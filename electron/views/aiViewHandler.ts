@@ -1,6 +1,8 @@
 import { WebContentsView, BrowserWindow, session, clipboard, Menu, Rectangle } from 'electron'
+import fs from 'node:fs'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { AISourceManager, AISource } from '../services/aiSourceManager'
+import { getViewPreloadPath } from '../utils/preloadPath'
 
 export const CHATGPT_START_URL = 'https://chatgpt.com/'
 
@@ -21,9 +23,11 @@ export class AIViewHandler {
     const authCoordinator = AuthCoordinator.getInstance()
     authCoordinator.attachToSession(chatgptSession)
 
+    const viewPreload = getViewPreloadPath()
     this.view = new WebContentsView({
       webPreferences: {
         session: chatgptSession,
+        preload: fs.existsSync(viewPreload) ? viewPreload : undefined,
         contextIsolation: true,
         sandbox: true,
       },
@@ -286,7 +290,9 @@ export class AIViewHandler {
 
   public async clearSession(): Promise<{ success: boolean; error?: string }> {
     try {
-      console.log('[AIView] Isolated delete login: Clearing ChatGPT credentials ONLY...')
+      const activeSource = this.aiSourceManager.getActiveSource()
+      const reloadUrl = activeSource?.url || this.currentUrl || CHATGPT_START_URL
+      console.log(`[AIView] Isolated delete login: Clearing credentials for '${activeSource?.name || 'AI'}' ONLY...`)
       const targetSession = session.fromPartition('persist:workbench-chatgpt')
 
       await targetSession.clearStorageData({
@@ -307,7 +313,7 @@ export class AIViewHandler {
 
       if (this.view && !this.view.webContents.isDestroyed()) {
         this.view.webContents.stop()
-        this.view.webContents.loadURL(CHATGPT_START_URL).catch(console.error)
+        this.view.webContents.loadURL(reloadUrl).catch(console.error)
 
         this.view.webContents.once('did-finish-load', () => {
           this.view?.webContents

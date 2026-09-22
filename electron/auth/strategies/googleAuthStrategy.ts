@@ -7,32 +7,20 @@ const majorVer = chromeVersion.split('.')[0]
 export class GoogleAuthStrategy implements AuthStrategy {
   public readonly name = 'Google'
 
-  private googleHostnames = [
-    'accounts.google.com',
-    'myaccount.google.com',
-    'passkeys.google.com',
-    'gds.google.com',
-    'apis.google.com',
-    'oauth2.googleapis.com',
-    'gstatic.com',
-    'googleusercontent.com',
-  ]
-
   public matches(url: string): boolean {
     try {
       const parsed = new URL(url)
+      const host = parsed.hostname.toLowerCase()
       return (
-        this.googleHostnames.some((h) => parsed.hostname === h || parsed.hostname.endsWith('.' + h)) ||
-        (parsed.hostname.endsWith('google.com') &&
-          (parsed.pathname.includes('oauth') ||
-            parsed.pathname.includes('signin') ||
-            parsed.pathname.includes('accounts') ||
-            parsed.pathname.includes('ServiceLogin') ||
-            parsed.pathname.includes('CheckCookie') ||
-            parsed.pathname.includes('challenge')))
+        host === 'google.com' ||
+        host.endsWith('.google.com') ||
+        host.endsWith('.googleapis.com') ||
+        host.endsWith('.gstatic.com') ||
+        host.endsWith('.googleusercontent.com') ||
+        host.endsWith('.googlevideo.com')
       )
     } catch {
-      return url.includes('accounts.google.com') || url.includes('google.com/o/oauth2')
+      return url.includes('google.com') || url.includes('accounts.google')
     }
   }
 
@@ -40,12 +28,16 @@ export class GoogleAuthStrategy implements AuthStrategy {
     const updated = { ...headers }
 
     // Maintain 100% consistent Chrome Desktop identity across Google endpoints.
-    // Never spoof Firefox or flip identities, which triggers Google's anti-bot webview blocks
-    // and breaks OAuth callback return loops.
+    // Aligns HTTP Client Hints exactly with runtime navigator.userAgentData and window.chrome.
     updated['User-Agent'] = CHROME_DESKTOP_UA
-    updated['sec-ch-ua'] = `"Chromium";v="${majorVer}", "Not:A-Brand";v="24", "Google Chrome";v="${majorVer}"`
+    updated['sec-ch-ua'] = `"Google Chrome";v="${majorVer}", "Chromium";v="${majorVer}", "Not_A Brand";v="24"`
     updated['sec-ch-ua-mobile'] = '?0'
     updated['sec-ch-ua-platform'] = '"Windows"'
+    updated['sec-ch-ua-platform-version'] = '"15.0.0"'
+    updated['sec-ch-ua-arch'] = '"x86"'
+    updated['sec-ch-ua-bitness'] = '"64"'
+    updated['sec-ch-ua-model'] = '""'
+    updated['sec-ch-ua-full-version-list'] = `"Google Chrome";v="${chromeVersion}", "Chromium";v="${chromeVersion}", "Not_A Brand";v="24.0.0.0"`
     updated['upgrade-insecure-requests'] = '1'
 
     return updated

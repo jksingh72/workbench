@@ -1,7 +1,9 @@
 import { WebContentsView, BrowserWindow, session, Rectangle } from 'electron'
+import fs from 'node:fs'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { CHROME_DESKTOP_UA } from '../auth/strategies/defaultAuthStrategy'
 import { BookSourceManager, BookSource } from '../services/bookSourceManager'
+import { getViewPreloadPath } from '../utils/preloadPath'
 
 export { CHROME_DESKTOP_UA }
 
@@ -27,9 +29,11 @@ export class BookViewHandler {
     const authCoordinator = AuthCoordinator.getInstance()
     authCoordinator.attachToSession(bookSession)
 
+    const viewPreload = getViewPreloadPath()
     this.view = new WebContentsView({
       webPreferences: {
         session: bookSession,
+        preload: fs.existsSync(viewPreload) ? viewPreload : undefined,
         contextIsolation: true,
         sandbox: true,
       },
@@ -171,7 +175,9 @@ export class BookViewHandler {
 
   public async clearSession(): Promise<{ success: boolean; error?: string }> {
     try {
-      console.log('[BookView] Isolated delete login: Clearing O\'Reilly credentials ONLY...')
+      const activeSource = this.bookSourceManager.getActiveSource()
+      const reloadUrl = activeSource?.url || this.currentUrl || OREILLY_START_URL
+      console.log(`[BookView] Isolated delete login: Clearing credentials for '${activeSource?.name || 'Book'}' ONLY...`)
       const targetSession = session.fromPartition('persist:workbench-oreilly')
 
       await targetSession.clearStorageData({
@@ -192,7 +198,7 @@ export class BookViewHandler {
 
       if (this.view && !this.view.webContents.isDestroyed()) {
         this.view.webContents.stop()
-        this.view.webContents.loadURL(OREILLY_START_URL).catch(console.error)
+        this.view.webContents.loadURL(reloadUrl).catch(console.error)
 
         this.view.webContents.once('did-finish-load', () => {
           this.view?.webContents

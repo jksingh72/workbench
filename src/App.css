@@ -641,6 +641,38 @@
   box-sizing: border-box;
 }
 
+/* Pane-scoped Modal Backdrop (positioned inside .pane-wrapper) */
+.pane-modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(5, 8, 14, 0.92);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  animation: fadeIn 0.15s ease;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.pane-modal-container {
+  width: 100%;
+  max-width: 440px;
+  max-height: 94%;
+  background: #111726;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  animation: scaleUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .modal-container {
   width: 100%;
   max-width: 440px;
@@ -701,6 +733,24 @@
   background-color: rgba(16, 163, 127, 0.15);
   color: #34d399;
   border: 1px solid rgba(16, 163, 127, 0.3);
+}
+
+.badge-gemini {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.badge-claude {
+  background-color: rgba(217, 119, 6, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(217, 119, 6, 0.35);
+}
+
+.badge-perplexity {
+  background-color: rgba(20, 184, 166, 0.15);
+  color: #2dd4bf;
+  border: 1px solid rgba(20, 184, 166, 0.35);
 }
 
 .badge-onenote {

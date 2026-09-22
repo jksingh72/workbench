@@ -29,9 +29,10 @@ export class DefaultAuthStrategy implements AuthStrategy {
   public modifyHeaders(headers: Record<string, string>, _url: string): Record<string, string> {
     const updated = { ...headers }
     updated['User-Agent'] = CHROME_DESKTOP_UA
-    updated['sec-ch-ua'] = `"Chromium";v="${majorVer}", "Not:A-Brand";v="24", "Google Chrome";v="${majorVer}"`
+    updated['sec-ch-ua'] = `"Google Chrome";v="${majorVer}", "Chromium";v="${majorVer}", "Not_A Brand";v="24"`
     updated['sec-ch-ua-mobile'] = '?0'
     updated['sec-ch-ua-platform'] = '"Windows"'
+    updated['sec-ch-ua-platform-version'] = '"15.0.0"'
     updated['upgrade-insecure-requests'] = '1'
     return updated
   }

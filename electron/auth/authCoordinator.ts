@@ -1,9 +1,11 @@
 import { Session, BrowserWindow, WebContents, WebContentsView, HandlerDetails, WindowOpenHandlerResponse, shell } from 'electron'
+import fs from 'node:fs'
 import { AuthStrategy } from './types'
 import { GoogleAuthStrategy } from './strategies/googleAuthStrategy'
 import { MicrosoftAuthStrategy } from './strategies/microsoftAuthStrategy'
 import { AppleAuthStrategy } from './strategies/appleAuthStrategy'
 import { DefaultAuthStrategy, CHROME_DESKTOP_UA } from './strategies/defaultAuthStrategy'
+import { getViewPreloadPath } from '../utils/preloadPath'
 
 export class AuthCoordinator {
   private static instance: AuthCoordinator | null = null
@@ -36,6 +38,15 @@ export class AuthCoordinator {
     this.attachedSessions.add(targetSession)
 
     targetSession.setUserAgent(CHROME_DESKTOP_UA)
+
+    const viewPreload = getViewPreloadPath()
+    if (fs.existsSync(viewPreload)) {
+      try {
+        targetSession.setPreloads([viewPreload])
+      } catch (err) {
+        console.warn('[AuthCoordinator] Could not set session preloads:', err)
+      }
+    }
 
     // Upgrade any insecure HTTP redirects to HTTPS to prevent CDN blocks
     targetSession.webRequest.onBeforeRequest({ urls: ['http://*/*'] }, (details, callback) => {
@@ -96,6 +107,7 @@ export class AuthCoordinator {
       const popupX = Math.round(winBounds.x + viewBounds.x + (viewBounds.width - popupWidth) / 2)
       const popupY = Math.round(winBounds.y + viewBounds.y + (viewBounds.height - popupHeight) / 2)
 
+      const viewPreload = getViewPreloadPath()
       return {
         action: 'allow' as const,
         overrideBrowserWindowOptions: {
@@ -106,6 +118,11 @@ export class AuthCoordinator {
           height: popupHeight,
           x: popupX,
           y: popupY,
+          webPreferences: {
+            preload: fs.existsSync(viewPreload) ? viewPreload : undefined,
+            contextIsolation: true,
+            sandbox: true,
+          },
         },
       }
     }

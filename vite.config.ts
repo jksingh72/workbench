@@ -32,6 +32,27 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: 'electron/views/viewPreload.ts',
+        onstart(options) {
+          options.reload()
+        },
+        vite: {
+          build: {
+            lib: {
+              entry: 'electron/views/viewPreload.ts',
+              formats: ['cjs'],
+              fileName: () => 'viewPreload.cjs',
+            },
+            rollupOptions: {
+              output: {
+                format: 'cjs',
+                entryFileNames: 'viewPreload.cjs',
+              },
+            },
+          },
+        },
+      },
     ]),
     renderer(),
   ],

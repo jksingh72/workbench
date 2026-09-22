@@ -4,7 +4,9 @@ import { PaneToolbar } from './components/PaneToolbar'
 import { Splitter } from './components/Splitter'
 import { HorizontalSplitter } from './components/HorizontalSplitter'
 import { OneNoteApp } from './components/OneNoteApp'
-import { SessionModal } from './components/SessionModal'
+import { BookDeleteLoginModal } from './components/BookDeleteLoginModal'
+import { AIDeleteLoginModal } from './components/AIDeleteLoginModal'
+import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { BookSourceModal } from './components/BookSourceModal'
 import { AISourceModal } from './components/AISourceModal'
 import { NavState, BookSource, AISource } from './types/electron'
@@ -19,7 +21,9 @@ export const App: React.FC = () => {
   const [dragTarget, setDragTarget] = useState<'none' | 'column' | 'row'>('none')
   const [isAskingAI, setIsAskingAI] = useState<boolean>(false)
   const [notification, setNotification] = useState<string | null>(null)
-  const [activeSessionModal, setActiveSessionModal] = useState<'book' | 'ai' | 'note' | null>(null)
+  const [isBookDeleteLoginOpen, setIsBookDeleteLoginOpen] = useState<boolean>(false)
+  const [isAIDeleteLoginOpen, setIsAIDeleteLoginOpen] = useState<boolean>(false)
+  const [isNoteDeleteDataOpen, setIsNoteDeleteDataOpen] = useState<boolean>(false)
   const [noteResetTrigger, setNoteResetTrigger] = useState<number>(0)
   const [clippedText, setClippedText] = useState<string | null>(null)
   const [bookSources, setBookSources] = useState<BookSource[]>([
@@ -335,16 +339,46 @@ export const App: React.FC = () => {
     window.electron?.navAction({ target, command })
   }
 
-  // Session credentials modal (scoped to the clicked pane)
-  const handleOpenSessionModal = (target: 'book' | 'ai' | 'note') => {
-    setActiveSessionModal(target)
-    window.electron?.setViewsVisible({ target: 'all', visible: false })
+  // Active sources
+  const activeBookSource =
+    bookSources.find((s) => s.id === activeBookSourceId) ||
+    bookSources[0] || { id: 'oreilly', name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/' }
+
+  const activeAISource =
+    aiSources.find((s) => s.id === activeAISourceId) ||
+    aiSources[0] || { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/' }
+
+  // Book Delete Login modal (scoped strictly to Bookview pane)
+  const handleOpenBookDeleteLogin = () => {
+    setIsBookDeleteLoginOpen(true)
+    window.electron?.setViewsVisible({ target: 'book', visible: false })
   }
 
-  const handleCloseSessionModal = () => {
-    setActiveSessionModal(null)
-    window.electron?.setViewsVisible({ target: 'all', visible: true })
+  const handleCloseBookDeleteLogin = () => {
+    setIsBookDeleteLoginOpen(false)
+    window.electron?.setViewsVisible({ target: 'book', visible: true })
     setTimeout(syncBounds, 50)
+  }
+
+  // AI Delete Login modal (scoped strictly to ChatView pane)
+  const handleOpenAIDeleteLogin = () => {
+    setIsAIDeleteLoginOpen(true)
+    window.electron?.setViewsVisible({ target: 'ai', visible: false })
+  }
+
+  const handleCloseAIDeleteLogin = () => {
+    setIsAIDeleteLoginOpen(false)
+    window.electron?.setViewsVisible({ target: 'ai', visible: true })
+    setTimeout(syncBounds, 50)
+  }
+
+  // OneNote Delete Data modal (scoped strictly to OneNote pane)
+  const handleOpenNoteDeleteData = () => {
+    setIsNoteDeleteDataOpen(true)
+  }
+
+  const handleCloseNoteDeleteData = () => {
+    setIsNoteDeleteDataOpen(false)
   }
 
   // Book source configuration handlers
@@ -514,7 +548,7 @@ export const App: React.FC = () => {
         onNavAction={(cmd) => handleNavAction('book', cmd)}
         onAskAI={handleAskAI}
         onShowNativeMenu={() => window.electron?.showAskAIMenu()}
-        onOpenSessionModal={() => handleOpenSessionModal('book')}
+        onOpenSessionModal={handleOpenBookDeleteLogin}
         onClipToNote={handleClipToNote}
         bookSources={bookSources}
         activeBookSourceId={activeBookSourceId}
@@ -523,6 +557,16 @@ export const App: React.FC = () => {
         isAskingAI={isAskingAI}
       />
       <div className="native-view-anchor" ref={bookAnchorRef} />
+
+      {/* Pane-Scoped Delete Login Modal for Bookview */}
+      {isBookDeleteLoginOpen && (
+        <BookDeleteLoginModal
+          isOpen={isBookDeleteLoginOpen}
+          activeSource={activeBookSource}
+          onClose={handleCloseBookDeleteLogin}
+          onNotify={showNotification}
+        />
+      )}
     </div>
   )
 
@@ -534,12 +578,22 @@ export const App: React.FC = () => {
           target="ai"
           navState={aiNavState}
           onNavAction={(cmd) => handleNavAction('ai', cmd)}
-          onOpenSessionModal={() => handleOpenSessionModal('ai')}
+          onOpenSessionModal={handleOpenAIDeleteLogin}
           aiSources={aiSources}
           activeAISourceId={activeAISourceId}
           onOpenAISourceModal={handleOpenAISourceModal}
         />
         <div className="native-view-anchor" ref={aiAnchorRef} />
+
+        {/* Pane-Scoped Delete Login Modal for ChatView */}
+        {isAIDeleteLoginOpen && (
+          <AIDeleteLoginModal
+            isOpen={isAIDeleteLoginOpen}
+            activeSource={activeAISource}
+            onClose={handleCloseAIDeleteLogin}
+            onNotify={showNotification}
+          />
+        )}
       </div>
 
       {/* Horizontal Splitter (ChatGPT vs OneNote) */}
@@ -561,9 +615,19 @@ export const App: React.FC = () => {
           onNotify={showNotification}
           clippedText={clippedText}
           onClearClippedText={() => setClippedText(null)}
-          onOpenSessionModal={() => handleOpenSessionModal('note')}
+          onOpenSessionModal={handleOpenNoteDeleteData}
           resetTrigger={noteResetTrigger}
         />
+
+        {/* Pane-Scoped Delete Data Modal for OneNote */}
+        {isNoteDeleteDataOpen && (
+          <NoteDeleteModal
+            isOpen={isNoteDeleteDataOpen}
+            onClose={handleCloseNoteDeleteData}
+            onNotify={showNotification}
+            onCleared={() => setNoteResetTrigger(Date.now())}
+          />
+        )}
       </div>
     </div>
   )
@@ -623,20 +687,7 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {/* Root-level Global Modals: render completely on top of all panes */}
-      {activeSessionModal && (
-        <SessionModal
-          isOpen={true}
-          target={activeSessionModal}
-          onClose={handleCloseSessionModal}
-          onNotify={showNotification}
-          onCleared={(target) => {
-            if (target === 'note') {
-              setNoteResetTrigger(Date.now())
-            }
-          }}
-        />
-      )}
+
 
       {isBookSourceModalOpen && (
         <BookSourceModal
