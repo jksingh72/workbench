@@ -17,9 +17,10 @@ import {
   ClipboardCopy,
   Check,
   KeyRound,
-  BookMarked
+  BookMarked,
+  Settings2
 } from 'lucide-react'
-import { NavState } from '../types/electron'
+import { NavState, BookSource } from '../types/electron'
 
 interface PaneToolbarProps {
   target: 'book' | 'ai'
@@ -29,6 +30,10 @@ interface PaneToolbarProps {
   onShowNativeMenu?: () => void
   onOpenSessionModal?: (target: 'book' | 'ai') => void
   onClipToNote?: () => void
+  bookSources?: BookSource[]
+  activeBookSourceId?: string
+  onSelectBookSource?: (sourceId: string) => void
+  onOpenBookSourceModal?: () => void
   isAskingAI?: boolean
 }
 
@@ -40,28 +45,37 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   onShowNativeMenu,
   onOpenSessionModal,
   onClipToNote,
+  bookSources = [],
+  activeBookSourceId = 'oreilly',
+  onSelectBookSource,
+  onOpenBookSourceModal,
   isAskingAI = false,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [bookSourceDropdownOpen, setBookSourceDropdownOpen] = useState(false)
   const [customPrompt, setCustomPrompt] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const bookSourceRef = useRef<HTMLDivElement>(null)
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false)
         setShowCustomInput(false)
       }
+      if (bookSourceRef.current && !bookSourceRef.current.contains(e.target as Node)) {
+        setBookSourceDropdownOpen(false)
+      }
     }
-    if (dropdownOpen) {
+    if (dropdownOpen || bookSourceDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside)
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [dropdownOpen])
+  }, [dropdownOpen, bookSourceDropdownOpen])
 
   const handleSelectTemplate = (key: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw') => {
     setDropdownOpen(false)
@@ -80,15 +94,79 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
   const isBook = target === 'book'
   const zoomPercent = Math.round((navState.zoomFactor || 1) * 100)
+  const activeSource = bookSources.find((s) => s.id === activeBookSourceId) || {
+    id: 'oreilly',
+    name: "O'Reilly Learning",
+    url: 'https://www.oreilly.com/member/login/',
+  }
 
   return (
     <div className={`pane-toolbar ${isBook ? 'book-toolbar' : 'ai-toolbar'}`}>
       {/* Left section: Identity & Navigation */}
       <div className="toolbar-section-left">
-        <div className={`pane-tag ${isBook ? 'tag-oreilly' : 'tag-chatgpt'}`}>
-          {isBook ? <BookOpen size={13} /> : <Bot size={13} />}
-          <span className="tag-label">{isBook ? "O'Reilly Learning" : 'ChatGPT'}</span>
-        </div>
+        {isBook ? (
+          <div className="book-source-selector-wrapper" ref={bookSourceRef}>
+            <button
+              className={`pane-tag tag-oreilly book-selector-btn ${
+                bookSourceDropdownOpen ? 'active' : ''
+              }`}
+              onClick={() => setBookSourceDropdownOpen(!bookSourceDropdownOpen)}
+              title="Click to switch reading platform or configure book sites"
+            >
+              <BookOpen size={13} />
+              <span className="tag-label">{activeSource.name}</span>
+              <ChevronDown
+                size={11}
+                className={`selector-chevron ${bookSourceDropdownOpen ? 'open' : ''}`}
+              />
+            </button>
+
+            {bookSourceDropdownOpen && (
+              <div className="book-source-dropdown">
+                <div className="dropdown-header">
+                  <span>Reading Platform:</span>
+                </div>
+
+                {bookSources.map((source) => (
+                  <button
+                    key={source.id}
+                    className={`dropdown-item source-select-item ${
+                      source.id === activeBookSourceId ? 'active' : ''
+                    }`}
+                    onClick={() => {
+                      setBookSourceDropdownOpen(false)
+                      onSelectBookSource?.(source.id)
+                    }}
+                  >
+                    <BookOpen size={13} className="item-icon" />
+                    <span className="item-title">{source.name}</span>
+                    {source.id === activeBookSourceId && (
+                      <Check size={12} className="source-check-icon" />
+                    )}
+                  </button>
+                ))}
+
+                <div className="dropdown-divider" />
+
+                <button
+                  className="dropdown-item configure-sources-btn"
+                  onClick={() => {
+                    setBookSourceDropdownOpen(false)
+                    onOpenBookSourceModal?.()
+                  }}
+                >
+                  <Settings2 size={13} className="item-icon text-amber" />
+                  <span>Configure Book Sites...</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="pane-tag tag-chatgpt">
+            <Bot size={13} />
+            <span className="tag-label">ChatGPT</span>
+          </div>
+        )}
 
         <div className="nav-buttons">
           <button

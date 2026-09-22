@@ -34,4 +34,8 @@ contextBridge.exposeInMainWorld('electron', {
   loadNotes: () => ipcRenderer.invoke('workbench:load-notes'),
   saveNotes: (notebooks: any) => ipcRenderer.invoke('workbench:save-notes', notebooks),
   clipSelection: () => ipcRenderer.invoke('workbench:clip-selection'),
+  getBookSources: () => ipcRenderer.invoke('workbench:get-book-sources'),
+  setActiveBookSource: (sourceId: string) => ipcRenderer.invoke('workbench:set-active-book-source', sourceId),
+  saveBookSources: (params: { sources: any[]; activeSourceId?: string }) =>
+    ipcRenderer.invoke('workbench:save-book-sources', params),
 })

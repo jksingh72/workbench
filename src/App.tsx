@@ -5,7 +5,8 @@ import { Splitter } from './components/Splitter'
 import { HorizontalSplitter } from './components/HorizontalSplitter'
 import { OneNoteApp } from './components/OneNoteApp'
 import { SessionModal } from './components/SessionModal'
-import { NavState } from './types/electron'
+import { BookSourceModal } from './components/BookSourceModal'
+import { NavState, BookSource } from './types/electron'
 import './App.css'
 
 export const App: React.FC = () => {
@@ -20,6 +21,12 @@ export const App: React.FC = () => {
   const [activeSessionModal, setActiveSessionModal] = useState<'book' | 'ai' | 'note' | null>(null)
   const [noteResetTrigger, setNoteResetTrigger] = useState<number>(0)
   const [clippedText, setClippedText] = useState<string | null>(null)
+  const [bookSources, setBookSources] = useState<BookSource[]>([
+    { id: 'oreilly', name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/', isPreset: true },
+    { id: 'kindle', name: 'Amazon Kindle', url: 'https://read.amazon.com/', isPreset: true },
+  ])
+  const [activeBookSourceId, setActiveBookSourceId] = useState<string>('oreilly')
+  const [isBookSourceModalOpen, setIsBookSourceModalOpen] = useState<boolean>(false)
 
   const [bookNavState, setBookNavState] = useState<NavState>({
     canGoBack: false,
@@ -101,6 +108,19 @@ export const App: React.FC = () => {
         showNotification(`⚠️ ${result.error || 'No text selected'}`)
       }
     })
+
+    // Load configured book sources
+    if (window.electron?.getBookSources) {
+      window.electron
+        .getBookSources()
+        .then((data) => {
+          if (data?.sources && data.sources.length > 0) {
+            setBookSources(data.sources)
+            setActiveBookSourceId(data.activeSourceId || data.sources[0].id)
+          }
+        })
+        .catch((err) => console.error('Failed to load book sources:', err))
+    }
 
     return () => {
       unsubscribeNav()
@@ -286,6 +306,39 @@ export const App: React.FC = () => {
     }
   }
 
+  // Book source configuration handlers
+  const handleOpenBookSourceModal = () => {
+    setIsBookSourceModalOpen(true)
+    window.electron?.setViewsVisible({ target: 'book', visible: false })
+  }
+
+  const handleCloseBookSourceModal = () => {
+    setIsBookSourceModalOpen(false)
+    window.electron?.setViewsVisible({ target: 'book', visible: true })
+  }
+
+  const handleSelectBookSource = async (sourceId: string) => {
+    setActiveBookSourceId(sourceId)
+    if (window.electron?.setActiveBookSource) {
+      const res = await window.electron.setActiveBookSource(sourceId)
+      if (res.success && res.activeSource) {
+        showNotification(`📖 Switched Bookview to ${res.activeSource.name}`)
+      }
+    }
+  }
+
+  const handleSaveBookSources = async (sources: BookSource[], newActiveId?: string) => {
+    setBookSources(sources)
+    if (newActiveId) setActiveBookSourceId(newActiveId)
+    if (window.electron?.saveBookSources) {
+      const res = await window.electron.saveBookSources({ sources, activeSourceId: newActiveId })
+      if (res.success && res.data) {
+        setBookSources(res.data.sources)
+        setActiveBookSourceId(res.data.activeSourceId)
+      }
+    }
+  }
+
   // Clip highlighted book text to OneNote
   const handleClipToNote = async () => {
     if (!window.electron?.clipSelection) return
@@ -387,6 +440,10 @@ export const App: React.FC = () => {
         onShowNativeMenu={() => window.electron?.showAskAIMenu()}
         onOpenSessionModal={() => handleOpenSessionModal('book')}
         onClipToNote={handleClipToNote}
+        bookSources={bookSources}
+        activeBookSourceId={activeBookSourceId}
+        onSelectBookSource={handleSelectBookSource}
+        onOpenBookSourceModal={handleOpenBookSourceModal}
         isAskingAI={isAskingAI}
       />
       <div className="native-view-anchor" ref={bookAnchorRef} />
@@ -396,6 +453,21 @@ export const App: React.FC = () => {
           isOpen={true}
           target="book"
           onClose={handleCloseSessionModal}
+          onNotify={showNotification}
+        />
+      )}
+
+      {isBookSourceModalOpen && (
+        <BookSourceModal
+          isOpen={true}
+          sources={bookSources}
+          activeSourceId={activeBookSourceId}
+          onClose={handleCloseBookSourceModal}
+          onSelectSource={(id) => {
+            handleSelectBookSource(id)
+            handleCloseBookSourceModal()
+          }}
+          onSaveSources={handleSaveBookSources}
           onNotify={showNotification}
         />
       )}

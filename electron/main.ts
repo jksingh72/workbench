@@ -8,6 +8,7 @@ import { NoteViewHandler } from './views/noteViewHandler'
 import { SessionManager } from './services/sessionManager'
 import { LayoutManager } from './services/layoutManager'
 import { AuthCoordinator } from './auth/authCoordinator'
+import { BookSourceManager, BookSource } from './services/bookSourceManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -27,6 +28,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 app.userAgentFallback = CHROME_DESKTOP_UA
 
 let mainWindow: BrowserWindow | null = null
+let bookSourceManager: BookSourceManager | null = null
 let bookHandler: BookViewHandler | null = null
 let aiHandler: AIViewHandler | null = null
 let noteHandler: NoteViewHandler | null = null
@@ -62,7 +64,8 @@ function createWindow() {
   })
 
   // Initialize modular view and service handlers
-  bookHandler = new BookViewHandler(mainWindow)
+  bookSourceManager = new BookSourceManager()
+  bookHandler = new BookViewHandler(mainWindow, bookSourceManager)
   aiHandler = new AIViewHandler(mainWindow)
   noteHandler = new NoteViewHandler()
   sessionManager = new SessionManager(bookHandler, aiHandler, noteHandler)
@@ -167,6 +170,32 @@ function registerIpcHandlers() {
   ipcMain.on('workbench:open-external', (_, url: string) => {
     if (url) shell.openExternal(url)
   })
+
+  // Book Sources Configuration
+  ipcMain.handle('workbench:get-book-sources', () => {
+    return bookSourceManager?.getData() ?? { sources: [], activeSourceId: '' }
+  })
+
+  ipcMain.handle('workbench:set-active-book-source', (_, sourceId: string) => {
+    if (!bookSourceManager || !bookHandler) return { success: false }
+    const target = bookSourceManager.setActiveSource(sourceId)
+    if (target) {
+      bookHandler.loadBookSource(target)
+      return { success: true, activeSource: target }
+    }
+    return { success: false, error: 'Source not found' }
+  })
+
+  ipcMain.handle(
+    'workbench:save-book-sources',
+    (_, { sources, activeSourceId }: { sources: BookSource[]; activeSourceId?: string }) => {
+      if (!bookSourceManager || !bookHandler) return { success: false }
+      const updated = bookSourceManager.saveSources(sources, activeSourceId)
+      const active = bookSourceManager.getActiveSource()
+      bookHandler.loadBookSource(active)
+      return { success: true, data: updated }
+    }
+  )
 }
 
 app.on('web-contents-created', (_event, contents) => {

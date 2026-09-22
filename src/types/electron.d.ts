@@ -48,6 +48,21 @@ export interface ElectronAPI {
   loadNotes: () => Promise<NoteBook[]>
   saveNotes: (notebooks: NoteBook[]) => Promise<{ success: boolean; error?: string }>
   clipSelection: () => Promise<{ success: boolean; text?: string; error?: string }>
+  getBookSources: () => Promise<BookSourceSettings>
+  setActiveBookSource: (sourceId: string) => Promise<{ success: boolean; activeSource?: BookSource; error?: string }>
+  saveBookSources: (params: { sources: BookSource[]; activeSourceId?: string }) => Promise<{ success: boolean; data?: BookSourceSettings; error?: string }>
+}
+
+export interface BookSource {
+  id: string
+  name: string
+  url: string
+  isPreset?: boolean
+}
+
+export interface BookSourceSettings {
+  sources: BookSource[]
+  activeSourceId: string
 }
 
 export interface SessionSettings {

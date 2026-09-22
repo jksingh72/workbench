@@ -1,6 +1,7 @@
 import { WebContentsView, BrowserWindow, session, Rectangle } from 'electron'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { CHROME_DESKTOP_UA } from '../auth/strategies/defaultAuthStrategy'
+import { BookSourceManager, BookSource } from '../services/bookSourceManager'
 
 export { CHROME_DESKTOP_UA }
 
@@ -9,20 +10,26 @@ export const OREILLY_START_URL = 'https://www.oreilly.com/member/login/'
 export class BookViewHandler {
   private view: WebContentsView | null = null
   private mainWindow: BrowserWindow
+  private bookSourceManager: BookSourceManager
+  private currentUrl: string = OREILLY_START_URL
 
-  constructor(mainWindow: BrowserWindow) {
+  constructor(mainWindow: BrowserWindow, bookSourceManager: BookSourceManager) {
     this.mainWindow = mainWindow
+    this.bookSourceManager = bookSourceManager
     this.initView()
   }
 
   private initView() {
-    const oreillySession = session.fromPartition('persist:workbench-oreilly')
+    const activeSource = this.bookSourceManager.getActiveSource()
+    this.currentUrl = activeSource.url
+
+    const bookSession = session.fromPartition('persist:workbench-oreilly')
     const authCoordinator = AuthCoordinator.getInstance()
-    authCoordinator.attachToSession(oreillySession)
+    authCoordinator.attachToSession(bookSession)
 
     this.view = new WebContentsView({
       webPreferences: {
-        session: oreillySession,
+        session: bookSession,
         contextIsolation: true,
         sandbox: true,
       },
@@ -38,9 +45,9 @@ export class BookViewHandler {
     // Wire navigation event state updates to React renderer
     this.wireNavEvents()
 
-    // Initial URL load
-    wc.loadURL(OREILLY_START_URL).catch((err) => {
-      console.error('[BookView] Failed to load initial URL:', err)
+    // Initial URL load from active book source
+    wc.loadURL(this.currentUrl).catch((err) => {
+      console.error(`[BookView] Failed to load initial URL for '${activeSource.name}':`, err)
     })
   }
 
@@ -111,7 +118,8 @@ export class BookViewHandler {
       case 'home':
         try {
           wc.stop()
-          wc.loadURL(OREILLY_START_URL).catch((err) => {
+          const homeUrl = this.currentUrl || this.bookSourceManager.getActiveSource().url
+          wc.loadURL(homeUrl).catch((err) => {
             console.error('[BookView] Home load error:', err)
           })
         } catch (err) {
@@ -127,6 +135,19 @@ export class BookViewHandler {
       case 'zoom-reset':
         wc.setZoomFactor(1.0)
         break
+    }
+  }
+
+  public loadBookSource(source: BookSource) {
+    if (!this.view || this.view.webContents.isDestroyed()) return
+    this.currentUrl = source.url
+    try {
+      this.view.webContents.stop()
+      this.view.webContents.loadURL(source.url).catch((err) => {
+        console.error(`[BookView] Failed to load source '${source.name}':`, err)
+      })
+    } catch (err) {
+      console.error(`[BookView] Error navigating to source '${source.name}':`, err)
     }
   }
 
