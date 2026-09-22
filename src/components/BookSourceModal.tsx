@@ -6,7 +6,10 @@ import {
   CheckCircle2,
   X,
   Globe,
-  BookMarked
+  BookMarked,
+  Pencil,
+  Check,
+  RotateCcw
 } from 'lucide-react'
 import { BookSource } from '../types/electron'
 
@@ -18,6 +21,11 @@ interface BookSourceModalProps {
   onSelectSource: (sourceId: string) => void
   onSaveSources: (sources: BookSource[], newActiveId?: string) => Promise<void>
   onNotify: (msg: string) => void
+}
+
+const DEFAULT_PRESET_URLS: Record<string, { name: string; url: string }> = {
+  oreilly: { name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/' },
+  kindle: { name: 'Amazon Kindle', url: 'https://read.amazon.com/' },
 }
 
 export const BookSourceModal: React.FC<BookSourceModalProps> = ({
@@ -34,7 +42,84 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  // Inline editing state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editUrl, setEditUrl] = useState('')
+  const [editError, setEditError] = useState<string | null>(null)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
   if (!isOpen) return null
+
+  const handleStartEdit = (source: BookSource) => {
+    setEditingId(source.id)
+    setEditName(source.name)
+    setEditUrl(source.url)
+    setEditError(null)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingId(null)
+    setEditName('')
+    setEditUrl('')
+    setEditError(null)
+  }
+
+  const handleResetToDefault = (sourceId: string) => {
+    const preset = DEFAULT_PRESET_URLS[sourceId]
+    if (preset) {
+      setEditName(preset.name)
+      setEditUrl(preset.url)
+      setEditError(null)
+    }
+  }
+
+  const handleSaveEdit = async (sourceId: string) => {
+    setEditError(null)
+    const cleanName = editName.trim()
+    let cleanUrl = editUrl.trim()
+
+    if (!cleanName) {
+      setEditError('Site name cannot be empty.')
+      return
+    }
+
+    if (!cleanUrl) {
+      setEditError('Website URL cannot be empty.')
+      return
+    }
+
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl
+    }
+
+    try {
+      new URL(cleanUrl)
+    } catch {
+      setEditError('Invalid URL format. Please include a valid web address.')
+      return
+    }
+
+    // Check duplicate name with other sources
+    if (sources.some((s) => s.id !== sourceId && s.name.toLowerCase() === cleanName.toLowerCase())) {
+      setEditError('Another book site with this name already exists.')
+      return
+    }
+
+    setIsSavingEdit(true)
+    try {
+      const updatedSources = sources.map((s) =>
+        s.id === sourceId ? { ...s, name: cleanName, url: cleanUrl } : s
+      )
+      await onSaveSources(updatedSources, activeSourceId)
+      onNotify(`✏️ Updated "${cleanName}" configuration.`)
+      setEditingId(null)
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to save changes.')
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
 
   const handleAddSource = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -149,6 +234,95 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
             <div className="sources-card-grid">
               {sources.map((source) => {
                 const isActive = source.id === activeSourceId
+                const isEditing = editingId === source.id
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={source.id}
+                      className={`source-item-card editing-card ${isActive ? 'active-card' : ''}`}
+                    >
+                      <div className="source-edit-form">
+                        <div className="edit-form-header">
+                          <span className="edit-title">Edit Book Site: {source.name}</span>
+                          {source.isPreset && (
+                            <span className="source-preset-pill">Preset</span>
+                          )}
+                        </div>
+
+                        <div className="edit-fields-row">
+                          <div className="edit-field field-name">
+                            <label>Site Name</label>
+                            <input
+                              type="text"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              placeholder="e.g. Amazon Kindle"
+                              disabled={isSavingEdit}
+                              autoFocus
+                            />
+                          </div>
+
+                          <div className="edit-field field-url">
+                            <label>Website URL</label>
+                            <input
+                              type="text"
+                              value={editUrl}
+                              onChange={(e) => setEditUrl(e.target.value)}
+                              placeholder="e.g. https://read.amazon.com/"
+                              disabled={isSavingEdit}
+                            />
+                          </div>
+                        </div>
+
+                        {editError && (
+                          <div className="edit-error-banner">
+                            <span>{editError}</span>
+                          </div>
+                        )}
+
+                        <div className="edit-actions-row">
+                          {source.id in DEFAULT_PRESET_URLS ? (
+                            <button
+                              type="button"
+                              className="btn-reset-preset"
+                              onClick={() => handleResetToDefault(source.id)}
+                              title="Reset back to default factory URL"
+                              disabled={isSavingEdit}
+                            >
+                              <RotateCcw size={11} />
+                              <span>Reset to Default</span>
+                            </button>
+                          ) : (
+                            <div />
+                          )}
+
+                          <div className="edit-button-group">
+                            <button
+                              type="button"
+                              className="btn-cancel-edit"
+                              onClick={handleCancelEdit}
+                              disabled={isSavingEdit}
+                            >
+                              <X size={12} />
+                              <span>Cancel</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-save-edit"
+                              onClick={() => handleSaveEdit(source.id)}
+                              disabled={isSavingEdit || !editName.trim() || !editUrl.trim()}
+                            >
+                              <Check size={12} />
+                              <span>{isSavingEdit ? 'Saving...' : 'Save'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+
                 return (
                   <div
                     key={source.id}
@@ -184,6 +358,14 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                       ) : (
                         <span className="current-source-label">Current</span>
                       )}
+
+                      <button
+                        className="btn-edit-source"
+                        onClick={() => handleStartEdit(source)}
+                        title={`Edit ${source.name} name or URL`}
+                      >
+                        <Pencil size={13} />
+                      </button>
 
                       {!source.isPreset && (
                         <button
