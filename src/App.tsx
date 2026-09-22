@@ -563,6 +563,7 @@ export const App: React.FC = () => {
         <BookDeleteLoginModal
           isOpen={isBookDeleteLoginOpen}
           activeSource={activeBookSource}
+          sources={bookSources}
           onClose={handleCloseBookDeleteLogin}
           onNotify={showNotification}
         />
@@ -590,6 +591,7 @@ export const App: React.FC = () => {
           <AIDeleteLoginModal
             isOpen={isAIDeleteLoginOpen}
             activeSource={activeAISource}
+            sources={aiSources}
             onClose={handleCloseAIDeleteLogin}
             onNotify={showNotification}
           />

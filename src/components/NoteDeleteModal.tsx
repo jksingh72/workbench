@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Trash2, CheckCircle2, X, RefreshCw, AlertCircle, BookMarked } from 'lucide-react'
 
 interface NoteDeleteModalProps {
@@ -17,6 +17,18 @@ export const NoteDeleteModal: React.FC<NoteDeleteModalProps> = ({
   const [isClearing, setIsClearing] = useState(false)
   const [clearedSuccess, setClearedSuccess] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
+
+  // Listen for Escape key to close modal
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   if (!isOpen) return null
 

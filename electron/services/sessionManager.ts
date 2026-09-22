@@ -65,13 +65,16 @@ export class SessionManager {
     return { ...this.settings }
   }
 
-  public async clearSession(target: 'book' | 'ai' | 'note'): Promise<{ success: boolean; error?: string }> {
-    console.log(`[SessionManager] Routing isolated clearSession to: ${target}`)
+  public async clearSession(
+    target: 'book' | 'ai' | 'note',
+    scope: string = 'current'
+  ): Promise<{ success: boolean; error?: string }> {
+    console.log(`[SessionManager] Routing isolated clearSession to: ${target}, scope: ${scope}`)
     switch (target) {
       case 'book':
-        return await this.bookHandler.clearSession()
+        return await this.bookHandler.clearSession(scope)
       case 'ai':
-        return await this.aiHandler.clearSession()
+        return await this.aiHandler.clearSession(scope)
       case 'note':
         return await this.noteHandler.clearSession()
       default:

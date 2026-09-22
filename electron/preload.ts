@@ -25,7 +25,8 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   openExternal: (url: string) => ipcRenderer.send('workbench:open-external', url),
-  clearSession: (target: 'book' | 'ai' | 'note') => ipcRenderer.invoke('workbench:clear-session', target),
+  clearSession: (target: 'book' | 'ai' | 'note', scope?: string) =>
+    ipcRenderer.invoke('workbench:clear-session', target, scope),
   getSessionSettings: () => ipcRenderer.invoke('workbench:get-session-settings'),
   updateSessionSettings: (settings: any) => ipcRenderer.invoke('workbench:update-session-settings', settings),
   setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) =>

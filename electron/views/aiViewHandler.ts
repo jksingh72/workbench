@@ -8,9 +8,13 @@ export const CHATGPT_START_URL = 'https://chatgpt.com/'
 
 export class AIViewHandler {
   private view: WebContentsView | null = null
+  private views: Map<string, WebContentsView> = new Map()
   private mainWindow: BrowserWindow
   private aiSourceManager: AISourceManager
+  private currentSourceId: string = ''
   private currentUrl: string = CHATGPT_START_URL
+  private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
+  private isVisible: boolean = true
 
   constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
@@ -18,66 +22,88 @@ export class AIViewHandler {
     this.initView()
   }
 
-  private initView() {
-    const chatgptSession = session.fromPartition('persist:workbench-chatgpt')
+  private getOrCreateView(source: AISource): WebContentsView {
+    const existing = this.views.get(source.id)
+    if (existing && !existing.webContents.isDestroyed()) {
+      return existing
+    }
+
+    const partitionName = `persist:workbench-ai-${source.id}`
+    const aiSession = session.fromPartition(partitionName)
     const authCoordinator = AuthCoordinator.getInstance()
-    authCoordinator.attachToSession(chatgptSession)
+    authCoordinator.attachToSession(aiSession)
 
     const viewPreload = getViewPreloadPath()
-    this.view = new WebContentsView({
+    const newView = new WebContentsView({
       webPreferences: {
-        session: chatgptSession,
+        session: aiSession,
         preload: fs.existsSync(viewPreload) ? viewPreload : undefined,
         contextIsolation: true,
         sandbox: true,
       },
     })
 
-    const wc = this.view.webContents
-
-    // Delegate OAuth, SSO, and login popups to AuthCoordinator
+    const wc = newView.webContents
     wc.setWindowOpenHandler((details) =>
-      authCoordinator.handleWindowOpen(details, this.view, this.mainWindow)
+      authCoordinator.handleWindowOpen(details, newView, this.mainWindow)
     )
 
-    // Wire navigation event state updates to React renderer
-    this.wireNavEvents()
+    this.wireNavEventsForView(newView, source.id)
 
-    // Initial URL load from active AI source
-    const activeSource = this.aiSourceManager.getActiveSource()
-    this.currentUrl = activeSource.url
-    wc.loadURL(this.currentUrl).catch((err) => {
-      console.error(`[AIView] Failed to load initial URL for '${activeSource.name}':`, err)
+    wc.loadURL(source.url).catch((err) => {
+      console.error(`[AIView] Failed to load initial URL for '${source.name}':`, err)
     })
+
+    this.views.set(source.id, newView)
+
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.contentView.addChildView(newView)
+    }
+
+    return newView
   }
 
-  private wireNavEvents() {
-    if (!this.view) return
-    const wc = this.view.webContents
+  private initView() {
+    const activeSource = this.aiSourceManager.getActiveSource()
+    this.currentSourceId = activeSource.id
+    this.currentUrl = activeSource.url
+    this.view = this.getOrCreateView(activeSource)
+  }
 
-    const sendState = () => {
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('workbench:nav-state', 'ai', {
-          canGoBack: wc.navigationHistory.canGoBack(),
-          canGoForward: wc.navigationHistory.canGoForward(),
-          isLoading: wc.isLoading(),
-          url: wc.getURL(),
-          title: wc.getTitle(),
-          zoomFactor: wc.getZoomFactor(),
-        })
+  private sendNavState(wc: Electron.WebContents) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed() && !wc.isDestroyed()) {
+      this.mainWindow.webContents.send('workbench:nav-state', 'ai', {
+        canGoBack: wc.navigationHistory.canGoBack(),
+        canGoForward: wc.navigationHistory.canGoForward(),
+        isLoading: wc.isLoading(),
+        url: wc.getURL(),
+        title: wc.getTitle(),
+        zoomFactor: wc.getZoomFactor(),
+      })
+    }
+  }
+
+  private wireNavEventsForView(viewInstance: WebContentsView, sourceId: string) {
+    const wc = viewInstance.webContents
+
+    const onStateChange = () => {
+      if (this.currentSourceId === sourceId) {
+        this.sendNavState(wc)
       }
     }
 
-    wc.on('did-start-loading', sendState)
-    wc.on('did-stop-loading', sendState)
-    wc.on('did-finish-load', sendState)
+    wc.on('did-start-loading', onStateChange)
+    wc.on('did-stop-loading', onStateChange)
+    wc.on('did-finish-load', onStateChange)
     wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-      console.warn(`[AIView] Load failed (${errorCode}):`, errorDescription, validatedURL)
-      sendState()
+      if (this.currentSourceId === sourceId) {
+        console.warn(`[AIView] Load failed (${errorCode}):`, errorDescription, validatedURL)
+        onStateChange()
+      }
     })
-    wc.on('did-navigate', sendState)
-    wc.on('did-navigate-in-page', sendState)
-    wc.on('page-title-updated', sendState)
+    wc.on('did-navigate', onStateChange)
+    wc.on('did-navigate-in-page', onStateChange)
+    wc.on('page-title-updated', onStateChange)
   }
 
   public getView(): WebContentsView | null {
@@ -85,19 +111,21 @@ export class AIViewHandler {
   }
 
   public setBounds(bounds: Rectangle) {
+    this.currentBounds = bounds
     if (this.view) {
       this.view.setBounds(bounds)
     }
   }
 
   public setVisible(visible: boolean) {
+    this.isVisible = visible
     if (this.view) {
       this.view.setVisible(visible)
     }
   }
 
   public handleNavAction(command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset') {
-    if (!this.view) return
+    if (!this.view || this.view.webContents.isDestroyed()) return
     const wc = this.view.webContents
 
     switch (command) {
@@ -139,16 +167,25 @@ export class AIViewHandler {
   }
 
   public loadAISource(source: AISource) {
-    if (!this.view || this.view.webContents.isDestroyed()) return
-    this.currentUrl = source.url
-    try {
-      this.view.webContents.stop()
-      this.view.webContents.loadURL(source.url).catch((err) => {
-        console.error(`[AIView] Failed to load source '${source.name}':`, err)
-      })
-    } catch (err) {
-      console.error(`[AIView] Error navigating to source '${source.name}':`, err)
+    if (this.currentSourceId === source.id && this.view) {
+      return
     }
+
+    // Hide previous view
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.setVisible(false)
+    }
+
+    this.currentSourceId = source.id
+    this.currentUrl = source.url
+    this.view = this.getOrCreateView(source)
+
+    if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
+      this.view.setBounds(this.currentBounds)
+    }
+    this.view.setVisible(this.isVisible)
+
+    this.sendNavState(this.view.webContents)
   }
 
   public async doAskAI(
@@ -157,7 +194,7 @@ export class AIViewHandler {
     extractSelection?: () => Promise<string>
   ) {
     if (!this.view || this.view.webContents.isDestroyed()) {
-      return { success: false, error: 'ChatGPT view is not ready' }
+      return { success: false, error: 'AI view is not ready' }
     }
 
     try {
@@ -196,7 +233,7 @@ export class AIViewHandler {
       // Put into system clipboard as backup
       clipboard.writeText(prompt)
 
-      // Inject into ChatGPT prompt input field
+      // Inject into prompt input field
       const injected = await this.view.webContents.executeJavaScript(`
         (function(textToInsert) {
           try {
@@ -239,7 +276,7 @@ export class AIViewHandler {
       }
     } catch (err: any) {
       console.error('[AIView] doAskAI error:', err)
-      return { success: false, error: err.message || 'Failed to communicate with ChatGPT' }
+      return { success: false, error: err.message || 'Failed to communicate with AI platform' }
     }
   }
 
@@ -288,57 +325,95 @@ export class AIViewHandler {
     menu.popup({ window: this.mainWindow })
   }
 
-  public async clearSession(): Promise<{ success: boolean; error?: string }> {
+  public async clearSession(scope: string = 'current'): Promise<{ success: boolean; error?: string }> {
     try {
       const activeSource = this.aiSourceManager.getActiveSource()
-      const reloadUrl = activeSource?.url || this.currentUrl || CHATGPT_START_URL
-      console.log(`[AIView] Isolated delete login: Clearing credentials for '${activeSource?.name || 'AI'}' ONLY...`)
-      const targetSession = session.fromPartition('persist:workbench-chatgpt')
+      const targetSourceId = scope === 'current' ? activeSource.id : scope
 
-      await targetSession.clearStorageData({
-        storages: [
-          'cookies',
-          'filesystem',
-          'indexdb',
-          'localstorage',
-          'shadercache',
-          'websql',
-          'serviceworkers',
-          'cachestorage',
-        ],
-      })
-      await targetSession.clearCache()
-      await targetSession.clearAuthCache()
-      await targetSession.clearHostResolverCache()
+      if (scope === 'all') {
+        console.log('[AIView] Clear session: Clearing credentials for ALL AI platforms...')
+        const allSources = this.aiSourceManager.getData().sources
+        for (const s of allSources) {
+          const partitionName = `persist:workbench-ai-${s.id}`
+          const targetSession = session.fromPartition(partitionName)
+          await targetSession.clearStorageData({
+            storages: [
+              'cookies',
+              'filesystem',
+              'indexdb',
+              'localstorage',
+              'shadercache',
+              'websql',
+              'serviceworkers',
+              'cachestorage',
+            ],
+          })
+          await targetSession.clearCache()
+          await targetSession.clearAuthCache()
+          await targetSession.clearHostResolverCache()
 
-      if (this.view && !this.view.webContents.isDestroyed()) {
-        this.view.webContents.stop()
-        this.view.webContents.loadURL(reloadUrl).catch(console.error)
+          const v = this.views.get(s.id)
+          if (v && !v.webContents.isDestroyed()) {
+            v.webContents.stop()
+            v.webContents.loadURL(s.url).catch(console.error)
+          }
+        }
+      } else {
+        const targetSource =
+          this.aiSourceManager.getData().sources.find((s) => s.id === targetSourceId) || activeSource
+        console.log(`[AIView] Isolated delete login: Clearing credentials for '${targetSource.name}' (${targetSource.id}) ONLY...`)
+        const partitionName = `persist:workbench-ai-${targetSource.id}`
+        const targetSession = session.fromPartition(partitionName)
 
-        this.view.webContents.once('did-finish-load', () => {
-          this.view?.webContents
-            .executeJavaScript(
-              `
-            try {
-              const inputs = document.querySelectorAll('input');
-              inputs.forEach(input => {
-                if (['email', 'password', 'text', 'tel'].includes(input.type)) {
-                  input.value = '';
-                  input.dispatchEvent(new Event('input', { bubbles: true }));
-                  input.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-              });
-            } catch (_) {}
-          `
-            )
-            .catch(() => {})
+        await targetSession.clearStorageData({
+          storages: [
+            'cookies',
+            'filesystem',
+            'indexdb',
+            'localstorage',
+            'shadercache',
+            'websql',
+            'serviceworkers',
+            'cachestorage',
+          ],
         })
+        await targetSession.clearCache()
+        await targetSession.clearAuthCache()
+        await targetSession.clearHostResolverCache()
+
+        const v =
+          this.views.get(targetSource.id) ||
+          (targetSource.id === this.currentSourceId ? this.view : null)
+
+        if (v && !v.webContents.isDestroyed()) {
+          v.webContents.stop()
+          v.webContents.loadURL(targetSource.url).catch(console.error)
+
+          v.webContents.once('did-finish-load', () => {
+            v?.webContents
+              .executeJavaScript(
+                `
+              try {
+                const inputs = document.querySelectorAll('input');
+                inputs.forEach(input => {
+                  if (['email', 'password', 'text', 'tel'].includes(input.type)) {
+                    input.value = '';
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                });
+              } catch (_) {}
+            `
+              )
+              .catch(() => {})
+          })
+        }
       }
 
       return { success: true }
     } catch (err: any) {
       console.error('[AIView] Clear session error:', err)
-      return { success: false, error: err.message || 'Failed to clear ChatGPT session' }
+      return { success: false, error: err.message || 'Failed to clear AI session' }
     }
   }
 }

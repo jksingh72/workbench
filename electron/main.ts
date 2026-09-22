@@ -164,9 +164,9 @@ function registerIpcHandlers() {
     return { success: true, settings: updated }
   })
 
-  ipcMain.handle('workbench:clear-session', async (_, target: 'book' | 'ai' | 'note') => {
+  ipcMain.handle('workbench:clear-session', async (_, target: 'book' | 'ai' | 'note', scope: string = 'current') => {
     if (!sessionManager) return { success: false, error: 'Session manager not ready' }
-    return await sessionManager.clearSession(target)
+    return await sessionManager.clearSession(target, scope)
   })
 
   // External Links

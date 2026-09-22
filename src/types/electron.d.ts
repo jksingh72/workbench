@@ -40,7 +40,7 @@ export interface ElectronAPI {
   ) => () => void
   onAskAIResult: (callback: (result: AskAIResult) => void) => () => void
   openExternal: (url: string) => void
-  clearSession: (target: 'book' | 'ai' | 'note') => Promise<{ success: boolean; error?: string }>
+  clearSession: (target: 'book' | 'ai' | 'note', scope?: 'current' | 'all' | string) => Promise<{ success: boolean; error?: string }>
   getSessionSettings: () => Promise<SessionSettings>
   updateSessionSettings: (settings: Partial<SessionSettings>) => Promise<{ success: boolean; settings: SessionSettings }>
   setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) => void
