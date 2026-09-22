@@ -53,4 +53,24 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.removeListener('workbench:open-book-source-modal', listener)
     }
   },
+  getAISources: () => ipcRenderer.invoke('workbench:get-ai-sources'),
+  setActiveAISource: (sourceId: string) => ipcRenderer.invoke('workbench:set-active-ai-source', sourceId),
+  saveAISources: (params: { sources: any[]; activeSourceId?: string }) =>
+    ipcRenderer.invoke('workbench:save-ai-sources', params),
+  showAISourceMenu: () => ipcRenderer.send('workbench:show-ai-source-menu'),
+  onAISourceChanged: (callback: (data: { activeSourceId: string; activeSource: any }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:ai-source-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:ai-source-changed', listener)
+    }
+  },
+  onOpenAISourceModal: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:open-ai-source-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-ai-source-modal', listener)
+    }
+  },
 })
+

@@ -20,7 +20,7 @@ import {
   BookMarked,
   Settings2
 } from 'lucide-react'
-import { NavState, BookSource } from '../types/electron'
+import { NavState, BookSource, AISource } from '../types/electron'
 
 interface PaneToolbarProps {
   target: 'book' | 'ai'
@@ -34,6 +34,9 @@ interface PaneToolbarProps {
   activeBookSourceId?: string
   onSelectBookSource?: (sourceId: string) => void
   onOpenBookSourceModal?: () => void
+  aiSources?: AISource[]
+  activeAISourceId?: string
+  onOpenAISourceModal?: () => void
   isAskingAI?: boolean
 }
 
@@ -48,6 +51,9 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   bookSources = [],
   activeBookSourceId = 'oreilly',
   onOpenBookSourceModal,
+  aiSources = [],
+  activeAISourceId = 'chatgpt',
+  onOpenAISourceModal,
   isAskingAI = false,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -94,6 +100,11 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
     name: "O'Reilly Learning",
     url: 'https://www.oreilly.com/member/login/',
   }
+  const activeAISource = aiSources.find((s) => s.id === activeAISourceId) || {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    url: 'https://chatgpt.com/',
+  }
 
   return (
     <div className={`pane-toolbar ${isBook ? 'book-toolbar' : 'ai-toolbar'}`}>
@@ -127,9 +138,31 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
             </button>
           </div>
         ) : (
-          <div className="pane-tag tag-chatgpt">
-            <Bot size={13} />
-            <span className="tag-label">ChatGPT</span>
+          <div className="ai-source-selector-wrapper">
+            <button
+              className="pane-tag tag-chatgpt ai-selector-btn"
+              onClick={() => {
+                if (window.electron?.showAISourceMenu) {
+                  window.electron.showAISourceMenu()
+                } else {
+                  onOpenAISourceModal?.()
+                }
+              }}
+              title="Click to switch AI assistant (ChatGPT, Claude, Gemini, etc.)"
+            >
+              <Bot size={13} />
+              <span className="tag-label">{activeAISource.name}</span>
+              <ChevronDown size={11} className="selector-chevron" />
+            </button>
+
+            <button
+              className="configure-sources-quick-btn configure-ai-btn"
+              onClick={onOpenAISourceModal}
+              title="Configure AI Platforms (Add, edit, remove AI websites)"
+            >
+              <Settings2 size={12} className="config-icon" />
+              <span>Configure</span>
+            </button>
           </div>
         )}
 
@@ -160,7 +193,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           <button
             className="nav-btn"
             onClick={() => onNavAction('home')}
-            title={isBook ? "O'Reilly Home" : 'ChatGPT Home'}
+            title={isBook ? `${activeSource.name} Home` : `${activeAISource.name} Home`}
           >
             <Home size={13} />
           </button>
@@ -169,8 +202,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
       {/* Center section: Page info */}
       <div className="toolbar-section-center">
-        <span className="url-display" title={navState.url || (isBook ? 'learning.oreilly.com' : 'chatgpt.com')}>
-          {navState.title || (isBook ? 'O\'Reilly Learning Platform' : 'ChatGPT Assistant')}
+        <span className="url-display" title={navState.url || (isBook ? activeSource.name : activeAISource.name)}>
+          {navState.title || (isBook ? activeSource.name : `${activeAISource.name} Assistant`)}
         </span>
       </div>
 
@@ -327,14 +360,14 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         <button
           className="session-manage-btn"
           onClick={() => onOpenSessionModal?.(target)}
-          title={`Delete saved User ID, password, and active login for ${isBook ? "O'Reilly" : 'ChatGPT'}`}
+          title={`Delete saved User ID, password, and active login for ${isBook ? activeSource.name : activeAISource.name}`}
         >
           <KeyRound size={12} className="key-icon" />
           <span className="session-manage-label">Delete Login</span>
         </button>
 
         {!isBook && (
-          <div className="ai-status-badge" title="Connected to ChatGPT web view">
+          <div className="ai-status-badge" title={`Connected to ${activeAISource.name} web view`}>
             <span className="ai-active-indicator" />
             <span>Ready for prompts</span>
           </div>

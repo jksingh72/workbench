@@ -6,7 +6,8 @@ import { HorizontalSplitter } from './components/HorizontalSplitter'
 import { OneNoteApp } from './components/OneNoteApp'
 import { SessionModal } from './components/SessionModal'
 import { BookSourceModal } from './components/BookSourceModal'
-import { NavState, BookSource } from './types/electron'
+import { AISourceModal } from './components/AISourceModal'
+import { NavState, BookSource, AISource } from './types/electron'
 import './App.css'
 
 export const App: React.FC = () => {
@@ -27,6 +28,15 @@ export const App: React.FC = () => {
   ])
   const [activeBookSourceId, setActiveBookSourceId] = useState<string>('oreilly')
   const [isBookSourceModalOpen, setIsBookSourceModalOpen] = useState<boolean>(false)
+
+  const [aiSources, setAiSources] = useState<AISource[]>([
+    { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', isPreset: true },
+    { id: 'claude', name: 'Anthropic Claude', url: 'https://claude.ai/', isPreset: true },
+    { id: 'gemini', name: 'Google Gemini', url: 'https://gemini.google.com/', isPreset: true },
+    { id: 'perplexity', name: 'Perplexity AI', url: 'https://www.perplexity.ai/', isPreset: true },
+  ])
+  const [activeAISourceId, setActiveAISourceId] = useState<string>('chatgpt')
+  const [isAISourceModalOpen, setIsAISourceModalOpen] = useState<boolean>(false)
 
   const [bookNavState, setBookNavState] = useState<NavState>({
     canGoBack: false,
@@ -133,11 +143,37 @@ export const App: React.FC = () => {
       handleOpenBookSourceModal()
     })
 
+    // Load configured AI sources
+    if (window.electron?.getAISources) {
+      window.electron
+        .getAISources()
+        .then((data) => {
+          if (data?.sources && data.sources.length > 0) {
+            setAiSources(data.sources)
+            setActiveAISourceId(data.activeSourceId || data.sources[0].id)
+          }
+        })
+        .catch((err) => console.error('Failed to load AI sources:', err))
+    }
+
+    const unsubscribeAISourceChanged = window.electron?.onAISourceChanged?.((data) => {
+      if (data?.activeSourceId) {
+        setActiveAISourceId(data.activeSourceId)
+        showNotification(`🤖 Switched ChatView to ${data.activeSource?.name || 'selected AI'}`)
+      }
+    })
+
+    const unsubscribeOpenAIModal = window.electron?.onOpenAISourceModal?.(() => {
+      handleOpenAISourceModal()
+    })
+
     return () => {
       unsubscribeNav()
       unsubscribeAskAI?.()
       unsubscribeBookSourceChanged?.()
       unsubscribeOpenModal?.()
+      unsubscribeAISourceChanged?.()
+      unsubscribeOpenAIModal?.()
     }
   }, [])
 
@@ -345,6 +381,40 @@ export const App: React.FC = () => {
     }
   }
 
+  // AI source configuration handlers
+  const handleOpenAISourceModal = () => {
+    setIsAISourceModalOpen(true)
+    window.electron?.setViewsVisible({ target: 'all', visible: false })
+  }
+
+  const handleCloseAISourceModal = () => {
+    setIsAISourceModalOpen(false)
+    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    setTimeout(syncBounds, 50)
+  }
+
+  const handleSelectAISource = async (sourceId: string) => {
+    setActiveAISourceId(sourceId)
+    if (window.electron?.setActiveAISource) {
+      const res = await window.electron.setActiveAISource(sourceId)
+      if (res.success && res.activeSource) {
+        showNotification(`🤖 Switched ChatView to ${res.activeSource.name}`)
+      }
+    }
+  }
+
+  const handleSaveAISources = async (sources: AISource[], newActiveId?: string) => {
+    setAiSources(sources)
+    if (newActiveId) setActiveAISourceId(newActiveId)
+    if (window.electron?.saveAISources) {
+      const res = await window.electron.saveAISources({ sources, activeSourceId: newActiveId })
+      if (res.success && res.data) {
+        setAiSources(res.data.sources)
+        setActiveAISourceId(res.data.activeSourceId)
+      }
+    }
+  }
+
   // Clip highlighted book text to OneNote
   const handleClipToNote = async () => {
     if (!window.electron?.clipSelection) return
@@ -458,13 +528,16 @@ export const App: React.FC = () => {
 
   const renderRightColumn = (paneStyle: React.CSSProperties) => (
     <div className="right-column-wrapper" ref={rightColumnRef} style={paneStyle}>
-      {/* Top Pane: ChatGPT */}
+      {/* Top Pane: AI Chat */}
       <div className="pane-wrapper ai-pane" style={chatSubPaneStyle}>
         <PaneToolbar
           target="ai"
           navState={aiNavState}
           onNavAction={(cmd) => handleNavAction('ai', cmd)}
           onOpenSessionModal={() => handleOpenSessionModal('ai')}
+          aiSources={aiSources}
+          activeAISourceId={activeAISourceId}
+          onOpenAISourceModal={handleOpenAISourceModal}
         />
         <div className="native-view-anchor" ref={aiAnchorRef} />
       </div>
@@ -576,6 +649,21 @@ export const App: React.FC = () => {
             handleCloseBookSourceModal()
           }}
           onSaveSources={handleSaveBookSources}
+          onNotify={showNotification}
+        />
+      )}
+
+      {isAISourceModalOpen && (
+        <AISourceModal
+          isOpen={true}
+          sources={aiSources}
+          activeSourceId={activeAISourceId}
+          onClose={handleCloseAISourceModal}
+          onSelectSource={(id) => {
+            handleSelectAISource(id)
+            handleCloseAISourceModal()
+          }}
+          onSaveSources={handleSaveAISources}
           onNotify={showNotification}
         />
       )}

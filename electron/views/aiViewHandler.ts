@@ -1,14 +1,18 @@
 import { WebContentsView, BrowserWindow, session, clipboard, Menu, Rectangle } from 'electron'
 import { AuthCoordinator } from '../auth/authCoordinator'
+import { AISourceManager, AISource } from '../services/aiSourceManager'
 
 export const CHATGPT_START_URL = 'https://chatgpt.com/'
 
 export class AIViewHandler {
   private view: WebContentsView | null = null
   private mainWindow: BrowserWindow
+  private aiSourceManager: AISourceManager
+  private currentUrl: string = CHATGPT_START_URL
 
-  constructor(mainWindow: BrowserWindow) {
+  constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
+    this.aiSourceManager = aiSourceManager
     this.initView()
   }
 
@@ -35,9 +39,11 @@ export class AIViewHandler {
     // Wire navigation event state updates to React renderer
     this.wireNavEvents()
 
-    // Initial URL load
-    wc.loadURL(CHATGPT_START_URL).catch((err) => {
-      console.error('[AIView] Failed to load initial URL:', err)
+    // Initial URL load from active AI source
+    const activeSource = this.aiSourceManager.getActiveSource()
+    this.currentUrl = activeSource.url
+    wc.loadURL(this.currentUrl).catch((err) => {
+      console.error(`[AIView] Failed to load initial URL for '${activeSource.name}':`, err)
     })
   }
 
@@ -108,7 +114,8 @@ export class AIViewHandler {
       case 'home':
         try {
           wc.stop()
-          wc.loadURL(CHATGPT_START_URL).catch((err) => {
+          const homeUrl = this.currentUrl || this.aiSourceManager.getActiveSource().url
+          wc.loadURL(homeUrl).catch((err) => {
             console.error('[AIView] Home load error:', err)
           })
         } catch (err) {
@@ -124,6 +131,19 @@ export class AIViewHandler {
       case 'zoom-reset':
         wc.setZoomFactor(1.0)
         break
+    }
+  }
+
+  public loadAISource(source: AISource) {
+    if (!this.view || this.view.webContents.isDestroyed()) return
+    this.currentUrl = source.url
+    try {
+      this.view.webContents.stop()
+      this.view.webContents.loadURL(source.url).catch((err) => {
+        console.error(`[AIView] Failed to load source '${source.name}':`, err)
+      })
+    } catch (err) {
+      console.error(`[AIView] Error navigating to source '${source.name}':`, err)
     }
   }
 

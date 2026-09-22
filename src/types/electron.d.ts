@@ -54,6 +54,12 @@ export interface ElectronAPI {
   showBookSourceMenu: () => void
   onBookSourceChanged: (callback: (data: { activeSourceId: string; activeSource: BookSource }) => void) => () => void
   onOpenBookSourceModal: (callback: () => void) => () => void
+  getAISources: () => Promise<AISourceSettings>
+  setActiveAISource: (sourceId: string) => Promise<{ success: boolean; activeSource?: AISource; error?: string }>
+  saveAISources: (params: { sources: AISource[]; activeSourceId?: string }) => Promise<{ success: boolean; data?: AISourceSettings; error?: string }>
+  showAISourceMenu: () => void
+  onAISourceChanged: (callback: (data: { activeSourceId: string; activeSource: AISource }) => void) => () => void
+  onOpenAISourceModal: (callback: () => void) => () => void
 }
 
 export interface BookSource {
@@ -65,6 +71,18 @@ export interface BookSource {
 
 export interface BookSourceSettings {
   sources: BookSource[]
+  activeSourceId: string
+}
+
+export interface AISource {
+  id: string
+  name: string
+  url: string
+  isPreset?: boolean
+}
+
+export interface AISourceSettings {
+  sources: AISource[]
   activeSourceId: string
 }
 

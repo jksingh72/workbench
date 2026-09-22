@@ -9,6 +9,7 @@ import { SessionManager } from './services/sessionManager'
 import { LayoutManager } from './services/layoutManager'
 import { AuthCoordinator } from './auth/authCoordinator'
 import { BookSourceManager, BookSource } from './services/bookSourceManager'
+import { AISourceManager, AISource } from './services/aiSourceManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -29,6 +30,7 @@ app.userAgentFallback = CHROME_DESKTOP_UA
 
 let mainWindow: BrowserWindow | null = null
 let bookSourceManager: BookSourceManager | null = null
+let aiSourceManager: AISourceManager | null = null
 let bookHandler: BookViewHandler | null = null
 let aiHandler: AIViewHandler | null = null
 let noteHandler: NoteViewHandler | null = null
@@ -65,8 +67,9 @@ function createWindow() {
 
   // Initialize modular view and service handlers
   bookSourceManager = new BookSourceManager()
+  aiSourceManager = new AISourceManager()
   bookHandler = new BookViewHandler(mainWindow, bookSourceManager)
-  aiHandler = new AIViewHandler(mainWindow)
+  aiHandler = new AIViewHandler(mainWindow, aiSourceManager)
   noteHandler = new NoteViewHandler()
   sessionManager = new SessionManager(bookHandler, aiHandler, noteHandler)
   layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler)
@@ -223,6 +226,67 @@ function registerIpcHandlers() {
         label: '⚙️ Configure Book Sites...',
         click: () => {
           mainWindow!.webContents.send('workbench:open-book-source-modal')
+        },
+      },
+    ]
+
+    const menu = Menu.buildFromTemplate(menuTemplate)
+    menu.popup({ window: mainWindow })
+  })
+
+  // Configurable AI Sources Management
+  ipcMain.handle('workbench:get-ai-sources', () => {
+    if (!aiSourceManager) return { sources: [], activeSourceId: 'chatgpt' }
+    return aiSourceManager.getData()
+  })
+
+  ipcMain.handle('workbench:set-active-ai-source', (_, sourceId: string) => {
+    if (!aiSourceManager || !aiHandler) return { success: false }
+    const target = aiSourceManager.setActiveSource(sourceId)
+    if (target) {
+      aiHandler.loadAISource(target)
+      return { success: true, activeSource: target }
+    }
+    return { success: false, error: 'Source not found' }
+  })
+
+  ipcMain.handle(
+    'workbench:save-ai-sources',
+    (_, { sources, activeSourceId }: { sources: AISource[]; activeSourceId?: string }) => {
+      if (!aiSourceManager || !aiHandler) return { success: false }
+      const updated = aiSourceManager.saveSources(sources, activeSourceId)
+      const active = aiSourceManager.getActiveSource()
+      aiHandler.loadAISource(active)
+      return { success: true, data: updated }
+    }
+  )
+
+  ipcMain.on('workbench:show-ai-source-menu', () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !aiSourceManager) return
+    const data = aiSourceManager.getData()
+    const active = aiSourceManager.getActiveSource()
+
+    const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+      { label: 'AI Assistant Platform:', enabled: false },
+      { type: 'separator' },
+      ...data.sources.map((s) => ({
+        label: s.name,
+        type: 'radio' as const,
+        checked: s.id === active.id,
+        click: () => {
+          aiSourceManager!.setActiveSource(s.id)
+          aiHandler?.loadAISource(s)
+          mainWindow!.webContents.send('workbench:ai-source-changed', {
+            activeSourceId: s.id,
+            activeSource: s,
+          })
+        },
+      })),
+      { type: 'separator' },
+      {
+        label: '⚙️ Configure AI Sites...',
+        click: () => {
+          mainWindow!.webContents.send('workbench:open-ai-source-modal')
         },
       },
     ]

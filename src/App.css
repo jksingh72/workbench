@@ -1839,6 +1839,65 @@ input:checked + .slider-round:before {
   color: #f59e0b;
 }
 
+/* AI Source Selector in Toolbar */
+.ai-source-selector-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ai-selector-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  background: rgba(16, 163, 127, 0.12);
+  border: 1px solid rgba(16, 163, 127, 0.35);
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.ai-selector-btn:hover {
+  background: rgba(16, 163, 127, 0.22);
+  border-color: rgba(16, 163, 127, 0.6);
+  box-shadow: 0 0 10px rgba(16, 163, 127, 0.25);
+}
+
+.configure-ai-btn {
+  background: rgba(16, 163, 127, 0.12);
+  border-color: rgba(16, 163, 127, 0.35);
+  color: #34d399;
+}
+
+.configure-ai-btn:hover {
+  background: rgba(16, 163, 127, 0.22);
+  border-color: rgba(16, 163, 127, 0.6);
+  color: #a7f3d0;
+  box-shadow: 0 0 8px rgba(16, 163, 127, 0.25);
+}
+
+.configure-ai-btn .config-icon {
+  color: #10b981;
+}
+
+.ai-sources-modal {
+  max-width: 520px;
+}
+
+.pill-active-ai {
+  background: rgba(16, 163, 127, 0.18);
+  color: #34d399;
+}
+
+.dot-ai {
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.text-emerald {
+  color: #10b981;
+}
+
 .book-source-dropdown {
   position: absolute;
   top: calc(100% + 6px);
