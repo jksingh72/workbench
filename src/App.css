@@ -1,0 +1,1775 @@
+/* App Container */
+.workbench-app {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-primary);
+  overflow: hidden;
+}
+
+/* Header */
+.app-header {
+  height: var(--header-height);
+  min-height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+  z-index: 100;
+}
+
+.header-left, .header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.logo-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.logo-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-oreilly-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-oreilly);
+  box-shadow: 0 0 8px rgba(224, 36, 36, 0.6);
+}
+
+.icon-chatgpt-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-chatgpt);
+  box-shadow: 0 0 8px rgba(16, 163, 127, 0.6);
+}
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.status-pill .dot.active {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+/* Ratio Presets */
+.ratio-presets {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.preset-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-surface-hover);
+}
+
+.preset-btn.active {
+  color: #fff;
+  background-color: var(--bg-surface-active);
+  box-shadow: var(--shadow-sm);
+}
+
+.action-icon-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.action-icon-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+}
+
+.action-icon-btn.swapped {
+  background-color: rgba(59, 130, 246, 0.15);
+  border-color: var(--accent-blue);
+  color: #60a5fa;
+}
+
+.quick-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background-color: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+.tip-kbd {
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #c4b5fd;
+  font-weight: 600;
+}
+
+.tip-text {
+  color: #ddd6fe;
+  font-weight: 500;
+}
+
+.notification-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  background: linear-gradient(90deg, rgba(16, 163, 127, 0.2), rgba(59, 130, 246, 0.2));
+  border: 1px solid rgba(16, 163, 127, 0.4);
+  border-radius: 20px;
+  color: #a7f3d0;
+  font-size: 12px;
+  font-weight: 500;
+  animation: fadeIn 0.2s ease;
+}
+
+.notification-banner .accent-icon {
+  color: #34d399;
+}
+
+/* Workspace dual-pane container */
+.workspace-container {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: calc(100vh - var(--header-height));
+  position: relative;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+}
+
+.pane-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Pane Toolbars */
+.pane-toolbar {
+  height: var(--toolbar-height);
+  min-height: var(--toolbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background-color: #0d121c;
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+  z-index: 50;
+}
+
+.toolbar-section-left,
+.toolbar-section-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-section-center {
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  padding: 0 12px;
+}
+
+.url-display {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.pane-tag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tag-oreilly {
+  background-color: rgba(224, 36, 36, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(224, 36, 36, 0.25);
+}
+
+.tag-chatgpt {
+  background-color: rgba(16, 163, 127, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 163, 127, 0.25);
+}
+
+.nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.nav-btn:hover:not(:disabled) {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px;
+}
+
+.zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.zoom-btn:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.zoom-reset-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.zoom-reset-btn:hover {
+  color: var(--text-primary);
+}
+
+/* Ask AI Button & Dropdown */
+.ask-ai-wrapper {
+  position: relative;
+}
+
+.ask-ai-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.4);
+}
+
+.ask-ai-btn:hover {
+  background: linear-gradient(135deg, #1d4ed8, #6d28d9);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.6);
+  transform: translateY(-1px);
+}
+
+.ask-ai-btn.active {
+  background: linear-gradient(135deg, #1e40af, #5b21b6);
+}
+
+.ask-ai-btn.pulsing {
+  animation: pulse 1s infinite;
+}
+
+.ask-ai-btn .sparkle-icon {
+  color: #fde047;
+}
+
+.ask-ai-btn .chevron {
+  transition: transform 0.2s ease;
+}
+
+.ask-ai-btn .chevron.open {
+  transform: rotate(180deg);
+}
+
+.ask-ai-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 280px;
+  background-color: #141b29;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease;
+}
+
+.dropdown-header {
+  padding: 6px 10px 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.dropdown-item .item-icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.icon-bulb { color: #facc15; }
+.icon-summary { color: #60a5fa; }
+.icon-code { color: #34d399; }
+.icon-quiz { color: #f472b6; }
+.icon-copy { color: #a78bfa; }
+
+.item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.item-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background-color: var(--border-subtle);
+  margin: 4px 0;
+}
+
+.custom-trigger {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+}
+
+.custom-prompt-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+}
+
+.custom-input {
+  flex: 1;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: none;
+}
+
+.custom-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.custom-submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: var(--accent-blue);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  cursor: pointer;
+}
+
+/* AI Status Badge */
+.ai-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  background-color: rgba(16, 163, 127, 0.08);
+  border: 1px solid rgba(16, 163, 127, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.ai-active-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--accent-chatgpt);
+  box-shadow: 0 0 6px rgba(16, 163, 127, 0.8);
+}
+
+/* Draggable Splitter */
+.pane-splitter {
+  width: 9px;
+  background-color: #0b0f17;
+  position: relative;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+  z-index: 100;
+  transition: background-color 0.2s ease;
+  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* Wide invisible hit area so clicking within 8px of the divider grabs it reliably */
+.pane-splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  right: -8px;
+  cursor: col-resize;
+  z-index: 101;
+}
+
+.pane-splitter:hover,
+.pane-splitter.dragging {
+  background-color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.splitter-handle {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.grip-dot {
+  width: 3px;
+  height: 3px;
+  background-color: var(--text-muted);
+  border-radius: 50%;
+}
+
+.pane-splitter:hover .grip-dot,
+.pane-splitter.dragging .grip-dot {
+  background-color: #ffffff;
+}
+
+/* Session Management Button in Toolbar */
+.session-manage-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.session-manage-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.session-manage-btn .key-icon {
+  color: #f59e0b;
+}
+
+/* Native View Placeholder Anchor */
+.native-view-anchor {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  position: relative;
+  background-color: #0b0f17;
+}
+
+
+
+/* ============================================================
+   Session Modal Styles (Scoped to Individual Panes)
+   ============================================================ */
+.modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(5, 8, 14, 0.86);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  animation: fadeIn 0.15s ease;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.modal-container {
+  width: 100%;
+  max-width: 440px;
+  max-height: 94%;
+  background: #111726;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: scaleUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes scaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.badge-oreilly {
+  background-color: rgba(224, 36, 36, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(224, 36, 36, 0.3);
+}
+
+.badge-chatgpt {
+  background-color: rgba(16, 163, 127, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 163, 127, 0.3);
+}
+
+.badge-onenote {
+  background-color: rgba(147, 51, 234, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(147, 51, 234, 0.35);
+}
+
+.onenote-delete-login-btn:hover {
+  border-color: rgba(147, 51, 234, 0.5);
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+
+.modal-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 2px 0 0 0;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background-color: var(--bg-surface-hover);
+  color: #fff;
+}
+
+.modal-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+/* Status Card */
+.session-status-card {
+  padding: 12px 14px;
+  background-color: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.status-indicator-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.status-label-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+}
+
+.status-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.status-pill-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.pill-active {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.pill-cleared {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.status-explanation {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Action Section: Clear Credentials */
+.session-action-section {
+  padding: 14px;
+  background-color: rgba(239, 68, 68, 0.04);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+.section-description {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.btn-danger-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: all 0.15s ease;
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fff;
+}
+
+.confirm-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+}
+
+.confirm-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #fca5a5;
+  line-height: 1.3;
+}
+
+.confirm-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-danger-solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background-color: #dc2626;
+  border: 1px solid #ef4444;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+.btn-secondary {
+  padding: 6px 12px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #86efac;
+  background-color: rgba(34, 197, 94, 0.1);
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+/* Toggle Section: Future Credentials */
+.session-toggle-section {
+  padding: 14px;
+  background-color: rgba(59, 130, 246, 0.04);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: var(--radius-md);
+}
+
+.toggle-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.toggle-info {
+  flex: 1;
+}
+
+.toggle-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.toggle-description {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Switch Toggle Component */
+.switch-toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.switch-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider-round {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #374151;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 22px;
+}
+
+.slider-round:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+}
+
+input:checked + .slider-round {
+  background-color: #3b82f6;
+}
+
+input:checked + .slider-round:before {
+  transform: translateX(16px);
+}
+
+/* Modal Footer */
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.btn-primary-done {
+  padding: 6px 18px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-primary-done:hover {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.5);
+}
+
+.text-amber { color: #f59e0b; }
+.text-blue { color: #60a5fa; }
+.text-emerald { color: #10b981; }
+.text-purple { color: #c084fc; }
+.text-yellow { color: #facc15; }
+
+/* ============================================================
+   Right Column & Horizontal Splitter Styles
+   ============================================================ */
+.right-column-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--bg-surface);
+}
+
+.clip-note-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(147, 51, 234, 0.12);
+  border: 1px solid rgba(147, 51, 234, 0.35);
+  color: #d8b4fe;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.clip-note-btn:hover {
+  background: rgba(147, 51, 234, 0.25);
+  border-color: rgba(168, 85, 247, 0.6);
+  color: #f3e8ff;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+  transform: translateY(-0.5px);
+}
+
+.clip-note-btn:active {
+  transform: translateY(0);
+}
+
+/* Horizontal Splitter (ChatGPT vs OneNote) */
+.pane-horizontal-splitter {
+  height: 9px;
+  width: 100%;
+  background: #0d131f;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  position: relative;
+  user-select: none;
+  touch-action: none;
+  z-index: 100;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+/* Generous hit target extending 10px above and below */
+.pane-horizontal-splitter::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  bottom: -10px;
+  left: 0;
+  right: 0;
+  z-index: 101;
+  cursor: row-resize;
+}
+
+.pane-horizontal-splitter:hover,
+.pane-horizontal-splitter.dragging {
+  background: #1e293b;
+}
+
+.pane-horizontal-splitter.dragging {
+  background: var(--accent-blue);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.7);
+}
+
+.horizontal-splitter-handle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 12px;
+  pointer-events: none;
+}
+
+.h-grip-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.3);
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.pane-horizontal-splitter:hover .h-grip-dot,
+.pane-horizontal-splitter.dragging .h-grip-dot {
+  background-color: #fff;
+  transform: scale(1.15);
+}
+
+/* ============================================================
+   OneNote Application Styles
+   ============================================================ */
+.onenote-pane {
+  background: #0f141f;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+}
+
+.onenote-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: #0b0f19;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* OneNote Top Bar */
+.onenote-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 12px;
+  background: #111728;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.onenote-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.onenote-logo-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, #7c3aed, #9333ea);
+  border-radius: 5px;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(124, 58, 237, 0.35);
+}
+
+.onenote-logo-icon {
+  stroke-width: 2.2px;
+}
+
+.onenote-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #fff;
+}
+
+.save-status-pill {
+  font-size: 10px;
+  font-weight: 500;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* OneNote Search */
+.onenote-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  max-width: 200px;
+  flex: 1;
+  transition: all 0.15s ease;
+}
+
+.onenote-search-box:focus-within {
+  border-color: #9333ea;
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1px rgba(147, 51, 234, 0.3);
+}
+
+.search-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  color: #f1f5f9;
+  width: 100%;
+}
+
+.search-input::placeholder {
+  color: #64748b;
+}
+
+/* Top Toolbar Action Buttons */
+.onenote-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.onenote-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.onenote-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.onenote-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.onenote-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* OneNote Section Tabs (Horizontal ribbon of colored tabs) */
+.onenote-section-tabs {
+  display: flex;
+  align-items: flex-end;
+  background: #0e1322;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 0 8px;
+  gap: 2px;
+  height: 31px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.section-tabs-scroll {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+  flex: 1;
+}
+
+.section-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  height: 27px;
+  border-top: 3px solid transparent;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.section-tab:hover {
+  color: #f1f5f9;
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.section-tab.active {
+  color: #fff;
+  font-weight: 600;
+  background-color: #151b2e !important;
+  border-bottom: 1px solid #151b2e;
+}
+
+.tab-color-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tab-name {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-count {
+  font-size: 9px;
+  color: #64748b;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0 4px;
+  border-radius: 6px;
+}
+
+.tab-delete-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.section-tab:hover .tab-delete-btn {
+  opacity: 1;
+}
+
+.tab-delete-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.add-section-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 3px;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.add-section-plus:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Workspace: Sidebar + Canvas */
+.onenote-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  background: #0b0f19;
+}
+
+/* Page List Sidebar */
+.onenote-pages-sidebar {
+  background: #0f1424;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.onenote-pages-sidebar.open {
+  width: 180px;
+}
+
+.onenote-pages-sidebar.collapsed {
+  width: 32px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-icon-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.sidebar-icon-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pages-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.page-card {
+  padding: 7px 9px;
+  border-radius: 4px;
+  border-left: 3px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.page-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.page-card.active {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.page-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.page-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.page-delete-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.page-card:hover .page-delete-btn {
+  opacity: 1;
+}
+
+.page-delete-btn:hover {
+  color: #f87171;
+}
+
+.page-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.page-card-date {
+  font-size: 9px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.page-card-snippet {
+  font-size: 10px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* OneNote Canvas & Editor */
+.onenote-canvas {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #0b0f19;
+  overflow: hidden;
+}
+
+/* Formatting Ribbon */
+.onenote-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: #111728;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.ribbon-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ribbon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ribbon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.code-block-btn {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.ribbon-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
+}
+
+.ribbon-spacer {
+  flex: 1;
+}
+
+.ribbon-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* OneNote Page Content */
+.onenote-page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  overflow: hidden;
+}
+
+.note-title-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  outline: none;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s ease;
+  width: 100%;
+}
+
+.note-title-input:focus {
+  border-bottom-color: #9333ea;
+}
+
+.note-title-input::placeholder {
+  color: #475569;
+}
+
+.note-body-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #cbd5e1;
+  width: 100%;
+  padding: 0;
+}
+
+.note-body-textarea::placeholder {
+  color: #475569;
+  font-style: italic;
+}
+
+/* Empty Page Placeholder */
+.no-page-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: #64748b;
+}
+
+.placeholder-icon {
+  opacity: 0.3;
+}
+
+/* Smooth custom scrollbars for OneNote and app panes */
+.note-body-textarea::-webkit-scrollbar,
+.pages-list::-webkit-scrollbar,
+.section-tabs-scroll::-webkit-scrollbar,
+.onenote-ribbon::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.note-body-textarea::-webkit-scrollbar-track,
+.pages-list::-webkit-scrollbar-track,
+.section-tabs-scroll::-webkit-scrollbar-track,
+.onenote-ribbon::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.note-body-textarea::-webkit-scrollbar-thumb,
+.pages-list::-webkit-scrollbar-thumb,
+.section-tabs-scroll::-webkit-scrollbar-thumb,
+.onenote-ribbon::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.note-body-textarea::-webkit-scrollbar-thumb:hover,
+.pages-list::-webkit-scrollbar-thumb:hover,
+.section-tabs-scroll::-webkit-scrollbar-thumb:hover,
+.onenote-ribbon::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}

@@ -1,0 +1,84 @@
+export interface Bounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface NavState {
+  canGoBack: boolean
+  canGoForward: boolean
+  isLoading: boolean
+  url: string
+  title: string
+  zoomFactor: number
+}
+
+export interface AskAIResult {
+  success: boolean
+  text?: string
+  prompt?: string
+  injected?: boolean
+  error?: string
+}
+
+export interface ElectronAPI {
+  updateBounds: (bounds: { book: Bounds; ai: Bounds }) => void
+  setSplit: (params: { ratio: number; isSwapped: boolean }) => void
+  showAskAIMenu: () => void
+  navAction: (action: {
+    target: 'book' | 'ai'
+    command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset'
+    url?: string
+  }) => void
+  askAI: (options: {
+    templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom'
+    customPrompt?: string
+  }) => Promise<AskAIResult>
+  onNavStateChange: (
+    callback: (target: 'book' | 'ai', state: Partial<NavState>) => void
+  ) => () => void
+  onAskAIResult: (callback: (result: AskAIResult) => void) => () => void
+  openExternal: (url: string) => void
+  clearSession: (target: 'book' | 'ai' | 'note') => Promise<{ success: boolean; error?: string }>
+  getSessionSettings: () => Promise<SessionSettings>
+  updateSessionSettings: (settings: Partial<SessionSettings>) => Promise<{ success: boolean; settings: SessionSettings }>
+  setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) => void
+  setVerticalSplit: (params: { ratio: number }) => void
+  loadNotes: () => Promise<NoteBook[]>
+  saveNotes: (notebooks: NoteBook[]) => Promise<{ success: boolean; error?: string }>
+  clipSelection: () => Promise<{ success: boolean; text?: string; error?: string }>
+}
+
+export interface SessionSettings {
+  storeBookCredentials: boolean
+  storeAICredentials: boolean
+  storeNoteCredentials: boolean
+}
+
+export interface NotePage {
+  id: string
+  title: string
+  content: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface NoteSection {
+  id: string
+  name: string
+  color: string
+  pages: NotePage[]
+}
+
+export interface NoteBook {
+  id: string
+  name: string
+  sections: NoteSection[]
+}
+
+declare global {
+  interface Window {
+    electron: ElectronAPI
+  }
+}
