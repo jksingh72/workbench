@@ -51,6 +51,9 @@ export interface ElectronAPI {
   getBookSources: () => Promise<BookSourceSettings>
   setActiveBookSource: (sourceId: string) => Promise<{ success: boolean; activeSource?: BookSource; error?: string }>
   saveBookSources: (params: { sources: BookSource[]; activeSourceId?: string }) => Promise<{ success: boolean; data?: BookSourceSettings; error?: string }>
+  showBookSourceMenu: () => void
+  onBookSourceChanged: (callback: (data: { activeSourceId: string; activeSource: BookSource }) => void) => () => void
+  onOpenBookSourceModal: (callback: () => void) => () => void
 }
 
 export interface BookSource {

@@ -47,12 +47,10 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   onClipToNote,
   bookSources = [],
   activeBookSourceId = 'oreilly',
-  onSelectBookSource,
   onOpenBookSourceModal,
   isAskingAI = false,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [bookSourceDropdownOpen, setBookSourceDropdownOpen] = useState(false)
   const [customPrompt, setCustomPrompt] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -65,17 +63,14 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         setDropdownOpen(false)
         setShowCustomInput(false)
       }
-      if (bookSourceRef.current && !bookSourceRef.current.contains(e.target as Node)) {
-        setBookSourceDropdownOpen(false)
-      }
     }
-    if (dropdownOpen || bookSourceDropdownOpen) {
+    if (dropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside)
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [dropdownOpen, bookSourceDropdownOpen])
+  }, [dropdownOpen])
 
   const handleSelectTemplate = (key: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw') => {
     setDropdownOpen(false)
@@ -107,59 +102,29 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         {isBook ? (
           <div className="book-source-selector-wrapper" ref={bookSourceRef}>
             <button
-              className={`pane-tag tag-oreilly book-selector-btn ${
-                bookSourceDropdownOpen ? 'active' : ''
-              }`}
-              onClick={() => setBookSourceDropdownOpen(!bookSourceDropdownOpen)}
-              title="Click to switch reading platform or configure book sites"
+              className="pane-tag tag-oreilly book-selector-btn"
+              onClick={() => {
+                if (window.electron?.showBookSourceMenu) {
+                  window.electron.showBookSourceMenu()
+                } else {
+                  onOpenBookSourceModal?.()
+                }
+              }}
+              title="Click to switch reading platform (O'Reilly, Kindle, etc.)"
             >
               <BookOpen size={13} />
               <span className="tag-label">{activeSource.name}</span>
-              <ChevronDown
-                size={11}
-                className={`selector-chevron ${bookSourceDropdownOpen ? 'open' : ''}`}
-              />
+              <ChevronDown size={11} className="selector-chevron" />
             </button>
 
-            {bookSourceDropdownOpen && (
-              <div className="book-source-dropdown">
-                <div className="dropdown-header">
-                  <span>Reading Platform:</span>
-                </div>
-
-                {bookSources.map((source) => (
-                  <button
-                    key={source.id}
-                    className={`dropdown-item source-select-item ${
-                      source.id === activeBookSourceId ? 'active' : ''
-                    }`}
-                    onClick={() => {
-                      setBookSourceDropdownOpen(false)
-                      onSelectBookSource?.(source.id)
-                    }}
-                  >
-                    <BookOpen size={13} className="item-icon" />
-                    <span className="item-title">{source.name}</span>
-                    {source.id === activeBookSourceId && (
-                      <Check size={12} className="source-check-icon" />
-                    )}
-                  </button>
-                ))}
-
-                <div className="dropdown-divider" />
-
-                <button
-                  className="dropdown-item configure-sources-btn"
-                  onClick={() => {
-                    setBookSourceDropdownOpen(false)
-                    onOpenBookSourceModal?.()
-                  }}
-                >
-                  <Settings2 size={13} className="item-icon text-amber" />
-                  <span>Configure Book Sites...</span>
-                </button>
-              </div>
-            )}
+            <button
+              className="configure-sources-quick-btn"
+              onClick={onOpenBookSourceModal}
+              title="Configure Book Sites (Add, edit, remove book websites)"
+            >
+              <Settings2 size={12} className="config-icon" />
+              <span>Configure</span>
+            </button>
           </div>
         ) : (
           <div className="pane-tag tag-chatgpt">

@@ -38,4 +38,19 @@ contextBridge.exposeInMainWorld('electron', {
   setActiveBookSource: (sourceId: string) => ipcRenderer.invoke('workbench:set-active-book-source', sourceId),
   saveBookSources: (params: { sources: any[]; activeSourceId?: string }) =>
     ipcRenderer.invoke('workbench:save-book-sources', params),
+  showBookSourceMenu: () => ipcRenderer.send('workbench:show-book-source-menu'),
+  onBookSourceChanged: (callback: (data: { activeSourceId: string; activeSource: any }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:book-source-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:book-source-changed', listener)
+    }
+  },
+  onOpenBookSourceModal: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:open-book-source-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-book-source-modal', listener)
+    }
+  },
 })

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -196,6 +196,40 @@ function registerIpcHandlers() {
       return { success: true, data: updated }
     }
   )
+
+  ipcMain.on('workbench:show-book-source-menu', () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !bookSourceManager) return
+    const data = bookSourceManager.getData()
+    const active = bookSourceManager.getActiveSource()
+
+    const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+      { label: 'Reading Platform:', enabled: false },
+      { type: 'separator' },
+      ...data.sources.map((s) => ({
+        label: s.name,
+        type: 'radio' as const,
+        checked: s.id === active.id,
+        click: () => {
+          bookSourceManager!.setActiveSource(s.id)
+          bookHandler?.loadBookSource(s)
+          mainWindow!.webContents.send('workbench:book-source-changed', {
+            activeSourceId: s.id,
+            activeSource: s,
+          })
+        },
+      })),
+      { type: 'separator' },
+      {
+        label: '⚙️ Configure Book Sites...',
+        click: () => {
+          mainWindow!.webContents.send('workbench:open-book-source-modal')
+        },
+      },
+    ]
+
+    const menu = Menu.buildFromTemplate(menuTemplate)
+    menu.popup({ window: mainWindow })
+  })
 }
 
 app.on('web-contents-created', (_event, contents) => {

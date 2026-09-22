@@ -122,9 +122,22 @@ export const App: React.FC = () => {
         .catch((err) => console.error('Failed to load book sources:', err))
     }
 
+    const unsubscribeBookSourceChanged = window.electron?.onBookSourceChanged?.((data) => {
+      if (data?.activeSourceId) {
+        setActiveBookSourceId(data.activeSourceId)
+        showNotification(`📖 Switched Bookview to ${data.activeSource?.name || 'selected site'}`)
+      }
+    })
+
+    const unsubscribeOpenModal = window.electron?.onOpenBookSourceModal?.(() => {
+      handleOpenBookSourceModal()
+    })
+
     return () => {
       unsubscribeNav()
       unsubscribeAskAI?.()
+      unsubscribeBookSourceChanged?.()
+      unsubscribeOpenModal?.()
     }
   }, [])
 
@@ -289,32 +302,25 @@ export const App: React.FC = () => {
   // Session credentials modal (scoped to the clicked pane)
   const handleOpenSessionModal = (target: 'book' | 'ai' | 'note') => {
     setActiveSessionModal(target)
-    if (target === 'book') {
-      window.electron?.setViewsVisible({ target: 'book', visible: false })
-    } else if (target === 'ai') {
-      window.electron?.setViewsVisible({ target: 'ai', visible: false })
-    }
+    window.electron?.setViewsVisible({ target: 'all', visible: false })
   }
 
   const handleCloseSessionModal = () => {
-    const prevTarget = activeSessionModal
     setActiveSessionModal(null)
-    if (prevTarget === 'book') {
-      window.electron?.setViewsVisible({ target: 'book', visible: true })
-    } else if (prevTarget === 'ai') {
-      window.electron?.setViewsVisible({ target: 'ai', visible: true })
-    }
+    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    setTimeout(syncBounds, 50)
   }
 
   // Book source configuration handlers
   const handleOpenBookSourceModal = () => {
     setIsBookSourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'book', visible: false })
+    window.electron?.setViewsVisible({ target: 'all', visible: false })
   }
 
   const handleCloseBookSourceModal = () => {
     setIsBookSourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'book', visible: true })
+    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    setTimeout(syncBounds, 50)
   }
 
   const handleSelectBookSource = async (sourceId: string) => {
@@ -447,30 +453,6 @@ export const App: React.FC = () => {
         isAskingAI={isAskingAI}
       />
       <div className="native-view-anchor" ref={bookAnchorRef} />
-
-      {activeSessionModal === 'book' && (
-        <SessionModal
-          isOpen={true}
-          target="book"
-          onClose={handleCloseSessionModal}
-          onNotify={showNotification}
-        />
-      )}
-
-      {isBookSourceModalOpen && (
-        <BookSourceModal
-          isOpen={true}
-          sources={bookSources}
-          activeSourceId={activeBookSourceId}
-          onClose={handleCloseBookSourceModal}
-          onSelectSource={(id) => {
-            handleSelectBookSource(id)
-            handleCloseBookSourceModal()
-          }}
-          onSaveSources={handleSaveBookSources}
-          onNotify={showNotification}
-        />
-      )}
     </div>
   )
 
@@ -485,15 +467,6 @@ export const App: React.FC = () => {
           onOpenSessionModal={() => handleOpenSessionModal('ai')}
         />
         <div className="native-view-anchor" ref={aiAnchorRef} />
-
-        {activeSessionModal === 'ai' && (
-          <SessionModal
-            isOpen={true}
-            target="ai"
-            onClose={handleCloseSessionModal}
-            onNotify={showNotification}
-          />
-        )}
       </div>
 
       {/* Horizontal Splitter (ChatGPT vs OneNote) */}
@@ -518,20 +491,6 @@ export const App: React.FC = () => {
           onOpenSessionModal={() => handleOpenSessionModal('note')}
           resetTrigger={noteResetTrigger}
         />
-
-        {activeSessionModal === 'note' && (
-          <SessionModal
-            isOpen={true}
-            target="note"
-            onClose={handleCloseSessionModal}
-            onNotify={showNotification}
-            onCleared={(target) => {
-              if (target === 'note') {
-                setNoteResetTrigger(Date.now())
-              }
-            }}
-          />
-        )}
       </div>
     </div>
   )
@@ -590,6 +549,36 @@ export const App: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Root-level Global Modals: render completely on top of all panes */}
+      {activeSessionModal && (
+        <SessionModal
+          isOpen={true}
+          target={activeSessionModal}
+          onClose={handleCloseSessionModal}
+          onNotify={showNotification}
+          onCleared={(target) => {
+            if (target === 'note') {
+              setNoteResetTrigger(Date.now())
+            }
+          }}
+        />
+      )}
+
+      {isBookSourceModalOpen && (
+        <BookSourceModal
+          isOpen={true}
+          sources={bookSources}
+          activeSourceId={activeBookSourceId}
+          onClose={handleCloseBookSourceModal}
+          onSelectSource={(id) => {
+            handleSelectBookSource(id)
+            handleCloseBookSourceModal()
+          }}
+          onSaveSources={handleSaveBookSources}
+          onNotify={showNotification}
+        />
+      )}
     </div>
   )
 }

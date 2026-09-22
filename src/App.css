@@ -625,19 +625,19 @@
    Session Modal Styles (Scoped to Individual Panes)
    ============================================================ */
 .modal-backdrop {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(5, 8, 14, 0.86);
-  backdrop-filter: blur(6px);
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(5, 8, 14, 0.88);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 500;
+  z-index: 99999;
   animation: fadeIn 0.15s ease;
-  padding: 10px;
+  padding: 16px;
   box-sizing: border-box;
 }
 
@@ -1810,6 +1810,33 @@ input:checked + .slider-round:before {
 .selector-chevron.open {
   transform: rotate(180deg);
   opacity: 1;
+}
+
+.configure-sources-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 5px;
+  padding: 2px 7px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-sm);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.configure-sources-quick-btn:hover {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fef08a;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.25);
+}
+
+.configure-sources-quick-btn .config-icon {
+  color: #f59e0b;
 }
 
 .book-source-dropdown {
