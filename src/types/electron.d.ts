@@ -23,11 +23,11 @@ export interface AskAIResult {
 }
 
 export interface ElectronAPI {
-  updateBounds: (bounds: { book: Bounds; ai: Bounds }) => void
+  updateBounds: (bounds: { book?: Bounds; ai?: Bounds; note?: Bounds }) => void
   setSplit: (params: { ratio: number; isSwapped: boolean }) => void
   showAskAIMenu: () => void
   navAction: (action: {
-    target: 'book' | 'ai'
+    target: 'book' | 'ai' | 'note'
     command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset'
     url?: string
   }) => void
@@ -36,14 +36,14 @@ export interface ElectronAPI {
     customPrompt?: string
   }) => Promise<AskAIResult>
   onNavStateChange: (
-    callback: (target: 'book' | 'ai', state: Partial<NavState>) => void
+    callback: (target: 'book' | 'ai' | 'note', state: Partial<NavState>) => void
   ) => () => void
   onAskAIResult: (callback: (result: AskAIResult) => void) => () => void
   openExternal: (url: string) => void
   clearSession: (target: 'book' | 'ai' | 'note', scope?: 'current' | 'all' | string) => Promise<{ success: boolean; error?: string }>
   getSessionSettings: () => Promise<SessionSettings>
   updateSessionSettings: (settings: Partial<SessionSettings>) => Promise<{ success: boolean; settings: SessionSettings }>
-  setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) => void
+  setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) => void
   setVerticalSplit: (params: { ratio: number }) => void
   loadNotes: () => Promise<NoteBook[]>
   saveNotes: (notebooks: NoteBook[]) => Promise<{ success: boolean; error?: string }>
@@ -60,6 +60,12 @@ export interface ElectronAPI {
   showAISourceMenu: () => void
   onAISourceChanged: (callback: (data: { activeSourceId: string; activeSource: AISource }) => void) => () => void
   onOpenAISourceModal: (callback: () => void) => () => void
+  getNoteSources: () => Promise<NoteSourceSettings>
+  setActiveNoteSource: (sourceId: string) => Promise<{ success: boolean; activeSource?: NoteSource; error?: string }>
+  saveNoteSources: (params: { sources: NoteSource[]; activeSourceId?: string }) => Promise<{ success: boolean; data?: NoteSourceSettings; error?: string }>
+  showNoteSourceMenu: () => void
+  onNoteSourceChanged: (callback: (data: { activeSourceId: string; activeSource: NoteSource }) => void) => () => void
+  onOpenNoteSourceModal: (callback: () => void) => () => void
 }
 
 export interface BookSource {
@@ -83,6 +89,18 @@ export interface AISource {
 
 export interface AISourceSettings {
   sources: AISource[]
+  activeSourceId: string
+}
+
+export interface NoteSource {
+  id: string
+  name: string
+  url: string
+  isPreset?: boolean
+}
+
+export interface NoteSourceSettings {
+  sources: NoteSource[]
   activeSourceId: string
 }
 
@@ -115,6 +133,6 @@ export interface NoteBook {
 
 declare global {
   interface Window {
-    electron: ElectronAPI
+    electron?: ElectronAPI
   }
 }

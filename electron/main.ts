@@ -10,6 +10,7 @@ import { LayoutManager } from './services/layoutManager'
 import { AuthCoordinator } from './auth/authCoordinator'
 import { BookSourceManager, BookSource } from './services/bookSourceManager'
 import { AISourceManager, AISource } from './services/aiSourceManager'
+import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -31,6 +32,7 @@ app.userAgentFallback = CHROME_DESKTOP_UA
 let mainWindow: BrowserWindow | null = null
 let bookSourceManager: BookSourceManager | null = null
 let aiSourceManager: AISourceManager | null = null
+let noteSourceManager: NoteSourceManager | null = null
 let bookHandler: BookViewHandler | null = null
 let aiHandler: AIViewHandler | null = null
 let noteHandler: NoteViewHandler | null = null
@@ -68,17 +70,20 @@ function createWindow() {
   // Initialize modular view and service handlers
   bookSourceManager = new BookSourceManager()
   aiSourceManager = new AISourceManager()
+  noteSourceManager = new NoteSourceManager()
   bookHandler = new BookViewHandler(mainWindow, bookSourceManager)
   aiHandler = new AIViewHandler(mainWindow, aiSourceManager)
-  noteHandler = new NoteViewHandler()
+  noteHandler = new NoteViewHandler(mainWindow, noteSourceManager)
   sessionManager = new SessionManager(bookHandler, aiHandler, noteHandler)
-  layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler)
+  layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler, noteHandler)
 
   // Attach native child views to the window's content view
   const bookView = bookHandler.getView()
   const aiView = aiHandler.getView()
+  const noteView = noteHandler.getView()
   if (bookView) mainWindow.contentView.addChildView(bookView)
   if (aiView) mainWindow.contentView.addChildView(aiView)
+  if (noteView) mainWindow.contentView.addChildView(noteView)
 
   // Set initial bounds
   layoutManager.applyBounds()
@@ -113,7 +118,7 @@ function registerIpcHandlers() {
     layoutManager?.setVerticalSplit(ratio)
   })
 
-  ipcMain.on('workbench:set-views-visible', (_, params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) => {
+  ipcMain.on('workbench:set-views-visible', (_, params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) => {
     layoutManager?.setViewsVisible(params)
   })
 
@@ -121,8 +126,10 @@ function registerIpcHandlers() {
   ipcMain.on('workbench:nav-action', (_, { target, command }) => {
     if (target === 'book') {
       bookHandler?.handleNavAction(command)
-    } else {
+    } else if (target === 'ai') {
       aiHandler?.handleNavAction(command)
+    } else if (target === 'note') {
+      noteHandler?.handleNavAction(command)
     }
   })
 
@@ -287,6 +294,70 @@ function registerIpcHandlers() {
         label: '⚙️ Configure AI Sites...',
         click: () => {
           mainWindow!.webContents.send('workbench:open-ai-source-modal')
+        },
+      },
+    ]
+
+    const menu = Menu.buildFromTemplate(menuTemplate)
+    menu.popup({ window: mainWindow })
+  })
+
+  // Configurable Note Sources Management
+  ipcMain.handle('workbench:get-note-sources', () => {
+    if (!noteSourceManager) return { sources: [], activeSourceId: 'onenote' }
+    return noteSourceManager.getData()
+  })
+
+  ipcMain.handle('workbench:set-active-note-source', (_, sourceId: string) => {
+    if (!noteSourceManager || !noteHandler) return { success: false }
+    const target = noteSourceManager.setActiveSource(sourceId)
+    if (target) {
+      noteHandler.loadNoteSource(target)
+      layoutManager?.applyBounds()
+      return { success: true, activeSource: target }
+    }
+    return { success: false, error: 'Source not found' }
+  })
+
+  ipcMain.handle(
+    'workbench:save-note-sources',
+    (_, { sources, activeSourceId }: { sources: NoteSource[]; activeSourceId?: string }) => {
+      if (!noteSourceManager || !noteHandler) return { success: false }
+      const updated = noteSourceManager.saveSources(sources, activeSourceId)
+      const active = noteSourceManager.getActiveSource()
+      noteHandler.loadNoteSource(active)
+      layoutManager?.applyBounds()
+      return { success: true, data: updated }
+    }
+  )
+
+  ipcMain.on('workbench:show-note-source-menu', () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !noteSourceManager) return
+    const data = noteSourceManager.getData()
+    const active = noteSourceManager.getActiveSource()
+
+    const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+      { label: 'Note Platform:', enabled: false },
+      { type: 'separator' },
+      ...data.sources.map((s) => ({
+        label: s.name,
+        type: 'radio' as const,
+        checked: s.id === active.id,
+        click: () => {
+          noteSourceManager!.setActiveSource(s.id)
+          noteHandler?.loadNoteSource(s)
+          layoutManager?.applyBounds()
+          mainWindow!.webContents.send('workbench:note-source-changed', {
+            activeSourceId: s.id,
+            activeSource: s,
+          })
+        },
+      })),
+      { type: 'separator' },
+      {
+        label: '⚙️ Configure Note Sites...',
+        click: () => {
+          mainWindow!.webContents.send('workbench:open-note-source-modal')
         },
       },
     ]

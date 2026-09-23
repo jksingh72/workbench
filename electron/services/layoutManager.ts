@@ -1,6 +1,7 @@
 import { BrowserWindow, Rectangle } from 'electron'
 import { BookViewHandler } from '../views/bookViewHandler'
 import { AIViewHandler } from '../views/aiViewHandler'
+import { NoteViewHandler } from '../views/noteViewHandler'
 
 export interface DOMBounds {
   x: number
@@ -13,6 +14,7 @@ export class LayoutManager {
   private mainWindow: BrowserWindow
   private bookHandler: BookViewHandler
   private aiHandler: AIViewHandler
+  private noteHandler: NoteViewHandler
 
   private currentSplitRatio = 60
   private currentVerticalSplitRatio = 50
@@ -21,11 +23,13 @@ export class LayoutManager {
   constructor(
     mainWindow: BrowserWindow,
     bookHandler: BookViewHandler,
-    aiHandler: AIViewHandler
+    aiHandler: AIViewHandler,
+    noteHandler: NoteViewHandler
   ) {
     this.mainWindow = mainWindow
     this.bookHandler = bookHandler
     this.aiHandler = aiHandler
+    this.noteHandler = noteHandler
   }
 
   public setSplit(ratio: number, isSwapped?: boolean) {
@@ -39,10 +43,11 @@ export class LayoutManager {
     this.applyBounds()
   }
 
-  public setViewsVisible(params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) {
+  public setViewsVisible(params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) {
     if (typeof params === 'boolean') {
       this.bookHandler.setVisible(params)
       this.aiHandler.setVisible(params)
+      this.noteHandler.setVisible(params)
       if (params) this.applyBounds()
       return
     }
@@ -54,13 +59,16 @@ export class LayoutManager {
     if (target === 'ai' || target === 'all') {
       this.aiHandler.setVisible(visible)
     }
+    if (target === 'note' || target === 'all') {
+      this.noteHandler.setVisible(visible)
+    }
     if (visible) {
       this.applyBounds()
     }
   }
 
-  public updateMeasuredBounds(bounds: { book: DOMBounds; ai: DOMBounds }) {
-    const { book, ai } = bounds
+  public updateMeasuredBounds(bounds: { book?: DOMBounds; ai?: DOMBounds; note?: DOMBounds }) {
+    const { book, ai, note } = bounds
 
     if (book && typeof book.x === 'number') {
       this.bookHandler.setBounds({
@@ -77,6 +85,15 @@ export class LayoutManager {
         y: Math.round(ai.y),
         width: Math.max(0, Math.round(ai.width)),
         height: Math.max(0, Math.round(ai.height)),
+      })
+    }
+
+    if (note && typeof note.x === 'number') {
+      this.noteHandler.setBounds({
+        x: Math.round(note.x),
+        y: Math.round(note.y),
+        width: Math.max(0, Math.round(note.width)),
+        height: Math.max(0, Math.round(note.height)),
       })
     }
   }
@@ -101,9 +118,11 @@ export class LayoutManager {
       if (!this.currentIsSwapped) {
         this.bookHandler.setBounds(fullBounds)
         this.aiHandler.setBounds(hiddenBounds)
+        this.noteHandler.setBounds(hiddenBounds)
       } else {
         this.aiHandler.setBounds(fullBounds)
         this.bookHandler.setBounds(hiddenBounds)
+        this.noteHandler.setBounds(hiddenBounds)
       }
       return
     }
@@ -114,9 +133,11 @@ export class LayoutManager {
       if (!this.currentIsSwapped) {
         this.bookHandler.setBounds(hiddenBounds)
         this.aiHandler.setBounds(fullBounds)
+        this.noteHandler.setBounds(hiddenBounds)
       } else {
         this.aiHandler.setBounds(hiddenBounds)
         this.bookHandler.setBounds(fullBounds)
+        this.noteHandler.setBounds(hiddenBounds)
       }
       return
     }
@@ -129,14 +150,22 @@ export class LayoutManager {
     const chatPaneHeight = Math.round((availableWorkspaceHeight - horizontalSplitterHeight) * (this.currentVerticalSplitRatio / 100))
     const aiViewHeight = Math.max(0, chatPaneHeight - paneToolbarHeight)
 
+    const totalRightColumnHeight = availableWorkspaceHeight - horizontalSplitterHeight
+    const notePaneHeight = Math.max(0, totalRightColumnHeight - chatPaneHeight)
+    const noteViewY = topBarHeight + aiViewHeight + horizontalSplitterHeight + paneToolbarHeight
+    const noteViewHeight = Math.max(0, notePaneHeight - paneToolbarHeight)
+
     const bookBounds: Rectangle = { x: 0, y: topBarHeight, width: leftWidth, height: fullContentHeight }
     const aiBounds: Rectangle = { x: rightX, y: topBarHeight, width: rightWidth, height: aiViewHeight }
+    const noteBounds: Rectangle = { x: rightX, y: noteViewY, width: rightWidth, height: noteViewHeight }
 
     if (!this.currentIsSwapped) {
       this.bookHandler.setBounds(bookBounds)
       this.aiHandler.setBounds(aiBounds)
+      this.noteHandler.setBounds(noteBounds)
     } else {
       this.aiHandler.setBounds({ x: 0, y: topBarHeight, width: leftWidth, height: aiViewHeight })
+      this.noteHandler.setBounds({ x: 0, y: noteViewY, width: leftWidth, height: noteViewHeight })
       this.bookHandler.setBounds({ x: rightX, y: topBarHeight, width: rightWidth, height: fullContentHeight })
     }
   }

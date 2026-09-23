@@ -9,7 +9,8 @@ import { AIDeleteLoginModal } from './components/AIDeleteLoginModal'
 import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { BookSourceModal } from './components/BookSourceModal'
 import { AISourceModal } from './components/AISourceModal'
-import { NavState, BookSource, AISource } from './types/electron'
+import { NoteSourceModal } from './components/NoteSourceModal'
+import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
 export const App: React.FC = () => {
@@ -42,6 +43,16 @@ export const App: React.FC = () => {
   const [activeAISourceId, setActiveAISourceId] = useState<string>('chatgpt')
   const [isAISourceModalOpen, setIsAISourceModalOpen] = useState<boolean>(false)
 
+  const [noteSources, setNoteSources] = useState<NoteSource[]>([
+    { id: 'onenote', name: 'Microsoft OneNote', url: 'https://www.onenote.com/notebooks', isPreset: true },
+    { id: 'evernote', name: 'Evernote', url: 'https://www.evernote.com/client/web', isPreset: true },
+    { id: 'local', name: 'Workbench Local Notes', url: 'workbench://local-notes', isPreset: true },
+    { id: 'notion', name: 'Notion', url: 'https://www.notion.so/login', isPreset: true },
+    { id: 'keep', name: 'Google Keep', url: 'https://keep.google.com/', isPreset: true },
+  ])
+  const [activeNoteSourceId, setActiveNoteSourceId] = useState<string>('onenote')
+  const [isNoteSourceModalOpen, setIsNoteSourceModalOpen] = useState<boolean>(false)
+
   const [bookNavState, setBookNavState] = useState<NavState>({
     canGoBack: false,
     canGoForward: false,
@@ -60,10 +71,20 @@ export const App: React.FC = () => {
     zoomFactor: 1.0,
   })
 
+  const [noteNavState, setNoteNavState] = useState<NavState>({
+    canGoBack: false,
+    canGoForward: false,
+    isLoading: true,
+    url: 'https://www.onenote.com/notebooks',
+    title: 'Microsoft OneNote',
+    zoomFactor: 1.0,
+  })
+
   const workspaceRef = useRef<HTMLDivElement>(null)
   const rightColumnRef = useRef<HTMLDivElement>(null)
   const bookAnchorRef = useRef<HTMLDivElement>(null)
   const aiAnchorRef = useRef<HTMLDivElement>(null)
+  const noteAnchorRef = useRef<HTMLDivElement>(null)
   const notificationTimeoutRef = useRef<any>(null)
   const dragTargetRef = useRef<'none' | 'column' | 'row'>('none')
 
@@ -81,6 +102,7 @@ export const App: React.FC = () => {
 
     const bookRect = bookAnchorRef.current?.getBoundingClientRect()
     const aiRect = aiAnchorRef.current?.getBoundingClientRect()
+    const noteRect = noteAnchorRef.current?.getBoundingClientRect()
 
     const book = bookRect
       ? {
@@ -100,7 +122,16 @@ export const App: React.FC = () => {
         }
       : { x: 0, y: 0, width: 0, height: 0 }
 
-    window.electron.updateBounds({ book, ai })
+    const note = noteRect
+      ? {
+          x: Math.round(noteRect.left),
+          y: Math.round(noteRect.top),
+          width: Math.round(noteRect.width),
+          height: Math.round(noteRect.height),
+        }
+      : { x: 0, y: 0, width: 0, height: 0 }
+
+    window.electron.updateBounds({ book, ai, note })
   }, [])
 
   // Listen to navigation events from Electron
@@ -110,8 +141,10 @@ export const App: React.FC = () => {
     const unsubscribeNav = window.electron.onNavStateChange((target, state) => {
       if (target === 'book') {
         setBookNavState((prev) => ({ ...prev, ...state }))
-      } else {
+      } else if (target === 'ai') {
         setAiNavState((prev) => ({ ...prev, ...state }))
+      } else if (target === 'note') {
+        setNoteNavState((prev) => ({ ...prev, ...state }))
       }
     })
 
@@ -171,6 +204,30 @@ export const App: React.FC = () => {
       handleOpenAISourceModal()
     })
 
+    // Load configured Note sources
+    if (window.electron?.getNoteSources) {
+      window.electron
+        .getNoteSources()
+        .then((data) => {
+          if (data?.sources && data.sources.length > 0) {
+            setNoteSources(data.sources)
+            setActiveNoteSourceId(data.activeSourceId || data.sources[0].id)
+          }
+        })
+        .catch((err) => console.error('Failed to load note sources:', err))
+    }
+
+    const unsubscribeNoteSourceChanged = window.electron?.onNoteSourceChanged?.((data) => {
+      if (data?.activeSourceId) {
+        setActiveNoteSourceId(data.activeSourceId)
+        showNotification(`📝 Switched NoteView to ${data.activeSource?.name || 'selected platform'}`)
+      }
+    })
+
+    const unsubscribeOpenNoteModal = window.electron?.onOpenNoteSourceModal?.(() => {
+      handleOpenNoteSourceModal()
+    })
+
     return () => {
       unsubscribeNav()
       unsubscribeAskAI?.()
@@ -178,6 +235,8 @@ export const App: React.FC = () => {
       unsubscribeOpenModal?.()
       unsubscribeAISourceChanged?.()
       unsubscribeOpenAIModal?.()
+      unsubscribeNoteSourceChanged?.()
+      unsubscribeOpenNoteModal?.()
     }
   }, [])
 
@@ -333,7 +392,7 @@ export const App: React.FC = () => {
 
   // Navigation actions
   const handleNavAction = (
-    target: 'book' | 'ai',
+    target: 'book' | 'ai' | 'note',
     command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset'
   ) => {
     window.electron?.navAction({ target, command })
@@ -347,6 +406,10 @@ export const App: React.FC = () => {
   const activeAISource =
     aiSources.find((s) => s.id === activeAISourceId) ||
     aiSources[0] || { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/' }
+
+  const activeNoteSource =
+    noteSources.find((s) => s.id === activeNoteSourceId) ||
+    noteSources[0] || { id: 'onenote', name: 'Microsoft OneNote', url: 'https://www.onenote.com/notebooks' }
 
   // Book Delete Login modal (scoped strictly to Bookview pane)
   const handleOpenBookDeleteLogin = () => {
@@ -372,13 +435,16 @@ export const App: React.FC = () => {
     setTimeout(syncBounds, 50)
   }
 
-  // OneNote Delete Data modal (scoped strictly to OneNote pane)
+  // Note Delete Data modal (scoped strictly to NoteView pane)
   const handleOpenNoteDeleteData = () => {
     setIsNoteDeleteDataOpen(true)
+    window.electron?.setViewsVisible({ target: 'note', visible: false })
   }
 
   const handleCloseNoteDeleteData = () => {
     setIsNoteDeleteDataOpen(false)
+    window.electron?.setViewsVisible({ target: 'note', visible: true })
+    setTimeout(syncBounds, 50)
   }
 
   // Book source configuration handlers
@@ -445,6 +511,40 @@ export const App: React.FC = () => {
       if (res.success && res.data) {
         setAiSources(res.data.sources)
         setActiveAISourceId(res.data.activeSourceId)
+      }
+    }
+  }
+
+  // Note source configuration handlers
+  const handleOpenNoteSourceModal = () => {
+    setIsNoteSourceModalOpen(true)
+    window.electron?.setViewsVisible({ target: 'all', visible: false })
+  }
+
+  const handleCloseNoteSourceModal = () => {
+    setIsNoteSourceModalOpen(false)
+    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    setTimeout(syncBounds, 50)
+  }
+
+  const handleSelectNoteSource = async (sourceId: string) => {
+    setActiveNoteSourceId(sourceId)
+    if (window.electron?.setActiveNoteSource) {
+      const res = await window.electron.setActiveNoteSource(sourceId)
+      if (res.success && res.activeSource) {
+        showNotification(`📝 Switched NoteView to ${res.activeSource.name}`)
+      }
+    }
+  }
+
+  const handleSaveNoteSources = async (sources: NoteSource[], newActiveId?: string) => {
+    setNoteSources(sources)
+    if (newActiveId) setActiveNoteSourceId(newActiveId)
+    if (window.electron?.saveNoteSources) {
+      const res = await window.electron.saveNoteSources({ sources, activeSourceId: newActiveId })
+      if (res.success && res.data) {
+        setNoteSources(res.data.sources)
+        setActiveNoteSourceId(res.data.activeSourceId)
       }
     }
   }
@@ -611,20 +711,36 @@ export const App: React.FC = () => {
         isDragging={dragTarget === 'row'}
       />
 
-      {/* Bottom Pane: OneNote Application */}
+      {/* Bottom Pane: Note Application */}
       <div className="pane-wrapper onenote-pane" style={noteSubPaneStyle}>
-        <OneNoteApp
-          onNotify={showNotification}
-          clippedText={clippedText}
-          onClearClippedText={() => setClippedText(null)}
+        <PaneToolbar
+          target="note"
+          navState={noteNavState}
+          onNavAction={(cmd) => handleNavAction('note', cmd)}
           onOpenSessionModal={handleOpenNoteDeleteData}
-          resetTrigger={noteResetTrigger}
+          noteSources={noteSources}
+          activeNoteSourceId={activeNoteSourceId}
+          onOpenNoteSourceModal={handleOpenNoteSourceModal}
         />
 
-        {/* Pane-Scoped Delete Data Modal for OneNote */}
+        {activeNoteSourceId === 'local' ? (
+          <OneNoteApp
+            onNotify={showNotification}
+            clippedText={clippedText}
+            onClearClippedText={() => setClippedText(null)}
+            onOpenSessionModal={handleOpenNoteDeleteData}
+            resetTrigger={noteResetTrigger}
+          />
+        ) : (
+          <div className="native-view-anchor" ref={noteAnchorRef} />
+        )}
+
+        {/* Pane-Scoped Delete Login Modal for NoteView */}
         {isNoteDeleteDataOpen && (
           <NoteDeleteModal
             isOpen={isNoteDeleteDataOpen}
+            activeSource={activeNoteSource}
+            sources={noteSources}
             onClose={handleCloseNoteDeleteData}
             onNotify={showNotification}
             onCleared={() => setNoteResetTrigger(Date.now())}
@@ -717,6 +833,21 @@ export const App: React.FC = () => {
             handleCloseAISourceModal()
           }}
           onSaveSources={handleSaveAISources}
+          onNotify={showNotification}
+        />
+      )}
+
+      {isNoteSourceModalOpen && (
+        <NoteSourceModal
+          isOpen={true}
+          sources={noteSources}
+          activeSourceId={activeNoteSourceId}
+          onClose={handleCloseNoteSourceModal}
+          onSelectSource={(id) => {
+            handleSelectNoteSource(id)
+            handleCloseNoteSourceModal()
+          }}
+          onSaveSources={handleSaveNoteSources}
           onNotify={showNotification}
         />
       )}

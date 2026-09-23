@@ -20,15 +20,15 @@ import {
   BookMarked,
   Settings2
 } from 'lucide-react'
-import { NavState, BookSource, AISource } from '../types/electron'
+import { NavState, BookSource, AISource, NoteSource } from '../types/electron'
 
 interface PaneToolbarProps {
-  target: 'book' | 'ai'
+  target: 'book' | 'ai' | 'note'
   navState: NavState
   onNavAction: (command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset') => void
   onAskAI?: (templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom', customPrompt?: string) => void
   onShowNativeMenu?: () => void
-  onOpenSessionModal?: (target: 'book' | 'ai') => void
+  onOpenSessionModal?: (target: 'book' | 'ai' | 'note') => void
   onClipToNote?: () => void
   bookSources?: BookSource[]
   activeBookSourceId?: string
@@ -37,6 +37,9 @@ interface PaneToolbarProps {
   aiSources?: AISource[]
   activeAISourceId?: string
   onOpenAISourceModal?: () => void
+  noteSources?: NoteSource[]
+  activeNoteSourceId?: string
+  onOpenNoteSourceModal?: () => void
   isAskingAI?: boolean
 }
 
@@ -54,6 +57,9 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   aiSources = [],
   activeAISourceId = 'chatgpt',
   onOpenAISourceModal,
+  noteSources = [],
+  activeNoteSourceId = 'onenote',
+  onOpenNoteSourceModal,
   isAskingAI = false,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -94,23 +100,42 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   }
 
   const isBook = target === 'book'
+  const isAI = target === 'ai'
+  const isNote = target === 'note'
+
   const zoomPercent = Math.round((navState.zoomFactor || 1) * 100)
+
   const activeSource = bookSources.find((s) => s.id === activeBookSourceId) || {
     id: 'oreilly',
     name: "O'Reilly Learning",
     url: 'https://www.oreilly.com/member/login/',
   }
+
   const activeAISource = aiSources.find((s) => s.id === activeAISourceId) || {
     id: 'chatgpt',
     name: 'ChatGPT',
     url: 'https://chatgpt.com/',
   }
 
+  const activeNoteSource = noteSources.find((s) => s.id === activeNoteSourceId) || {
+    id: 'onenote',
+    name: 'Microsoft OneNote',
+    url: 'https://www.onenote.com/notebooks',
+  }
+
+  const isLocalNote = isNote && activeNoteSource.id === 'local'
+
+  const toolbarClass = isBook
+    ? 'book-toolbar'
+    : isAI
+      ? 'ai-toolbar'
+      : 'note-toolbar'
+
   return (
-    <div className={`pane-toolbar ${isBook ? 'book-toolbar' : 'ai-toolbar'}`}>
+    <div className={`pane-toolbar ${toolbarClass}`}>
       {/* Left section: Identity & Navigation */}
       <div className="toolbar-section-left">
-        {isBook ? (
+        {isBook && (
           <div className="book-source-selector-wrapper" ref={bookSourceRef}>
             <button
               className="pane-tag tag-oreilly book-selector-btn"
@@ -137,7 +162,9 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               <span>Configure</span>
             </button>
           </div>
-        ) : (
+        )}
+
+        {isAI && (
           <div className="ai-source-selector-wrapper">
             <button
               className="pane-tag tag-chatgpt ai-selector-btn"
@@ -166,10 +193,39 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           </div>
         )}
 
+        {isNote && (
+          <div className="note-source-selector-wrapper">
+            <button
+              className="pane-tag tag-onenote note-selector-btn"
+              onClick={() => {
+                if (window.electron?.showNoteSourceMenu) {
+                  window.electron.showNoteSourceMenu()
+                } else {
+                  onOpenNoteSourceModal?.()
+                }
+              }}
+              title="Click to switch note platform (OneNote, Evernote, Local Notes, etc.)"
+            >
+              <BookMarked size={13} />
+              <span className="tag-label">{activeNoteSource.name}</span>
+              <ChevronDown size={11} className="selector-chevron" />
+            </button>
+
+            <button
+              className="configure-sources-quick-btn configure-note-btn"
+              onClick={onOpenNoteSourceModal}
+              title="Configure Note Platforms (OneNote, Evernote, Notion, Keep, custom sites)"
+            >
+              <Settings2 size={12} className="config-icon" />
+              <span>Configure</span>
+            </button>
+          </div>
+        )}
+
         <div className="nav-buttons">
           <button
             className="nav-btn"
-            disabled={!navState.canGoBack}
+            disabled={isLocalNote || !navState.canGoBack}
             onClick={() => onNavAction('back')}
             title="Go Back"
           >
@@ -177,23 +233,31 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           </button>
           <button
             className="nav-btn"
-            disabled={!navState.canGoForward}
+            disabled={isLocalNote || !navState.canGoForward}
             onClick={() => onNavAction('forward')}
             title="Go Forward"
           >
             <ArrowRight size={13} />
           </button>
           <button
-            className={`nav-btn ${navState.isLoading ? 'loading' : ''}`}
+            className={`nav-btn ${navState.isLoading && !isLocalNote ? 'loading' : ''}`}
+            disabled={isLocalNote}
             onClick={() => onNavAction('reload')}
             title="Reload Page"
           >
-            <RotateCw size={13} className={navState.isLoading ? 'spin' : ''} />
+            <RotateCw size={13} className={navState.isLoading && !isLocalNote ? 'spin' : ''} />
           </button>
           <button
             className="nav-btn"
+            disabled={isLocalNote}
             onClick={() => onNavAction('home')}
-            title={isBook ? `${activeSource.name} Home` : `${activeAISource.name} Home`}
+            title={
+              isBook
+                ? `${activeSource.name} Home`
+                : isAI
+                  ? `${activeAISource.name} Home`
+                  : `${activeNoteSource.name} Home`
+            }
           >
             <Home size={13} />
           </button>
@@ -202,8 +266,23 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
       {/* Center section: Page info */}
       <div className="toolbar-section-center">
-        <span className="url-display" title={navState.url || (isBook ? activeSource.name : activeAISource.name)}>
-          {navState.title || (isBook ? activeSource.name : `${activeAISource.name} Assistant`)}
+        <span
+          className="url-display"
+          title={
+            navState.url ||
+            (isBook
+              ? activeSource.name
+              : isAI
+                ? activeAISource.name
+                : activeNoteSource.name)
+          }
+        >
+          {navState.title ||
+            (isBook
+              ? activeSource.name
+              : isAI
+                ? `${activeAISource.name} Assistant`
+                : activeNoteSource.name)}
         </span>
       </div>
 
@@ -360,16 +439,40 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         <button
           className="session-manage-btn"
           onClick={() => onOpenSessionModal?.(target)}
-          title={`Delete saved User ID, password, and active login for ${isBook ? activeSource.name : activeAISource.name}`}
+          title={`Delete saved login and credentials for ${
+            isBook
+              ? activeSource.name
+              : isAI
+                ? activeAISource.name
+                : activeNoteSource.name
+          }`}
         >
           <KeyRound size={12} className="key-icon" />
           <span className="session-manage-label">Delete Login</span>
         </button>
 
-        {!isBook && (
+        {isAI && (
           <div className="ai-status-badge" title={`Connected to ${activeAISource.name} web view`}>
             <span className="ai-active-indicator" />
             <span>Ready for prompts</span>
+          </div>
+        )}
+
+        {isNote && (
+          <div
+            className="note-status-badge"
+            title={
+              isLocalNote
+                ? 'Workbench Local Notes'
+                : `Connected to ${activeNoteSource.name}`
+            }
+          >
+            <span
+              className={`note-active-indicator ${
+                isLocalNote ? 'indicator-local' : 'indicator-cloud'
+              }`}
+            />
+            <span>{isLocalNote ? 'Local Notes' : 'Connected'}</span>
           </div>
         )}
       </div>

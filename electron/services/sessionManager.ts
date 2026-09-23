@@ -76,7 +76,7 @@ export class SessionManager {
       case 'ai':
         return await this.aiHandler.clearSession(scope)
       case 'note':
-        return await this.noteHandler.clearSession()
+        return await this.noteHandler.clearSession(scope)
       default:
         return { success: false, error: `Unknown session target: ${target}` }
     }

@@ -84,6 +84,10 @@ export class AuthCoordinator {
     wc.setUserAgent(CHROME_DESKTOP_UA)
   }
 
+  public isAllowedPopupUrl(url: string): boolean {
+    return this.strategies.some((s) => s.isAllowedPopupUrl?.(url))
+  }
+
   /**
    * Handle window.open (popups) from embedded web views.
    * Centers allowed OAuth/SSO popups over the calling pane; opens non-auth links externally.
@@ -96,7 +100,7 @@ export class AuthCoordinator {
     const { url } = details
 
     // Check if any strategy allows this popup URL
-    const isAllowed = this.strategies.some((s) => s.isAllowedPopupUrl?.(url))
+    const isAllowed = this.isAllowedPopupUrl(url)
 
     if (isAllowed) {
       const viewBounds = callingView?.getBounds() || { x: 0, y: 82, width: 800, height: 600 }

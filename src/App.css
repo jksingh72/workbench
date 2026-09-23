@@ -1948,6 +1948,88 @@ input:checked + .slider-round:before {
   color: #10b981;
 }
 
+/* Note Source Selector in Toolbar */
+.note-source-selector-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.note-selector-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  background: rgba(147, 51, 234, 0.12);
+  border: 1px solid rgba(147, 51, 234, 0.35);
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.note-selector-btn:hover {
+  background: rgba(147, 51, 234, 0.22);
+  border-color: rgba(147, 51, 234, 0.6);
+  box-shadow: 0 0 10px rgba(147, 51, 234, 0.25);
+}
+
+.configure-note-btn {
+  background: rgba(147, 51, 234, 0.12);
+  border-color: rgba(147, 51, 234, 0.35);
+  color: #c084fc;
+}
+
+.configure-note-btn:hover {
+  background: rgba(147, 51, 234, 0.22);
+  border-color: rgba(147, 51, 234, 0.6);
+  color: #e9d5ff;
+  box-shadow: 0 0 8px rgba(147, 51, 234, 0.25);
+}
+
+.configure-note-btn .config-icon {
+  color: #a855f7;
+}
+
+.note-sources-modal-container {
+  max-width: 520px;
+}
+
+.note-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.note-active-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.indicator-cloud {
+  background-color: #a855f7;
+  box-shadow: 0 0 6px #a855f7;
+}
+
+.indicator-local {
+  background-color: #3b82f6;
+  box-shadow: 0 0 6px #3b82f6;
+}
+
+.tag-onenote {
+  color: #c084fc;
+}
+
+.badge-purple {
+  background: rgba(147, 51, 234, 0.15);
+  color: #a855f7;
+}
+
 .book-source-dropdown {
   position: absolute;
   top: calc(100% + 6px);

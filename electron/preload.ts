@@ -6,8 +6,8 @@ contextBridge.exposeInMainWorld('electron', {
   showAskAIMenu: () => ipcRenderer.send('workbench:show-ask-ai-menu'),
   navAction: (action: any) => ipcRenderer.send('workbench:nav-action', action),
   askAI: (options: any) => ipcRenderer.invoke('workbench:ask-ai', options),
-  onNavStateChange: (callback: (target: 'book' | 'ai', state: any) => void) => {
-    const listener = (_: any, target: 'book' | 'ai', state: any) => {
+  onNavStateChange: (callback: (target: 'book' | 'ai' | 'note', state: any) => void) => {
+    const listener = (_: any, target: 'book' | 'ai' | 'note', state: any) => {
       callback(target, state)
     }
     ipcRenderer.on('workbench:nav-state', listener)
@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:clear-session', target, scope),
   getSessionSettings: () => ipcRenderer.invoke('workbench:get-session-settings'),
   updateSessionSettings: (settings: any) => ipcRenderer.invoke('workbench:update-session-settings', settings),
-  setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'all'; visible: boolean }) =>
+  setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) =>
     ipcRenderer.send('workbench:set-views-visible', params),
   setVerticalSplit: (params: { ratio: number }) => ipcRenderer.send('workbench:set-vertical-split', params),
   loadNotes: () => ipcRenderer.invoke('workbench:load-notes'),
@@ -73,5 +73,23 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.removeListener('workbench:open-ai-source-modal', listener)
     }
   },
+  getNoteSources: () => ipcRenderer.invoke('workbench:get-note-sources'),
+  setActiveNoteSource: (sourceId: string) => ipcRenderer.invoke('workbench:set-active-note-source', sourceId),
+  saveNoteSources: (params: { sources: any[]; activeSourceId?: string }) =>
+    ipcRenderer.invoke('workbench:save-note-sources', params),
+  showNoteSourceMenu: () => ipcRenderer.send('workbench:show-note-source-menu'),
+  onNoteSourceChanged: (callback: (data: { activeSourceId: string; activeSource: any }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:note-source-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:note-source-changed', listener)
+    }
+  },
+  onOpenNoteSourceModal: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:open-note-source-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-note-source-modal', listener)
+    }
+  },
 })
-
