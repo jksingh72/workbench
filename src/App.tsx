@@ -112,13 +112,34 @@ export const App: React.FC = () => {
     setTimeout(syncBounds, 50)
   }
 
+  const isAnyModalOpen =
+    isBookDeleteLoginOpen ||
+    isAIDeleteLoginOpen ||
+    isNoteDeleteDataOpen ||
+    isBookSourceModalOpen ||
+    isAISourceModalOpen ||
+    isNoteSourceModalOpen
+
   // Calculate and sync bounds of native WebContentsViews
   const syncBounds = useCallback(() => {
     if (!window.electron?.updateBounds) return
 
-    const bookRect = activePanes.book ? bookAnchorRef.current?.getBoundingClientRect() : null
-    const aiRect = activePanes.ai ? aiAnchorRef.current?.getBoundingClientRect() : null
-    const noteRect = activePanes.note ? noteAnchorRef.current?.getBoundingClientRect() : null
+    const isBookModalOpen = isBookDeleteLoginOpen || isBookSourceModalOpen
+    const isAIModalOpen = isAIDeleteLoginOpen || isAISourceModalOpen
+    const isNoteModalOpen = isNoteDeleteDataOpen || isNoteSourceModalOpen
+
+    const bookRect =
+      activePanes.book && !isBookModalOpen
+        ? bookAnchorRef.current?.getBoundingClientRect()
+        : null
+    const aiRect =
+      activePanes.ai && !isAIModalOpen
+        ? aiAnchorRef.current?.getBoundingClientRect()
+        : null
+    const noteRect =
+      activePanes.note && !isNoteModalOpen
+        ? noteAnchorRef.current?.getBoundingClientRect()
+        : null
 
     const book = bookRect
       ? {
@@ -148,7 +169,15 @@ export const App: React.FC = () => {
       : { x: 0, y: 0, width: 0, height: 0 }
 
     window.electron.updateBounds({ book, ai, note })
-  }, [activePanes])
+  }, [
+    activePanes,
+    isBookDeleteLoginOpen,
+    isBookSourceModalOpen,
+    isAIDeleteLoginOpen,
+    isAISourceModalOpen,
+    isNoteDeleteDataOpen,
+    isNoteSourceModalOpen,
+  ])
 
   // Listen to navigation events from Electron
   useEffect(() => {
@@ -275,6 +304,7 @@ export const App: React.FC = () => {
 
   // Drag splitter handling: Column (Left pane vs Right column)
   const handleColumnPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isAnyModalOpen) return
     e.preventDefault()
     e.stopPropagation()
     try {
@@ -318,6 +348,7 @@ export const App: React.FC = () => {
 
   // Drag splitter handling: Row (ChatGPT top vs OneNote bottom)
   const handleRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isAnyModalOpen) return
     e.preventDefault()
     e.stopPropagation()
     try {
@@ -740,6 +771,7 @@ export const App: React.FC = () => {
           setTimeout(syncBounds, 50)
         }}
         isDragging={dragTarget === 'row'}
+        disabled={isAnyModalOpen}
       />
 
       {renderNote(noteSubPaneStyle)}
@@ -773,7 +805,11 @@ export const App: React.FC = () => {
           const next = !isSwapped
           setIsSwapped(next)
           window.electron?.setSplit({ ratio: splitRatio, isSwapped: next })
-          setTimeout(syncBounds, 50)
+          requestAnimationFrame(() => {
+            syncBounds()
+            setTimeout(syncBounds, 50)
+            setTimeout(syncBounds, 150)
+          })
         }}
         isSwapped={isSwapped}
         notification={notification}
@@ -784,7 +820,7 @@ export const App: React.FC = () => {
       <div className="workspace-container" ref={workspaceRef}>
         {isTripleMode ? (
           !isSwapped ? (
-            <>
+            <React.Fragment key="triple-normal">
               {renderBook(leftColumnStyle)}
               <Splitter
                 onPointerDown={handleColumnPointerDown}
@@ -796,11 +832,12 @@ export const App: React.FC = () => {
                   setTimeout(syncBounds, 50)
                 }}
                 isDragging={dragTarget === 'column'}
+                disabled={isAnyModalOpen}
               />
               {renderStackedRightColumn(rightColumnStyle)}
-            </>
+            </React.Fragment>
           ) : (
-            <>
+            <React.Fragment key="triple-swapped">
               {renderStackedRightColumn(leftColumnStyle)}
               <Splitter
                 onPointerDown={handleColumnPointerDown}
@@ -812,15 +849,16 @@ export const App: React.FC = () => {
                   setTimeout(syncBounds, 50)
                 }}
                 isDragging={dragTarget === 'column'}
+                disabled={isAnyModalOpen}
               />
               {renderBook(rightColumnStyle)}
-            </>
+            </React.Fragment>
           )
         ) : (
           (() => {
             const { left: LeftPane, right: RightPane } = getDualPanes()
             return !isSwapped ? (
-              <>
+              <React.Fragment key="dual-normal">
                 {LeftPane(leftColumnStyle)}
                 <Splitter
                   onPointerDown={handleColumnPointerDown}
@@ -832,11 +870,12 @@ export const App: React.FC = () => {
                     setTimeout(syncBounds, 50)
                   }}
                   isDragging={dragTarget === 'column'}
+                  disabled={isAnyModalOpen}
                 />
                 {RightPane(rightColumnStyle)}
-              </>
+              </React.Fragment>
             ) : (
-              <>
+              <React.Fragment key="dual-swapped">
                 {RightPane(leftColumnStyle)}
                 <Splitter
                   onPointerDown={handleColumnPointerDown}
@@ -848,9 +887,10 @@ export const App: React.FC = () => {
                     setTimeout(syncBounds, 50)
                   }}
                   isDragging={dragTarget === 'column'}
+                  disabled={isAnyModalOpen}
                 />
                 {LeftPane(rightColumnStyle)}
-              </>
+              </React.Fragment>
             )
           })()
         )}

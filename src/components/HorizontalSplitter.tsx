@@ -6,6 +6,7 @@ interface HorizontalSplitterProps {
   onPointerUp?: (e: React.PointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
   isDragging: boolean
+  disabled?: boolean
 }
 
 export const HorizontalSplitter: React.FC<HorizontalSplitterProps> = ({
@@ -14,16 +15,17 @@ export const HorizontalSplitter: React.FC<HorizontalSplitterProps> = ({
   onPointerUp,
   onDoubleClick,
   isDragging,
+  disabled = false,
 }) => {
   return (
     <div
-      className={`pane-horizontal-splitter ${isDragging ? 'dragging' : ''}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onDoubleClick={onDoubleClick}
-      title="Drag up/down to resize ChatGPT and OneNote (Double-click to reset to 50:50)"
+      className={`pane-horizontal-splitter ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`}
+      onPointerDown={disabled ? undefined : onPointerDown}
+      onPointerMove={disabled ? undefined : onPointerMove}
+      onPointerUp={disabled ? undefined : onPointerUp}
+      onPointerCancel={disabled ? undefined : onPointerUp}
+      onDoubleClick={disabled ? () => {} : onDoubleClick}
+      title={disabled ? 'Splitter resizing is paused while a dialog is open' : 'Drag up/down to resize ChatGPT and OneNote (Double-click to reset to 50:50)'}
     >
       <div className="horizontal-splitter-handle">
         <span className="h-grip-dot" />

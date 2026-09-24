@@ -314,6 +314,10 @@ function registerIpcHandlers() {
     if (target) {
       noteHandler.loadNoteSource(target)
       layoutManager?.applyBounds()
+      mainWindow!.webContents.send('workbench:note-source-changed', {
+        activeSourceId: target.id,
+        activeSource: target,
+      })
       return { success: true, activeSource: target }
     }
     return { success: false, error: 'Source not found' }
@@ -327,6 +331,10 @@ function registerIpcHandlers() {
       const active = noteSourceManager.getActiveSource()
       noteHandler.loadNoteSource(active)
       layoutManager?.applyBounds()
+      mainWindow!.webContents.send('workbench:note-source-changed', {
+        activeSourceId: active.id,
+        activeSource: active,
+      })
       return { success: true, data: updated }
     }
   )

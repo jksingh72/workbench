@@ -9,6 +9,7 @@ export const CHATGPT_START_URL = 'https://chatgpt.com/'
 export class AIViewHandler {
   private view: WebContentsView | null = null
   private views: Map<string, WebContentsView> = new Map()
+  private attachedViews: Set<WebContentsView> = new Set()
   private mainWindow: BrowserWindow
   private aiSourceManager: AISourceManager
   private currentSourceId: string = ''
@@ -20,6 +21,29 @@ export class AIViewHandler {
     this.mainWindow = mainWindow
     this.aiSourceManager = aiSourceManager
     this.initView()
+  }
+
+  private attachView(v: WebContentsView) {
+    if (!this.attachedViews.has(v) && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      try {
+        this.mainWindow.contentView.addChildView(v)
+        this.attachedViews.add(v)
+      } catch (err) {
+        console.warn('[AIView] attachView error:', err)
+      }
+    }
+  }
+
+  private detachView(v: WebContentsView) {
+    if (this.attachedViews.has(v) && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      try {
+        this.mainWindow.contentView.removeChildView(v)
+      } catch (err) {
+        console.warn('[AIView] detachView error:', err)
+      } finally {
+        this.attachedViews.delete(v)
+      }
+    }
   }
 
   private getOrCreateView(source: AISource): WebContentsView {
@@ -56,8 +80,8 @@ export class AIViewHandler {
 
     this.views.set(source.id, newView)
 
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.contentView.addChildView(newView)
+    if (this.isVisible && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.attachView(newView)
     }
 
     return newView
@@ -111,11 +135,17 @@ export class AIViewHandler {
   }
 
   public setBounds(bounds: Rectangle) {
-    this.currentBounds = bounds
+    if (bounds.width > 0 && bounds.height > 0) {
+      this.currentBounds = bounds
+    }
     if (this.view) {
       if (!this.isVisible) {
-        this.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        try {
+          this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+        } catch (_) {}
+        this.detachView(this.view)
       } else {
+        this.attachView(this.view)
         this.view.setBounds(bounds)
       }
     }
@@ -127,8 +157,12 @@ export class AIViewHandler {
       if (!v.webContents.isDestroyed()) {
         if (!visible || v !== this.view) {
           v.setVisible(false)
-          v.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+          try {
+            v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+          } catch (_) {}
+          this.detachView(v)
         } else {
+          this.attachView(v)
           v.setVisible(true)
           if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
             v.setBounds(this.currentBounds)
@@ -188,16 +222,23 @@ export class AIViewHandler {
     // Hide previous view
     if (this.view && !this.view.webContents.isDestroyed()) {
       this.view.setVisible(false)
+      try {
+        this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+      } catch (_) {}
+      this.detachView(this.view)
     }
 
     this.currentSourceId = source.id
     this.currentUrl = source.url
     this.view = this.getOrCreateView(source)
 
-    if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
-      this.view.setBounds(this.currentBounds)
+    if (this.isVisible) {
+      this.attachView(this.view)
+      if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
+        this.view.setBounds(this.currentBounds)
+      }
+      this.view.setVisible(true)
     }
-    this.view.setVisible(this.isVisible)
 
     this.sendNavState(this.view.webContents)
   }

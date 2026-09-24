@@ -8,6 +8,7 @@ import { getViewPreloadPath } from '../utils/preloadPath'
 export class NoteViewHandler {
   private view: WebContentsView | null = null
   private views: Map<string, WebContentsView> = new Map()
+  private attachedViews: Set<WebContentsView> = new Set()
   private mainWindow: BrowserWindow | null = null
   private noteSourceManager: NoteSourceManager | null = null
   private currentSourceId: string = ''
@@ -29,6 +30,29 @@ export class NoteViewHandler {
     this.mainWindow = mainWindow
     this.noteSourceManager = noteSourceManager
     this.initView()
+  }
+
+  private attachView(v: WebContentsView) {
+    if (!this.attachedViews.has(v) && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      try {
+        this.mainWindow.contentView.addChildView(v)
+        this.attachedViews.add(v)
+      } catch (err) {
+        console.warn('[NoteView] attachView error:', err)
+      }
+    }
+  }
+
+  private detachView(v: WebContentsView) {
+    if (this.attachedViews.has(v) && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      try {
+        this.mainWindow.contentView.removeChildView(v)
+      } catch (err) {
+        console.warn('[NoteView] detachView error:', err)
+      } finally {
+        this.attachedViews.delete(v)
+      }
+    }
   }
 
   public isWebSource(source?: NoteSource | null): boolean {
@@ -119,8 +143,8 @@ export class NoteViewHandler {
 
     this.views.set(source.id, newView)
 
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.contentView.addChildView(newView)
+    if (this.isVisible && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.attachView(newView)
     }
 
     return newView
@@ -180,11 +204,17 @@ export class NoteViewHandler {
   }
 
   public setBounds(bounds: Rectangle) {
-    this.currentBounds = bounds
+    if (bounds.width > 0 && bounds.height > 0) {
+      this.currentBounds = bounds
+    }
     if (this.view && this.isWebSource(this.noteSourceManager?.getActiveSource())) {
       if (!this.isVisible) {
-        this.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        try {
+          this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+        } catch (_) {}
+        this.detachView(this.view)
       } else {
+        this.attachView(this.view)
         this.view.setBounds(bounds)
       }
     }
@@ -198,8 +228,12 @@ export class NoteViewHandler {
       if (!v.webContents.isDestroyed()) {
         if (!visible || !activeIsWeb || v !== this.view) {
           v.setVisible(false)
-          v.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+          try {
+            v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+          } catch (_) {}
+          this.detachView(v)
         } else {
+          this.attachView(v)
           v.setVisible(true)
           if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
             v.setBounds(this.currentBounds)
@@ -254,15 +288,14 @@ export class NoteViewHandler {
   }
 
   public loadNoteSource(source: NoteSource) {
-    if (this.currentSourceId === source.id && ((!this.isWebSource(source) && !this.view) || (this.isWebSource(source) && this.view))) {
-      return
-    }
-
-    // Hide any existing views
+    // Hide any existing views cleanly
     for (const v of this.views.values()) {
       if (!v.webContents.isDestroyed()) {
         v.setVisible(false)
-        v.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        try {
+          v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+        } catch (_) {}
+        this.detachView(v)
       }
     }
 
@@ -270,13 +303,16 @@ export class NoteViewHandler {
     this.currentUrl = source.url
 
     if (this.isWebSource(source)) {
+      this.isVisible = true
       this.view = this.getOrCreateView(source)
+      this.attachView(this.view)
       if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
         this.view.setBounds(this.currentBounds)
       }
-      this.view.setVisible(this.isVisible)
+      this.view.setVisible(true)
       this.sendNavState(this.view.webContents)
     } else {
+      this.isVisible = false
       this.view = null
       this.sendLocalNavState()
     }

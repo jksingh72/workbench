@@ -632,6 +632,17 @@
   border-color: var(--accent-blue);
 }
 
+.pane-splitter.disabled {
+  cursor: default !important;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.pane-splitter.disabled::before {
+  cursor: default !important;
+  pointer-events: none;
+}
+
 .splitter-handle {
   display: flex;
   flex-direction: column;
@@ -1269,6 +1280,17 @@ input:checked + .slider-round:before {
 .pane-horizontal-splitter.dragging {
   background: var(--accent-blue);
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.7);
+}
+
+.pane-horizontal-splitter.disabled {
+  cursor: default !important;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.pane-horizontal-splitter.disabled::before {
+  cursor: default !important;
+  pointer-events: none;
 }
 
 .horizontal-splitter-handle {
