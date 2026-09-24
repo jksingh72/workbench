@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Header } from './components/Header'
-import { PaneToolbar } from './components/PaneToolbar'
+import { Header, PaneId } from './components/Header'
 import { Splitter } from './components/Splitter'
 import { HorizontalSplitter } from './components/HorizontalSplitter'
-import { OneNoteApp } from './components/OneNoteApp'
-import { BookDeleteLoginModal } from './components/BookDeleteLoginModal'
-import { AIDeleteLoginModal } from './components/AIDeleteLoginModal'
-import { NoteDeleteModal } from './components/NoteDeleteModal'
-import { BookSourceModal } from './components/BookSourceModal'
-import { AISourceModal } from './components/AISourceModal'
-import { NoteSourceModal } from './components/NoteSourceModal'
+import { BookPane } from './components/panes/BookPane'
+import { ChatPane } from './components/panes/ChatPane'
+import { NotePane } from './components/panes/NotePane'
 import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
 export const App: React.FC = () => {
+  // Active panes (minimum 2 must be active): Default all 3 active
+  const [activePanes, setActivePanes] = useState<Record<PaneId, boolean>>({
+    book: true,
+    ai: true,
+    note: true,
+  })
+
   // Horizontal split ratio (Bookview width vs Right Column width): Default 60:40
   const [splitRatio, setSplitRatio] = useState<number>(60)
   // Vertical split ratio for Right Column (ChatGPT height vs OneNote height): Default 50:50
@@ -96,13 +98,27 @@ export const App: React.FC = () => {
     }, 4000)
   }
 
+  const activeCount = Object.values(activePanes).filter(Boolean).length
+
+  const handleTogglePane = (pane: PaneId) => {
+    if (activePanes[pane] && activeCount <= 2) {
+      showNotification('⚠️ At least two panes must remain active')
+      return
+    }
+    setActivePanes((prev) => ({
+      ...prev,
+      [pane]: !prev[pane],
+    }))
+    setTimeout(syncBounds, 50)
+  }
+
   // Calculate and sync bounds of native WebContentsViews
   const syncBounds = useCallback(() => {
     if (!window.electron?.updateBounds) return
 
-    const bookRect = bookAnchorRef.current?.getBoundingClientRect()
-    const aiRect = aiAnchorRef.current?.getBoundingClientRect()
-    const noteRect = noteAnchorRef.current?.getBoundingClientRect()
+    const bookRect = activePanes.book ? bookAnchorRef.current?.getBoundingClientRect() : null
+    const aiRect = activePanes.ai ? aiAnchorRef.current?.getBoundingClientRect() : null
+    const noteRect = activePanes.note ? noteAnchorRef.current?.getBoundingClientRect() : null
 
     const book = bookRect
       ? {
@@ -132,7 +148,7 @@ export const App: React.FC = () => {
       : { x: 0, y: 0, width: 0, height: 0 }
 
     window.electron.updateBounds({ book, ai, note })
-  }, [])
+  }, [activePanes])
 
   // Listen to navigation events from Electron
   useEffect(() => {
@@ -398,19 +414,6 @@ export const App: React.FC = () => {
     window.electron?.navAction({ target, command })
   }
 
-  // Active sources
-  const activeBookSource =
-    bookSources.find((s) => s.id === activeBookSourceId) ||
-    bookSources[0] || { id: 'oreilly', name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/' }
-
-  const activeAISource =
-    aiSources.find((s) => s.id === activeAISourceId) ||
-    aiSources[0] || { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/' }
-
-  const activeNoteSource =
-    noteSources.find((s) => s.id === activeNoteSourceId) ||
-    noteSources[0] || { id: 'onenote', name: 'Microsoft OneNote', url: 'https://www.onenote.com/notebooks' }
-
   // Book Delete Login modal (scoped strictly to Bookview pane)
   const handleOpenBookDeleteLogin = () => {
     setIsBookDeleteLoginOpen(true)
@@ -450,12 +453,12 @@ export const App: React.FC = () => {
   // Book source configuration handlers
   const handleOpenBookSourceModal = () => {
     setIsBookSourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'all', visible: false })
+    window.electron?.setViewsVisible({ target: 'book', visible: false })
   }
 
   const handleCloseBookSourceModal = () => {
     setIsBookSourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    window.electron?.setViewsVisible({ target: 'book', visible: true })
     setTimeout(syncBounds, 50)
   }
 
@@ -484,12 +487,12 @@ export const App: React.FC = () => {
   // AI source configuration handlers
   const handleOpenAISourceModal = () => {
     setIsAISourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'all', visible: false })
+    window.electron?.setViewsVisible({ target: 'ai', visible: false })
   }
 
   const handleCloseAISourceModal = () => {
     setIsAISourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    window.electron?.setViewsVisible({ target: 'ai', visible: true })
     setTimeout(syncBounds, 50)
   }
 
@@ -518,12 +521,12 @@ export const App: React.FC = () => {
   // Note source configuration handlers
   const handleOpenNoteSourceModal = () => {
     setIsNoteSourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'all', visible: false })
+    window.electron?.setViewsVisible({ target: 'note', visible: false })
   }
 
   const handleCloseNoteSourceModal = () => {
     setIsNoteSourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'all', visible: true })
+    window.electron?.setViewsVisible({ target: 'note', visible: true })
     setTimeout(syncBounds, 50)
   }
 
@@ -551,6 +554,10 @@ export const App: React.FC = () => {
 
   // Clip highlighted book text to OneNote
   const handleClipToNote = async () => {
+    if (!activePanes.note) {
+      showNotification('📝 Noteview is currently disabled. Enable Noteview in the top bar to clip notes.')
+      return
+    }
     if (!window.electron?.clipSelection) return
     try {
       const res = await window.electron.clipSelection()
@@ -569,6 +576,10 @@ export const App: React.FC = () => {
     templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom',
     customPrompt?: string
   ) => {
+    if (!activePanes.ai) {
+      showNotification('🤖 Chatview is currently disabled. Enable Chatview in the top bar to ask AI.')
+      return
+    }
     if (!window.electron?.askAI) return
 
     setIsAskingAI(true)
@@ -640,63 +651,83 @@ export const App: React.FC = () => {
     flexShrink: 0,
   }
 
-  const renderBookPane = (paneStyle: React.CSSProperties) => (
-    <div className="pane-wrapper book-pane" style={paneStyle}>
-      <PaneToolbar
-        target="book"
-        navState={bookNavState}
-        onNavAction={(cmd) => handleNavAction('book', cmd)}
-        onAskAI={handleAskAI}
-        onShowNativeMenu={() => window.electron?.showAskAIMenu()}
-        onOpenSessionModal={handleOpenBookDeleteLogin}
-        onClipToNote={handleClipToNote}
-        bookSources={bookSources}
-        activeBookSourceId={activeBookSourceId}
-        onSelectBookSource={handleSelectBookSource}
-        onOpenBookSourceModal={handleOpenBookSourceModal}
-        isAskingAI={isAskingAI}
-      />
-      <div className="native-view-anchor" ref={bookAnchorRef} />
-
-      {/* Pane-Scoped Delete Login Modal for Bookview */}
-      {isBookDeleteLoginOpen && (
-        <BookDeleteLoginModal
-          isOpen={isBookDeleteLoginOpen}
-          activeSource={activeBookSource}
-          sources={bookSources}
-          onClose={handleCloseBookDeleteLogin}
-          onNotify={showNotification}
-        />
-      )}
-    </div>
+  const renderBook = (paneStyle: React.CSSProperties) => (
+    <BookPane
+      style={paneStyle}
+      anchorRef={bookAnchorRef}
+      navState={bookNavState}
+      onNavAction={(cmd) => handleNavAction('book', cmd)}
+      onAskAI={handleAskAI}
+      onShowNativeMenu={() => window.electron?.showAskAIMenu()}
+      onClipToNote={handleClipToNote}
+      bookSources={bookSources}
+      activeBookSourceId={activeBookSourceId}
+      onSelectBookSource={handleSelectBookSource}
+      onOpenBookSourceModal={handleOpenBookSourceModal}
+      isAskingAI={isAskingAI}
+      isDeleteLoginOpen={isBookDeleteLoginOpen}
+      onOpenDeleteLogin={handleOpenBookDeleteLogin}
+      onCloseDeleteLogin={handleCloseBookDeleteLogin}
+      onNotify={showNotification}
+      isSourceModalOpen={isBookSourceModalOpen}
+      onCloseSourceModal={handleCloseBookSourceModal}
+      onSaveSources={handleSaveBookSources}
+    />
   )
 
-  const renderRightColumn = (paneStyle: React.CSSProperties) => (
-    <div className="right-column-wrapper" ref={rightColumnRef} style={paneStyle}>
-      {/* Top Pane: AI Chat */}
-      <div className="pane-wrapper ai-pane" style={chatSubPaneStyle}>
-        <PaneToolbar
-          target="ai"
-          navState={aiNavState}
-          onNavAction={(cmd) => handleNavAction('ai', cmd)}
-          onOpenSessionModal={handleOpenAIDeleteLogin}
-          aiSources={aiSources}
-          activeAISourceId={activeAISourceId}
-          onOpenAISourceModal={handleOpenAISourceModal}
-        />
-        <div className="native-view-anchor" ref={aiAnchorRef} />
+  const renderChat = (paneStyle: React.CSSProperties) => (
+    <ChatPane
+      style={paneStyle}
+      anchorRef={aiAnchorRef}
+      navState={aiNavState}
+      onNavAction={(cmd) => handleNavAction('ai', cmd)}
+      aiSources={aiSources}
+      activeAISourceId={activeAISourceId}
+      onOpenAISourceModal={handleOpenAISourceModal}
+      isDeleteLoginOpen={isAIDeleteLoginOpen}
+      onOpenDeleteLogin={handleOpenAIDeleteLogin}
+      onCloseDeleteLogin={handleCloseAIDeleteLogin}
+      onNotify={showNotification}
+      isSourceModalOpen={isAISourceModalOpen}
+      onCloseSourceModal={handleCloseAISourceModal}
+      onSelectAISource={(id) => {
+        handleSelectAISource(id)
+        handleCloseAISourceModal()
+      }}
+      onSaveSources={handleSaveAISources}
+    />
+  )
 
-        {/* Pane-Scoped Delete Login Modal for ChatView */}
-        {isAIDeleteLoginOpen && (
-          <AIDeleteLoginModal
-            isOpen={isAIDeleteLoginOpen}
-            activeSource={activeAISource}
-            sources={aiSources}
-            onClose={handleCloseAIDeleteLogin}
-            onNotify={showNotification}
-          />
-        )}
-      </div>
+  const renderNote = (paneStyle: React.CSSProperties) => (
+    <NotePane
+      style={paneStyle}
+      anchorRef={noteAnchorRef}
+      navState={noteNavState}
+      onNavAction={(cmd) => handleNavAction('note', cmd)}
+      noteSources={noteSources}
+      activeNoteSourceId={activeNoteSourceId}
+      onOpenNoteSourceModal={handleOpenNoteSourceModal}
+      clippedText={clippedText}
+      onClearClippedText={() => setClippedText(null)}
+      noteResetTrigger={noteResetTrigger}
+      onNoteReset={() => setNoteResetTrigger(Date.now())}
+      isDeleteDataOpen={isNoteDeleteDataOpen}
+      onOpenDeleteData={handleOpenNoteDeleteData}
+      onCloseDeleteData={handleCloseNoteDeleteData}
+      onNotify={showNotification}
+      isSourceModalOpen={isNoteSourceModalOpen}
+      onCloseSourceModal={handleCloseNoteSourceModal}
+      onSelectNoteSource={(id) => {
+        handleSelectNoteSource(id)
+        handleCloseNoteSourceModal()
+      }}
+      onSaveSources={handleSaveNoteSources}
+    />
+  )
+
+  const renderStackedRightColumn = (paneStyle: React.CSSProperties) => (
+    <div className="right-column-wrapper" ref={rightColumnRef} style={paneStyle}>
+      {renderChat(chatSubPaneStyle)}
 
       {/* Horizontal Splitter (ChatGPT vs OneNote) */}
       <HorizontalSplitter
@@ -711,44 +742,23 @@ export const App: React.FC = () => {
         isDragging={dragTarget === 'row'}
       />
 
-      {/* Bottom Pane: Note Application */}
-      <div className="pane-wrapper onenote-pane" style={noteSubPaneStyle}>
-        <PaneToolbar
-          target="note"
-          navState={noteNavState}
-          onNavAction={(cmd) => handleNavAction('note', cmd)}
-          onOpenSessionModal={handleOpenNoteDeleteData}
-          noteSources={noteSources}
-          activeNoteSourceId={activeNoteSourceId}
-          onOpenNoteSourceModal={handleOpenNoteSourceModal}
-        />
-
-        {activeNoteSourceId === 'local' ? (
-          <OneNoteApp
-            onNotify={showNotification}
-            clippedText={clippedText}
-            onClearClippedText={() => setClippedText(null)}
-            onOpenSessionModal={handleOpenNoteDeleteData}
-            resetTrigger={noteResetTrigger}
-          />
-        ) : (
-          <div className="native-view-anchor" ref={noteAnchorRef} />
-        )}
-
-        {/* Pane-Scoped Delete Login Modal for NoteView */}
-        {isNoteDeleteDataOpen && (
-          <NoteDeleteModal
-            isOpen={isNoteDeleteDataOpen}
-            activeSource={activeNoteSource}
-            sources={noteSources}
-            onClose={handleCloseNoteDeleteData}
-            onNotify={showNotification}
-            onCleared={() => setNoteResetTrigger(Date.now())}
-          />
-        )}
-      </div>
+      {renderNote(noteSubPaneStyle)}
     </div>
   )
+
+  const isTripleMode = activePanes.book && activePanes.ai && activePanes.note
+
+  // In 2-pane mode, determine which two panes are side-by-side
+  const getDualPanes = () => {
+    if (activePanes.book && activePanes.ai) {
+      return { left: renderBook, right: renderChat }
+    }
+    if (activePanes.book && activePanes.note) {
+      return { left: renderBook, right: renderNote }
+    }
+    // ai + note
+    return { left: renderChat, right: renderNote }
+  }
 
   return (
     <div className="workbench-app">
@@ -767,90 +777,84 @@ export const App: React.FC = () => {
         }}
         isSwapped={isSwapped}
         notification={notification}
+        activePanes={activePanes}
+        onTogglePane={handleTogglePane}
       />
 
       <div className="workspace-container" ref={workspaceRef}>
-        {!isSwapped ? (
-          <>
-            {renderBookPane(leftColumnStyle)}
-            <Splitter
-              onPointerDown={handleColumnPointerDown}
-              onPointerMove={handleColumnPointerMove}
-              onPointerUp={handleColumnPointerUp}
-              onDoubleClick={() => {
-                setSplitRatio(60)
-                window.electron?.setSplit({ ratio: 60, isSwapped })
-                setTimeout(syncBounds, 50)
-              }}
-              isDragging={dragTarget === 'column'}
-            />
-            {renderRightColumn(rightColumnStyle)}
-          </>
+        {isTripleMode ? (
+          !isSwapped ? (
+            <>
+              {renderBook(leftColumnStyle)}
+              <Splitter
+                onPointerDown={handleColumnPointerDown}
+                onPointerMove={handleColumnPointerMove}
+                onPointerUp={handleColumnPointerUp}
+                onDoubleClick={() => {
+                  setSplitRatio(60)
+                  window.electron?.setSplit({ ratio: 60, isSwapped })
+                  setTimeout(syncBounds, 50)
+                }}
+                isDragging={dragTarget === 'column'}
+              />
+              {renderStackedRightColumn(rightColumnStyle)}
+            </>
+          ) : (
+            <>
+              {renderStackedRightColumn(leftColumnStyle)}
+              <Splitter
+                onPointerDown={handleColumnPointerDown}
+                onPointerMove={handleColumnPointerMove}
+                onPointerUp={handleColumnPointerUp}
+                onDoubleClick={() => {
+                  setSplitRatio(60)
+                  window.electron?.setSplit({ ratio: 60, isSwapped })
+                  setTimeout(syncBounds, 50)
+                }}
+                isDragging={dragTarget === 'column'}
+              />
+              {renderBook(rightColumnStyle)}
+            </>
+          )
         ) : (
-          <>
-            {renderRightColumn(leftColumnStyle)}
-            <Splitter
-              onPointerDown={handleColumnPointerDown}
-              onPointerMove={handleColumnPointerMove}
-              onPointerUp={handleColumnPointerUp}
-              onDoubleClick={() => {
-                setSplitRatio(60)
-                window.electron?.setSplit({ ratio: 60, isSwapped })
-                setTimeout(syncBounds, 50)
-              }}
-              isDragging={dragTarget === 'column'}
-            />
-            {renderBookPane(rightColumnStyle)}
-          </>
+          (() => {
+            const { left: LeftPane, right: RightPane } = getDualPanes()
+            return !isSwapped ? (
+              <>
+                {LeftPane(leftColumnStyle)}
+                <Splitter
+                  onPointerDown={handleColumnPointerDown}
+                  onPointerMove={handleColumnPointerMove}
+                  onPointerUp={handleColumnPointerUp}
+                  onDoubleClick={() => {
+                    setSplitRatio(50)
+                    window.electron?.setSplit({ ratio: 50, isSwapped })
+                    setTimeout(syncBounds, 50)
+                  }}
+                  isDragging={dragTarget === 'column'}
+                />
+                {RightPane(rightColumnStyle)}
+              </>
+            ) : (
+              <>
+                {RightPane(leftColumnStyle)}
+                <Splitter
+                  onPointerDown={handleColumnPointerDown}
+                  onPointerMove={handleColumnPointerMove}
+                  onPointerUp={handleColumnPointerUp}
+                  onDoubleClick={() => {
+                    setSplitRatio(50)
+                    window.electron?.setSplit({ ratio: 50, isSwapped })
+                    setTimeout(syncBounds, 50)
+                  }}
+                  isDragging={dragTarget === 'column'}
+                />
+                {LeftPane(rightColumnStyle)}
+              </>
+            )
+          })()
         )}
       </div>
-
-
-
-      {isBookSourceModalOpen && (
-        <BookSourceModal
-          isOpen={true}
-          sources={bookSources}
-          activeSourceId={activeBookSourceId}
-          onClose={handleCloseBookSourceModal}
-          onSelectSource={(id) => {
-            handleSelectBookSource(id)
-            handleCloseBookSourceModal()
-          }}
-          onSaveSources={handleSaveBookSources}
-          onNotify={showNotification}
-        />
-      )}
-
-      {isAISourceModalOpen && (
-        <AISourceModal
-          isOpen={true}
-          sources={aiSources}
-          activeSourceId={activeAISourceId}
-          onClose={handleCloseAISourceModal}
-          onSelectSource={(id) => {
-            handleSelectAISource(id)
-            handleCloseAISourceModal()
-          }}
-          onSaveSources={handleSaveAISources}
-          onNotify={showNotification}
-        />
-      )}
-
-      {isNoteSourceModalOpen && (
-        <NoteSourceModal
-          isOpen={true}
-          sources={noteSources}
-          activeSourceId={activeNoteSourceId}
-          onClose={handleCloseNoteSourceModal}
-          onSelectSource={(id) => {
-            handleSelectNoteSource(id)
-            handleCloseNoteSourceModal()
-          }}
-          onSaveSources={handleSaveNoteSources}
-          onNotify={showNotification}
-        />
-      )}
     </div>
   )
 }

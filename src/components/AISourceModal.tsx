@@ -198,8 +198,8 @@ export const AISourceModal: React.FC<AISourceModalProps> = ({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-container ai-sources-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="pane-modal-backdrop" onClick={onClose}>
+      <div className="pane-modal-container ai-sources-modal" onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="modal-header">
           <div className="modal-title-group">

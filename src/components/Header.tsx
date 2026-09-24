@@ -2,10 +2,14 @@ import React from 'react'
 import {
   BookOpen,
   Bot,
+  FileText,
+  Check,
   ArrowLeftRight,
   Sparkles,
   Columns2
 } from 'lucide-react'
+
+export type PaneId = 'book' | 'ai' | 'note'
 
 interface HeaderProps {
   splitRatio: number
@@ -13,6 +17,8 @@ interface HeaderProps {
   onSwapPanes: () => void
   isSwapped: boolean
   notification: string | null
+  activePanes: Record<PaneId, boolean>
+  onTogglePane: (pane: PaneId) => void
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,21 +27,25 @@ export const Header: React.FC<HeaderProps> = ({
   onSwapPanes,
   isSwapped,
   notification,
+  activePanes,
+  onTogglePane,
 }) => {
+  const activeCount = Object.values(activePanes).filter(Boolean).length
+
   return (
     <header className="app-header">
       <div className="header-left">
         <div className="logo-badge">
           <div className="logo-icons">
-            <span className="icon-oreilly-dot" title="O'Reilly Media" />
-            <span className="icon-chatgpt-dot" title="ChatGPT" />
+            <span className="icon-oreilly-dot" title="Bookview" />
+            <span className="icon-chatgpt-dot" title="Chatview" />
           </div>
           <span className="brand-name">Workbench</span>
         </div>
 
-        <div className="status-pill">
+        <div className="status-pill" title={`Active panes: ${activeCount} of 3`}>
           <span className="dot active" />
-          <span>Dual Session</span>
+          <span>{activeCount === 3 ? 'Triple View' : 'Dual View'}</span>
         </div>
       </div>
 
@@ -46,63 +56,108 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{notification}</span>
           </div>
         ) : (
-          <div className="ratio-presets">
-            <button
-              className={`preset-btn ${Math.round(splitRatio) === 60 ? 'active' : ''}`}
-              onClick={() => onSetSplitRatio(60)}
-              title="Default: 60% Book / 40% AI"
-            >
-              <Columns2 size={13} />
-              <span>60 : 40</span>
-            </button>
+          <div className="header-controls">
+            {/* Pane Selector Toggles */}
+            <div className="pane-selector-group">
+              <span className="group-label">Panes:</span>
+              <button
+                type="button"
+                className={`pane-chip ${activePanes.book ? 'active' : ''} ${activePanes.book && activeCount <= 2 ? 'locked' : ''}`}
+                onClick={() => onTogglePane('book')}
+                title={
+                  activePanes.book && activeCount <= 2
+                    ? 'At least 2 panes must remain selected'
+                    : activePanes.book
+                    ? 'Click to hide Bookview'
+                    : 'Click to show Bookview'
+                }
+              >
+                <BookOpen size={12} />
+                <span>Book</span>
+                {activePanes.book && <Check size={11} className="chip-check" />}
+              </button>
 
-            <button
-              className={`preset-btn ${Math.round(splitRatio) === 50 ? 'active' : ''}`}
-              onClick={() => onSetSplitRatio(50)}
-              title="Equal: 50% Book / 50% AI"
-            >
-              <span>50 : 50</span>
-            </button>
+              <button
+                type="button"
+                className={`pane-chip ${activePanes.ai ? 'active' : ''} ${activePanes.ai && activeCount <= 2 ? 'locked' : ''}`}
+                onClick={() => onTogglePane('ai')}
+                title={
+                  activePanes.ai && activeCount <= 2
+                    ? 'At least 2 panes must remain selected'
+                    : activePanes.ai
+                    ? 'Click to hide Chatview'
+                    : 'Click to show Chatview'
+                }
+              >
+                <Bot size={12} />
+                <span>Chat</span>
+                {activePanes.ai && <Check size={11} className="chip-check" />}
+              </button>
 
-            <button
-              className={`preset-btn ${Math.round(splitRatio) === 70 ? 'active' : ''}`}
-              onClick={() => onSetSplitRatio(70)}
-              title="Wide Book: 70% Book / 30% AI"
-            >
-              <span>70 : 30</span>
-            </button>
+              <button
+                type="button"
+                className={`pane-chip ${activePanes.note ? 'active' : ''} ${activePanes.note && activeCount <= 2 ? 'locked' : ''}`}
+                onClick={() => onTogglePane('note')}
+                title={
+                  activePanes.note && activeCount <= 2
+                    ? 'At least 2 panes must remain selected'
+                    : activePanes.note
+                    ? 'Click to hide Noteview'
+                    : 'Click to show Noteview'
+                }
+              >
+                <FileText size={12} />
+                <span>Note</span>
+                {activePanes.note && <Check size={11} className="chip-check" />}
+              </button>
+            </div>
 
-            <button
-              className={`preset-btn ${Math.round(splitRatio) === 40 ? 'active' : ''}`}
-              onClick={() => onSetSplitRatio(40)}
-              title="AI Focus: 40% Book / 60% AI"
-            >
-              <span>40 : 60</span>
-            </button>
+            {/* Column Width Split Presets */}
+            <div className="ratio-presets">
+              <button
+                type="button"
+                className={`preset-btn ${Math.round(splitRatio) === 60 ? 'active' : ''}`}
+                onClick={() => onSetSplitRatio(60)}
+                title="Ratio: 60% Left / 40% Right"
+              >
+                <Columns2 size={13} />
+                <span>60 : 40</span>
+              </button>
 
-            <button
-              className={`preset-btn ${splitRatio >= 98 ? 'active' : ''}`}
-              onClick={() => onSetSplitRatio(splitRatio >= 98 ? 60 : 100)}
-              title="Full Bookview"
-            >
-              <BookOpen size={13} />
-              <span>Full Book</span>
-            </button>
+              <button
+                type="button"
+                className={`preset-btn ${Math.round(splitRatio) === 50 ? 'active' : ''}`}
+                onClick={() => onSetSplitRatio(50)}
+                title="Ratio: 50% Left / 50% Right"
+              >
+                <span>50 : 50</span>
+              </button>
 
-            <button
-              className={`preset-btn ${splitRatio <= 2 ? 'active' : ''}`}
-              onClick={() => onSetSplitRatio(splitRatio <= 2 ? 60 : 0)}
-              title="Full AI View"
-            >
-              <Bot size={13} />
-              <span>Full AI</span>
-            </button>
+              <button
+                type="button"
+                className={`preset-btn ${Math.round(splitRatio) === 70 ? 'active' : ''}`}
+                onClick={() => onSetSplitRatio(70)}
+                title="Ratio: 70% Left / 30% Right"
+              >
+                <span>70 : 30</span>
+              </button>
+
+              <button
+                type="button"
+                className={`preset-btn ${Math.round(splitRatio) === 40 ? 'active' : ''}`}
+                onClick={() => onSetSplitRatio(40)}
+                title="Ratio: 40% Left / 60% Right"
+              >
+                <span>40 : 60</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       <div className="header-right">
         <button
+          type="button"
           className={`action-icon-btn ${isSwapped ? 'swapped' : ''}`}
           onClick={onSwapPanes}
           title="Swap Left / Right Panes"
@@ -119,3 +174,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   )
 }
+

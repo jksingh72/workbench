@@ -196,8 +196,8 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-container book-sources-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="pane-modal-backdrop" onClick={onClose}>
+      <div className="pane-modal-container book-sources-modal" onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="modal-header">
           <div className="modal-title-group">

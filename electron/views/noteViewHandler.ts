@@ -182,7 +182,11 @@ export class NoteViewHandler {
   public setBounds(bounds: Rectangle) {
     this.currentBounds = bounds
     if (this.view && this.isWebSource(this.noteSourceManager?.getActiveSource())) {
-      this.view.setBounds(bounds)
+      if (!this.isVisible) {
+        this.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      } else {
+        this.view.setBounds(bounds)
+      }
     }
   }
 

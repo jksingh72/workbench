@@ -201,8 +201,8 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-container note-sources-modal-container" onClick={(e) => e.stopPropagation()}>
+    <div className="pane-modal-backdrop" onClick={onClose}>
+      <div className="pane-modal-container note-sources-modal-container" onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="modal-header">
           <div className="modal-title-group">

@@ -113,14 +113,28 @@ export class AIViewHandler {
   public setBounds(bounds: Rectangle) {
     this.currentBounds = bounds
     if (this.view) {
-      this.view.setBounds(bounds)
+      if (!this.isVisible) {
+        this.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      } else {
+        this.view.setBounds(bounds)
+      }
     }
   }
 
   public setVisible(visible: boolean) {
     this.isVisible = visible
-    if (this.view) {
-      this.view.setVisible(visible)
+    for (const v of this.views.values()) {
+      if (!v.webContents.isDestroyed()) {
+        if (!visible || v !== this.view) {
+          v.setVisible(false)
+          v.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        } else {
+          v.setVisible(true)
+          if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
+            v.setBounds(this.currentBounds)
+          }
+        }
+      }
     }
   }
 
