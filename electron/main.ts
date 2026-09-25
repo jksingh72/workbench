@@ -392,27 +392,49 @@ function registerIpcHandlers() {
       }
 
       const entries = await fs.promises.readdir(targetPath, { withFileTypes: true })
-      const items = await Promise.all(
+      const rawItems = await Promise.all(
         entries.map(async (entry) => {
           const itemPath = path.join(targetPath, entry.name)
           let size = 0
           let mtime = new Date().toISOString()
+          let isDirectory = entry.isDirectory()
+
           try {
             const stat = await fs.promises.stat(itemPath)
             size = stat.size
             mtime = stat.mtime.toISOString()
-          } catch (_) {}
+            if (stat.isDirectory()) {
+              isDirectory = true
+            }
+          } catch (_) {
+            try {
+              const lstat = await fs.promises.lstat(itemPath)
+              size = lstat.size
+              mtime = lstat.mtime.toISOString()
+              if (lstat.isDirectory()) {
+                isDirectory = true
+              }
+            } catch (__) {}
+          }
 
           return {
             name: entry.name,
             path: itemPath,
-            isDirectory: entry.isDirectory(),
+            isDirectory,
             size,
             mtime,
-            extension: entry.isDirectory() ? '' : path.extname(entry.name).toLowerCase(),
+            extension: isDirectory ? '' : path.extname(entry.name).toLowerCase(),
           }
         })
       )
+
+      // Filter out hidden OS / metadata files (desktop.ini, OneDrive GUID metadata, thumbs.db)
+      const items = rawItems.filter((item) => {
+        const lower = item.name.toLowerCase()
+        if (lower === 'desktop.ini' || lower === 'thumbs.db' || lower === '$recycle.bin') return false
+        if (item.name.startsWith('.') && item.name.length > 20) return false
+        return true
+      })
 
       // Sort directories first, then alphabetical by name
       items.sort((a, b) => {
@@ -498,6 +520,134 @@ function registerIpcHandlers() {
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to delete item' }
+    }
+  })
+
+  ipcMain.handle(
+    'workbench:copy-item',
+    async (_, { srcPath, destDir }: { srcPath: string; destDir: string }) => {
+      try {
+        const baseName = path.basename(srcPath)
+        const ext = path.extname(baseName)
+        const nameWithoutExt = path.basename(baseName, ext)
+        let targetName = baseName
+        let targetPath = path.join(destDir, targetName)
+        let counter = 1
+
+        while (fs.existsSync(targetPath)) {
+          if (path.resolve(path.dirname(srcPath)) === path.resolve(destDir) && counter === 1) {
+            targetName = `${nameWithoutExt} - Copy${ext}`
+          } else {
+            targetName = `${nameWithoutExt} - Copy (${counter})${ext}`
+          }
+          targetPath = path.join(destDir, targetName)
+          counter++
+        }
+
+        await fs.promises.cp(srcPath, targetPath, { recursive: true })
+        return { success: true, targetPath }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to copy item' }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'workbench:move-item',
+    async (_, { srcPath, destDir }: { srcPath: string; destDir: string }) => {
+      try {
+        const baseName = path.basename(srcPath)
+        const ext = path.extname(baseName)
+        const nameWithoutExt = path.basename(baseName, ext)
+        let targetName = baseName
+        let targetPath = path.join(destDir, targetName)
+        let counter = 1
+
+        if (path.resolve(srcPath) === path.resolve(targetPath)) {
+          return { success: true, targetPath }
+        }
+
+        while (fs.existsSync(targetPath)) {
+          targetName = `${nameWithoutExt} (${counter})${ext}`
+          targetPath = path.join(destDir, targetName)
+          counter++
+        }
+
+        try {
+          await fs.promises.rename(srcPath, targetPath)
+        } catch (err: any) {
+          if (err.code === 'EXDEV') {
+            await fs.promises.cp(srcPath, targetPath, { recursive: true })
+            await fs.promises.rm(srcPath, { recursive: true, force: true })
+          } else {
+            throw err
+          }
+        }
+        return { success: true, targetPath }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to move item' }
+      }
+    }
+  )
+
+  ipcMain.handle('workbench:get-system-roots', async () => {
+    try {
+      const roots: { name: string; path: string; icon: 'documents' | 'downloads' | 'desktop' | 'home' | 'drive' | 'cloud' }[] = []
+
+      // 1. Detect OneDrive
+      const oneDrivePath =
+        process.env.OneDrive ||
+        process.env.OneDriveConsumer ||
+        process.env.OneDriveCommercial ||
+        'D:\\One-Drive-Base\\OneDrive'
+
+      if (oneDrivePath && fs.existsSync(oneDrivePath)) {
+        roots.push({ name: 'OneDrive', path: oneDrivePath, icon: 'cloud' })
+      }
+
+      // 2. Documents (check OneDrive or standard user documents)
+      try {
+        let docs = app.getPath('documents')
+        if (oneDrivePath && fs.existsSync(path.join(oneDrivePath, 'Documents'))) {
+          // If OneDrive has Documents, prefer it
+          docs = path.join(oneDrivePath, 'Documents')
+        }
+        if (fs.existsSync(docs)) {
+          roots.push({ name: 'Documents', path: docs, icon: 'documents' })
+        }
+      } catch (_) {}
+
+      // 3. Desktop (check OneDrive or standard user desktop)
+      try {
+        let desk = app.getPath('desktop')
+        if ((!fs.existsSync(desk) || fs.readdirSync(desk).length === 0) && oneDrivePath && fs.existsSync(path.join(oneDrivePath, 'Desktop'))) {
+          desk = path.join(oneDrivePath, 'Desktop')
+        }
+        if (fs.existsSync(desk)) {
+          roots.push({ name: 'Desktop', path: desk, icon: 'desktop' })
+        }
+      } catch (_) {}
+
+      try {
+        roots.push({ name: 'Downloads', path: app.getPath('downloads'), icon: 'downloads' })
+      } catch (_) {}
+      try {
+        roots.push({ name: 'User Home', path: app.getPath('home'), icon: 'home' })
+      } catch (_) {}
+
+      const driveLetters = ['C', 'D', 'E', 'F', 'G']
+      for (const letter of driveLetters) {
+        const drivePath = `${letter}:\\`
+        try {
+          if (fs.existsSync(drivePath)) {
+            roots.push({ name: `Local Disk (${letter}:)`, path: drivePath, icon: 'drive' })
+          }
+        } catch (_) {}
+      }
+
+      return { success: true, roots }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to get system roots', roots: [] }
     }
   })
 }

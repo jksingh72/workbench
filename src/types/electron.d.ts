@@ -77,6 +77,15 @@ export interface ElectronAPI {
   createFolder: (parentPath: string, folderName: string) => Promise<{ success: boolean; error?: string }>
   renameItem: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
   deleteItem: (itemPath: string) => Promise<{ success: boolean; error?: string }>
+  copyItem: (srcPath: string, destDir: string) => Promise<{ success: boolean; targetPath?: string; error?: string }>
+  moveItem: (srcPath: string, destDir: string) => Promise<{ success: boolean; targetPath?: string; error?: string }>
+  getSystemRoots: () => Promise<{ success: boolean; roots: SystemRootItem[]; error?: string }>
+}
+
+export interface SystemRootItem {
+  name: string
+  path: string
+  icon: 'documents' | 'downloads' | 'desktop' | 'home' | 'drive' | 'cloud'
 }
 
 export interface FileItem {

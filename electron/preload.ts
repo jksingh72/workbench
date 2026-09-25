@@ -112,4 +112,10 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:rename-item', { oldPath, newPath }),
   deleteItem: (itemPath: string) =>
     ipcRenderer.invoke('workbench:delete-item', itemPath),
+  copyItem: (srcPath: string, destDir: string) =>
+    ipcRenderer.invoke('workbench:copy-item', { srcPath, destDir }),
+  moveItem: (srcPath: string, destDir: string) =>
+    ipcRenderer.invoke('workbench:move-item', { srcPath, destDir }),
+  getSystemRoots: () =>
+    ipcRenderer.invoke('workbench:get-system-roots'),
 })
