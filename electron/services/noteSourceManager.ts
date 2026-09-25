@@ -28,15 +28,9 @@ export const DEFAULT_NOTE_SOURCES: NoteSource[] = [
     isPreset: true,
   },
   {
-    id: 'local',
-    name: 'Workbench Local Notes',
-    url: 'workbench://local-notes',
-    isPreset: true,
-  },
-  {
-    id: 'notion',
-    name: 'Notion',
-    url: 'https://www.notion.so/login',
+    id: 'apple-notes',
+    name: 'Apple Notes',
+    url: 'https://www.icloud.com/notes',
     isPreset: true,
   },
   {
@@ -62,9 +56,15 @@ export class NoteSourceManager {
         const raw = fs.readFileSync(this.configPath, 'utf-8')
         const parsed = JSON.parse(raw)
         if (Array.isArray(parsed.sources) && parsed.sources.length > 0) {
+          // Clean storage: retain only active allowed presets and valid custom non-preset sources
+          const allowedPresetIds = new Set(DEFAULT_NOTE_SOURCES.map((p) => p.id))
+          const validSources = parsed.sources.filter(
+            (s: NoteSource) => allowedPresetIds.has(s.id) || !s.isPreset
+          )
+
           // Ensure all presets exist
-          const existingIds = new Set(parsed.sources.map((s: NoteSource) => s.id))
-          const mergedSources = [...parsed.sources]
+          const existingIds = new Set(validSources.map((s: NoteSource) => s.id))
+          const mergedSources = [...validSources]
           for (const preset of DEFAULT_NOTE_SOURCES) {
             if (!existingIds.has(preset.id)) {
               mergedSources.push(preset)
@@ -72,21 +72,33 @@ export class NoteSourceManager {
           }
 
           const activeSourceId =
-            mergedSources.find((s) => s.id === parsed.activeSourceId)?.id || mergedSources[0].id
+            mergedSources.find((s) => s.id === parsed.activeSourceId)?.id || DEFAULT_NOTE_SOURCES[0].id
 
-          return {
+          const result: NoteSourceSettings = {
             sources: mergedSources,
             activeSourceId,
           }
+          this.saveToFile(result)
+          return result
         }
       }
     } catch (err) {
       console.error('[NoteSourceManager] Failed to read config, falling back to defaults:', err)
     }
 
-    return {
+    const initialSettings: NoteSourceSettings = {
       sources: [...DEFAULT_NOTE_SOURCES],
       activeSourceId: DEFAULT_NOTE_SOURCES[0].id,
+    }
+    this.saveToFile(initialSettings)
+    return initialSettings
+  }
+
+  private saveToFile(settings: NoteSourceSettings) {
+    try {
+      fs.writeFileSync(this.configPath, JSON.stringify(settings, null, 2), 'utf-8')
+    } catch (err) {
+      console.error('[NoteSourceManager] Failed to save config to file:', err)
     }
   }
 

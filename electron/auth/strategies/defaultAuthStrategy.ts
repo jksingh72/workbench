@@ -19,6 +19,8 @@ export class DefaultAuthStrategy implements AuthStrategy {
     'okta.com',
     'pingidentity.com',
     'onelogin.com',
+    'icloud.com',
+    'apple.com',
   ]
 
   public matches(_url: string): boolean {
@@ -32,7 +34,8 @@ export class DefaultAuthStrategy implements AuthStrategy {
     updated['sec-ch-ua'] = `"Google Chrome";v="${majorVer}", "Chromium";v="${majorVer}", "Not_A Brand";v="24"`
     updated['sec-ch-ua-mobile'] = '?0'
     updated['sec-ch-ua-platform'] = '"Windows"'
-    updated['sec-ch-ua-platform-version'] = '"15.0.0"'
+    // Do not inject high-entropy platform version without server Accept-CH; prevents Akamai/Cloudflare bot flags
+    delete updated['sec-ch-ua-platform-version']
     updated['upgrade-insecure-requests'] = '1'
     return updated
   }

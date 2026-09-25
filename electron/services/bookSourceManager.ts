@@ -18,7 +18,7 @@ export const DEFAULT_BOOK_SOURCES: BookSource[] = [
   {
     id: 'oreilly',
     name: "O'Reilly Learning",
-    url: 'https://www.oreilly.com/member/login/',
+    url: 'https://learning.oreilly.com/home/',
     isPreset: true,
   },
   {
@@ -50,6 +50,13 @@ export class BookSourceManager {
           for (const preset of DEFAULT_BOOK_SOURCES) {
             if (!existingIds.has(preset.id)) {
               mergedSources.push(preset)
+            }
+          }
+
+          // Auto-migrate legacy O'Reilly URLs
+          for (const s of mergedSources) {
+            if (s.id === 'oreilly' && (s.url.includes('oreilly.com/member/login') || s.url.startsWith('http://'))) {
+              s.url = 'https://learning.oreilly.com/home/'
             }
           }
 

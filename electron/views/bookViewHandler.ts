@@ -7,7 +7,7 @@ import { getViewPreloadPath } from '../utils/preloadPath'
 
 export { CHROME_DESKTOP_UA }
 
-export const OREILLY_START_URL = 'https://www.oreilly.com/member/login/'
+export const OREILLY_START_URL = 'https://learning.oreilly.com/home/'
 
 export class BookViewHandler {
   private view: WebContentsView | null = null
@@ -221,6 +221,10 @@ export class BookViewHandler {
 
   public loadBookSource(source: BookSource) {
     if (this.currentSourceId === source.id && this.view) {
+      if (this.currentUrl !== source.url) {
+        this.currentUrl = source.url
+        this.view.webContents.loadURL(source.url).catch(() => {})
+      }
       return
     }
 
@@ -234,8 +238,13 @@ export class BookViewHandler {
     }
 
     this.currentSourceId = source.id
-    this.currentUrl = source.url
+    const isExisting = this.views.has(source.id)
     this.view = this.getOrCreateView(source)
+
+    if (isExisting && this.currentUrl !== source.url) {
+      this.view.webContents.loadURL(source.url).catch(() => {})
+    }
+    this.currentUrl = source.url
 
     if (this.isVisible) {
       this.attachView(this.view)

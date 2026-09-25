@@ -302,11 +302,17 @@ export class NoteViewHandler {
     }
 
     this.currentSourceId = source.id
-    this.currentUrl = source.url
 
     if (this.isWebSource(source)) {
       this.isVisible = true
+      const isExisting = this.views.has(source.id)
       this.view = this.getOrCreateView(source)
+
+      if (isExisting && this.currentUrl !== source.url) {
+        this.view.webContents.loadURL(source.url).catch(() => {})
+      }
+      this.currentUrl = source.url
+
       this.attachView(this.view)
       if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
         this.view.setBounds(this.currentBounds)
@@ -314,6 +320,7 @@ export class NoteViewHandler {
       this.view.setVisible(true)
       this.sendNavState(this.view.webContents)
     } else {
+      this.currentUrl = source.url
       this.isVisible = false
       this.view = null
       this.sendLocalNavState()

@@ -26,8 +26,7 @@ interface NoteSourceModalProps {
 const DEFAULT_PRESET_NOTE_URLS: Record<string, { name: string; url: string }> = {
   onenote: { name: 'Microsoft OneNote', url: 'https://www.onenote.com/notebooks' },
   evernote: { name: 'Evernote', url: 'https://www.evernote.com/client/web' },
-  local: { name: 'Workbench Local Notes', url: 'workbench://local-notes' },
-  notion: { name: 'Notion', url: 'https://www.notion.so/login' },
+  'apple-notes': { name: 'Apple Notes', url: 'https://www.icloud.com/notes' },
   keep: { name: 'Google Keep', url: 'https://keep.google.com/' },
 }
 
@@ -212,7 +211,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
             <div>
               <h3 className="modal-title">Configure Note Platforms</h3>
               <p className="modal-subtitle">
-                Switch between OneNote, Evernote, Notion, Keep, or add custom note workspaces
+                Switch between OneNote, Evernote, Apple Notes, Google Keep, or add custom note workspaces
               </p>
             </div>
           </div>

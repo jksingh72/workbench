@@ -6,6 +6,8 @@ export class AppleAuthStrategy implements AuthStrategy {
   private appleHostnames = [
     'appleid.apple.com',
     'idmsa.apple.com',
+    'icloud.com',
+    'apple.com',
   ]
 
   public matches(url: string): boolean {

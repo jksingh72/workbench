@@ -218,6 +218,10 @@ export class AIViewHandler {
 
   public loadAISource(source: AISource) {
     if (this.currentSourceId === source.id && this.view) {
+      if (this.currentUrl !== source.url) {
+        this.currentUrl = source.url
+        this.view.webContents.loadURL(source.url).catch(() => {})
+      }
       return
     }
 
@@ -231,8 +235,13 @@ export class AIViewHandler {
     }
 
     this.currentSourceId = source.id
-    this.currentUrl = source.url
+    const isExisting = this.views.has(source.id)
     this.view = this.getOrCreateView(source)
+
+    if (isExisting && this.currentUrl !== source.url) {
+      this.view.webContents.loadURL(source.url).catch(() => {})
+    }
+    this.currentUrl = source.url
 
     if (this.isVisible) {
       this.attachView(this.view)
