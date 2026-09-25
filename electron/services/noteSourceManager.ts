@@ -7,6 +7,7 @@ export interface NoteSource {
   name: string
   url: string
   isPreset?: boolean
+  isLocal?: boolean
 }
 
 export interface NoteSourceSettings {
@@ -39,6 +40,13 @@ export const DEFAULT_NOTE_SOURCES: NoteSource[] = [
     url: 'https://keep.google.com/',
     isPreset: true,
   },
+  {
+    id: 'local-explorer',
+    name: 'Local File Explorer',
+    url: '',
+    isPreset: true,
+    isLocal: true,
+  },
 ]
 
 export class NoteSourceManager {
@@ -67,7 +75,20 @@ export class NoteSourceManager {
           const mergedSources = [...validSources]
           for (const preset of DEFAULT_NOTE_SOURCES) {
             if (!existingIds.has(preset.id)) {
-              mergedSources.push(preset)
+              mergedSources.push({
+                ...preset,
+                url: preset.id === 'local-explorer' ? app.getPath('documents') : preset.url,
+              })
+            }
+          }
+
+          // Ensure local-explorer has a valid folder path
+          for (const s of mergedSources) {
+            if (s.id === 'local-explorer') {
+              s.isLocal = true
+              if (!s.url || !fs.existsSync(s.url)) {
+                s.url = app.getPath('documents')
+              }
             }
           }
 
@@ -87,7 +108,9 @@ export class NoteSourceManager {
     }
 
     const initialSettings: NoteSourceSettings = {
-      sources: [...DEFAULT_NOTE_SOURCES],
+      sources: DEFAULT_NOTE_SOURCES.map((p) =>
+        p.id === 'local-explorer' ? { ...p, url: app.getPath('documents') } : { ...p }
+      ),
       activeSourceId: DEFAULT_NOTE_SOURCES[0].id,
     }
     this.saveToFile(initialSettings)
@@ -147,12 +170,14 @@ export class NoteSourceManager {
         validated.push({
           ...preset,
           name: s.name?.trim() || preset.name,
-          url: s.url?.trim() || preset.url,
+          url: s.url?.trim() || preset.url || (preset.id === 'local-explorer' ? app.getPath('documents') : ''),
+          isLocal: preset.isLocal || s.isLocal,
         })
       } else {
         const cleanName = s.name?.trim() || 'Custom Note Site'
         let cleanUrl = s.url?.trim() || ''
-        if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        const isLocal = !!s.isLocal || (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://'))
+        if (!isLocal && !cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
           cleanUrl = 'https://' + cleanUrl
         }
         validated.push({
@@ -160,6 +185,7 @@ export class NoteSourceManager {
           name: cleanName,
           url: cleanUrl,
           isPreset: false,
+          isLocal,
         })
       }
     }
@@ -167,7 +193,10 @@ export class NoteSourceManager {
     // Ensure all presets are present
     for (const preset of DEFAULT_NOTE_SOURCES) {
       if (!seenIds.has(preset.id)) {
-        validated.push(preset)
+        validated.push({
+          ...preset,
+          url: preset.id === 'local-explorer' ? app.getPath('documents') : preset.url,
+        })
       }
     }
 

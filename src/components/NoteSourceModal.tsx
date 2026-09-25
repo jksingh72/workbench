@@ -9,7 +9,9 @@ import {
   StickyNote,
   Pencil,
   Check,
-  RotateCcw
+  RotateCcw,
+  Folder,
+  FolderOpen
 } from 'lucide-react'
 import { NoteSource } from '../types/electron'
 
@@ -28,6 +30,7 @@ const DEFAULT_PRESET_NOTE_URLS: Record<string, { name: string; url: string }> = 
   evernote: { name: 'Evernote', url: 'https://www.evernote.com/client/web' },
   'apple-notes': { name: 'Apple Notes', url: 'https://www.icloud.com/notes' },
   keep: { name: 'Google Keep', url: 'https://keep.google.com/' },
+  'local-explorer': { name: 'Local File Explorer', url: '' },
 }
 
 export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
@@ -39,6 +42,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
   onSaveSources,
   onNotify,
 }) => {
+  const [newSourceType, setNewSourceType] = useState<'web' | 'local'>('web')
   const [newName, setNewName] = useState('')
   const [newUrl, setNewUrl] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -48,6 +52,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editUrl, setEditUrl] = useState('')
+  const [editIsLocal, setEditIsLocal] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
 
@@ -69,6 +74,11 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
     setEditingId(source.id)
     setEditName(source.name)
     setEditUrl(source.url)
+    setEditIsLocal(
+      !!source.isLocal ||
+      source.id === 'local-explorer' ||
+      (!source.url.startsWith('http://') && !source.url.startsWith('https://'))
+    )
     setEditError(null)
   }
 
@@ -76,7 +86,30 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
     setEditingId(null)
     setEditName('')
     setEditUrl('')
+    setEditIsLocal(false)
     setEditError(null)
+  }
+
+  const handleBrowseEditFolder = async () => {
+    if (window.electron?.selectFolder) {
+      const selected = await window.electron.selectFolder(editUrl || undefined)
+      if (selected) {
+        setEditUrl(selected)
+      }
+    }
+  }
+
+  const handleBrowseNewFolder = async () => {
+    if (window.electron?.selectFolder) {
+      const selected = await window.electron.selectFolder(newUrl || undefined)
+      if (selected) {
+        setNewUrl(selected)
+        if (!newName.trim()) {
+          const parts = selected.split(/[\/\\]/).filter(Boolean)
+          setNewName(parts[parts.length - 1] || 'Local Folder')
+        }
+      }
+    }
   }
 
   const handleResetToDefault = (sourceId: string) => {
@@ -92,18 +125,19 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
     setEditError(null)
     const cleanName = editName.trim()
     let cleanUrl = editUrl.trim()
+    const isLocal = editIsLocal || sourceId === 'local-explorer'
 
     if (!cleanName) {
-      setEditError('Site name cannot be empty.')
+      setEditError('Name cannot be empty.')
       return
     }
 
-    if (sourceId !== 'local' && !cleanUrl) {
-      setEditError('URL cannot be empty.')
+    if (!cleanUrl) {
+      setEditError(isLocal ? 'Folder path cannot be empty.' : 'URL cannot be empty.')
       return
     }
 
-    if (sourceId !== 'local' && !cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+    if (!isLocal && !cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
       cleanUrl = 'https://' + cleanUrl
     }
 
@@ -115,6 +149,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
           ...s,
           name: cleanName,
           url: cleanUrl,
+          isLocal,
         }
       })
 
@@ -134,26 +169,29 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
 
     const cleanName = newName.trim()
     let cleanUrl = newUrl.trim()
+    const isLocal = newSourceType === 'local'
 
     if (!cleanName) {
-      setErrorMsg('Please enter a name for the note platform.')
+      setErrorMsg('Please enter a name for the note platform or folder.')
       return
     }
 
     if (!cleanUrl) {
-      setErrorMsg('Please enter the website login or workspace URL.')
+      setErrorMsg(isLocal ? 'Please select a local folder to explore.' : 'Please enter the website login or workspace URL.')
       return
     }
 
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl
-    }
+    if (!isLocal) {
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        cleanUrl = 'https://' + cleanUrl
+      }
 
-    try {
-      new URL(cleanUrl)
-    } catch {
-      setErrorMsg('Please enter a valid website URL (e.g. https://www.evernote.com/)')
-      return
+      try {
+        new URL(cleanUrl)
+      } catch {
+        setErrorMsg('Please enter a valid website URL (e.g. https://www.evernote.com/)')
+        return
+      }
     }
 
     const newId = `custom-note-${Date.now()}`
@@ -162,6 +200,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
       name: cleanName,
       url: cleanUrl,
       isPreset: false,
+      isLocal,
     }
 
     setIsSubmitting(true)
@@ -174,7 +213,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
       onNotify(`✨ Added and switched NoteView to "${cleanName}"!`)
       onClose()
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to save custom note platform.')
+      setErrorMsg(err.message || 'Failed to save note platform.')
     } finally {
       setIsSubmitting(false)
     }
@@ -248,7 +287,28 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                             autoFocus
                           />
                         </div>
-                        {source.id !== 'local' && (
+                        {editIsLocal ? (
+                          <div className="edit-field">
+                            <label>Folder Path</label>
+                            <div className="input-with-action-btn">
+                              <input
+                                type="text"
+                                value={editUrl}
+                                onChange={(e) => setEditUrl(e.target.value)}
+                                placeholder="D:\Notes"
+                              />
+                              <button
+                                type="button"
+                                className="btn-browse-folder"
+                                onClick={handleBrowseEditFolder}
+                                title="Browse Folder..."
+                              >
+                                <FolderOpen size={13} />
+                                <span>Browse...</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : source.id !== 'local' ? (
                           <div className="edit-field">
                             <label>Website URL</label>
                             <input
@@ -258,7 +318,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                               placeholder="https://..."
                             />
                           </div>
-                        )}
+                        ) : null}
 
                         {editError && <div className="edit-error-text">{editError}</div>}
 
@@ -299,6 +359,11 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                   )
                 }
 
+                const isItemLocal =
+                  source.isLocal ||
+                  source.id === 'local-explorer' ||
+                  (!source.url.startsWith('http://') && !source.url.startsWith('https://'))
+
                 return (
                   <div
                     key={source.id}
@@ -306,9 +371,17 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                   >
                     <div className="source-info">
                       <div className="source-name-row">
+                        {isItemLocal ? (
+                          <Folder size={15} className="source-type-icon text-cyan" />
+                        ) : (
+                          <Globe size={15} className="source-type-icon text-muted" />
+                        )}
                         <span className="source-name">{source.name}</span>
                         {source.isPreset && (
                           <span className="source-preset-badge">Built-in</span>
+                        )}
+                        {isItemLocal && (
+                          <span className="source-local-badge">Local</span>
                         )}
                         {isActive && (
                           <span className="source-active-pill">
@@ -318,7 +391,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                         )}
                       </div>
                       <span className="source-url" title={source.url}>
-                        {source.url}
+                        {source.url || '(Local Folder)'}
                       </span>
                     </div>
 
@@ -359,24 +432,52 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
             </div>
           </div>
 
-          {/* Add New Note Platform Form */}
+          {/* Add New Note Platform / Local Folder Form */}
           <div className="add-source-section">
             <h4 className="section-heading">
               <Plus size={14} className="heading-icon text-purple" />
-              <span>Add Custom Note Platform</span>
+              <span>Add Note Platform or Local Folder</span>
             </h4>
             <p className="section-description">
-              Connect any web-based note taking workspace or knowledge base (e.g. Evernote, Notion, Joplin, Zoho Notebook, Bear, Craft).
+              Connect a web-based note taking workspace or explore a local folder on your computer (with Word, Excel, and local notes support).
             </p>
+
+            {/* Type selector toggle */}
+            <div className="source-type-toggle">
+              <button
+                type="button"
+                className={`type-tab-btn ${newSourceType === 'web' ? 'active' : ''}`}
+                onClick={() => {
+                  setNewSourceType('web')
+                  setNewUrl('')
+                }}
+              >
+                <Globe size={13} />
+                <span>Web Platform (OneNote, Evernote, etc.)</span>
+              </button>
+              <button
+                type="button"
+                className={`type-tab-btn ${newSourceType === 'local' ? 'active' : ''}`}
+                onClick={() => {
+                  setNewSourceType('local')
+                  setNewUrl('')
+                }}
+              >
+                <Folder size={13} />
+                <span>Local Folder Explorer (Word, Excel, Notes)</span>
+              </button>
+            </div>
 
             <form onSubmit={handleAddSource} className="add-source-form">
               <div className="form-row">
                 <div className="form-field field-name">
-                  <label htmlFor="note-source-name">Platform Name</label>
+                  <label htmlFor="note-source-name">
+                    {newSourceType === 'local' ? 'Folder Display Name' : 'Platform Name'}
+                  </label>
                   <input
                     id="note-source-name"
                     type="text"
-                    placeholder="e.g. Joplin Web"
+                    placeholder={newSourceType === 'local' ? 'e.g. My Documents or Work Vault' : 'e.g. Joplin Web'}
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     disabled={isSubmitting}
@@ -384,17 +485,34 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                 </div>
 
                 <div className="form-field field-url">
-                  <label htmlFor="note-source-url">Website URL</label>
+                  <label htmlFor="note-source-url">
+                    {newSourceType === 'local' ? 'Local Directory Path' : 'Website URL'}
+                  </label>
                   <div className="input-with-icon">
-                    <Globe size={14} className="field-icon" />
+                    {newSourceType === 'local' ? (
+                      <Folder size={14} className="field-icon text-cyan" />
+                    ) : (
+                      <Globe size={14} className="field-icon" />
+                    )}
                     <input
                       id="note-source-url"
                       type="text"
-                      placeholder="e.g. https://app.joplinapp.org/"
+                      placeholder={newSourceType === 'local' ? 'D:\\MyNotes\\...' : 'e.g. https://app.joplinapp.org/'}
                       value={newUrl}
                       onChange={(e) => setNewUrl(e.target.value)}
                       disabled={isSubmitting}
                     />
+                    {newSourceType === 'local' && (
+                      <button
+                        type="button"
+                        className="btn-browse-in-field"
+                        onClick={handleBrowseNewFolder}
+                        title="Browse for folder"
+                      >
+                        <FolderOpen size={13} />
+                        <span>Browse...</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -412,7 +530,7 @@ export const NoteSourceModal: React.FC<NoteSourceModalProps> = ({
                   disabled={isSubmitting || !newName.trim() || !newUrl.trim()}
                 >
                   <Plus size={13} />
-                  <span>{isSubmitting ? 'Adding...' : 'Add & Open Platform'}</span>
+                  <span>{isSubmitting ? 'Adding...' : newSourceType === 'local' ? 'Add & Open Folder' : 'Add & Open Platform'}</span>
                 </button>
               </div>
             </form>

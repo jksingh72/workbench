@@ -94,4 +94,22 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.removeListener('workbench:open-note-source-modal', listener)
     }
   },
+
+  // Local File Explorer API
+  selectFolder: (defaultPath?: string) =>
+    ipcRenderer.invoke('workbench:select-folder', defaultPath),
+  readDirectory: (dirPath: string) =>
+    ipcRenderer.invoke('workbench:read-directory', dirPath),
+  openPath: (filePath: string) =>
+    ipcRenderer.invoke('workbench:open-path', filePath),
+  showItemInFolder: (filePath: string) =>
+    ipcRenderer.send('workbench:show-item-in-folder', filePath),
+  createFile: (parentPath: string, fileName: string, content?: string) =>
+    ipcRenderer.invoke('workbench:create-file', { parentPath, fileName, content }),
+  createFolder: (parentPath: string, folderName: string) =>
+    ipcRenderer.invoke('workbench:create-folder', { parentPath, folderName }),
+  renameItem: (oldPath: string, newPath: string) =>
+    ipcRenderer.invoke('workbench:rename-item', { oldPath, newPath }),
+  deleteItem: (itemPath: string) =>
+    ipcRenderer.invoke('workbench:delete-item', itemPath),
 })

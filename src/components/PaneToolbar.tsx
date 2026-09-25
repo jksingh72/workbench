@@ -18,7 +18,8 @@ import {
   Check,
   KeyRound,
   BookMarked,
-  Settings2
+  Settings2,
+  Folder
 } from 'lucide-react'
 import { NavState, BookSource, AISource, NoteSource } from '../types/electron'
 
@@ -123,7 +124,14 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
     url: 'https://www.onenote.com/notebooks',
   }
 
-  const isLocalNote = isNote && activeNoteSource.id === 'local'
+  const isLocalFolder =
+    isNote &&
+    (!!activeNoteSource.isLocal ||
+      activeNoteSource.id === 'local-explorer' ||
+      activeNoteSource.id === 'local' ||
+      (!!activeNoteSource.url && !activeNoteSource.url.startsWith('http://') && !activeNoteSource.url.startsWith('https://')))
+
+  const isLocalNote = isLocalFolder
 
   const toolbarClass = isBook
     ? 'book-toolbar'
@@ -206,7 +214,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               }}
               title="Click to switch note platform (OneNote, Evernote, Local Notes, etc.)"
             >
-              <BookMarked size={13} />
+              {isLocalFolder ? <Folder size={13} className="text-cyan" /> : <BookMarked size={13} />}
               <span className="tag-label">{activeNoteSource.name}</span>
               <ChevronDown size={11} className="selector-chevron" />
             </button>

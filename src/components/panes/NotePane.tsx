@@ -2,6 +2,7 @@ import React from 'react'
 import { BookMarked } from 'lucide-react'
 import { PaneToolbar } from '../PaneToolbar'
 import { OneNoteApp } from '../OneNoteApp'
+import { LocalExplorer } from '../LocalExplorer'
 import { NavState, NoteSource } from '../../types/electron'
 
 export interface NotePaneProps {
@@ -34,7 +35,16 @@ export const NotePane: React.FC<NotePaneProps> = ({
   onOpenDeleteData,
   onNotify,
 }) => {
-  const currentSource = noteSources.find((s) => s.id === activeNoteSourceId) || { name: 'Microsoft OneNote' }
+  const currentSource: NoteSource = noteSources.find((s) => s.id === activeNoteSourceId) || {
+    id: 'onenote',
+    name: 'Microsoft OneNote',
+    url: '',
+    isLocal: false,
+  }
+  const isLocalFolder =
+    currentSource.isLocal ||
+    currentSource.id === 'local-explorer' ||
+    (!!currentSource.url && !currentSource.url.startsWith('http://') && !currentSource.url.startsWith('https://'))
 
   return (
     <div className="pane-wrapper onenote-pane" style={style}>
@@ -48,7 +58,14 @@ export const NotePane: React.FC<NotePaneProps> = ({
         onOpenNoteSourceModal={onOpenNoteSourceModal}
       />
 
-      {activeNoteSourceId === 'local' ? (
+      {isLocalFolder ? (
+        <LocalExplorer
+          rootPath={currentSource.url}
+          clippedText={clippedText}
+          onClearClippedText={onClearClippedText}
+          onNotify={onNotify}
+        />
+      ) : activeNoteSourceId === 'local' ? (
         <OneNoteApp
           onNotify={onNotify}
           clippedText={clippedText}

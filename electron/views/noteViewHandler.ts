@@ -57,7 +57,8 @@ export class NoteViewHandler {
 
   public isWebSource(source?: NoteSource | null): boolean {
     if (!source) return false
-    return source.id !== 'local' && (source.url.startsWith('http://') || source.url.startsWith('https://'))
+    if (source.isLocal || source.id === 'local-explorer' || source.id === 'local') return false
+    return source.url.startsWith('http://') || source.url.startsWith('https://')
   }
 
   private initView() {

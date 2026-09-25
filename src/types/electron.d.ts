@@ -67,6 +67,25 @@ export interface ElectronAPI {
   showNoteSourceMenu: () => void
   onNoteSourceChanged: (callback: (data: { activeSourceId: string; activeSource: NoteSource }) => void) => () => void
   onOpenNoteSourceModal: (callback: () => void) => () => void
+
+  // Local File Explorer API
+  selectFolder: (defaultPath?: string) => Promise<string | null>
+  readDirectory: (dirPath: string) => Promise<{ success: boolean; items?: FileItem[]; currentPath?: string; error?: string }>
+  openPath: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  showItemInFolder: (filePath: string) => void
+  createFile: (parentPath: string, fileName: string, content?: string) => Promise<{ success: boolean; error?: string }>
+  createFolder: (parentPath: string, folderName: string) => Promise<{ success: boolean; error?: string }>
+  renameItem: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
+  deleteItem: (itemPath: string) => Promise<{ success: boolean; error?: string }>
+}
+
+export interface FileItem {
+  name: string
+  path: string
+  isDirectory: boolean
+  size: number
+  mtime: string
+  extension: string
 }
 
 export interface BookSource {
@@ -98,6 +117,7 @@ export interface NoteSource {
   name: string
   url: string
   isPreset?: boolean
+  isLocal?: boolean
 }
 
 export interface NoteSourceSettings {

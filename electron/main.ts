@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -368,6 +368,137 @@ function registerIpcHandlers() {
 
     const menu = Menu.buildFromTemplate(menuTemplate)
     menu.popup({ window: mainWindow })
+  })
+
+  // Local File Explorer IPC Handlers
+  ipcMain.handle('workbench:select-folder', async (_, defaultPath?: string) => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Folder for Local Explorer',
+      defaultPath: defaultPath && fs.existsSync(defaultPath) ? defaultPath : app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('workbench:read-directory', async (_, dirPath: string) => {
+    try {
+      let targetPath = dirPath
+      if (!targetPath || !fs.existsSync(targetPath)) {
+        targetPath = app.getPath('documents')
+      }
+
+      const entries = await fs.promises.readdir(targetPath, { withFileTypes: true })
+      const items = await Promise.all(
+        entries.map(async (entry) => {
+          const itemPath = path.join(targetPath, entry.name)
+          let size = 0
+          let mtime = new Date().toISOString()
+          try {
+            const stat = await fs.promises.stat(itemPath)
+            size = stat.size
+            mtime = stat.mtime.toISOString()
+          } catch (_) {}
+
+          return {
+            name: entry.name,
+            path: itemPath,
+            isDirectory: entry.isDirectory(),
+            size,
+            mtime,
+            extension: entry.isDirectory() ? '' : path.extname(entry.name).toLowerCase(),
+          }
+        })
+      )
+
+      // Sort directories first, then alphabetical by name
+      items.sort((a, b) => {
+        if (a.isDirectory && !b.isDirectory) return -1
+        if (!a.isDirectory && b.isDirectory) return 1
+        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      })
+
+      return { success: true, items, currentPath: targetPath }
+    } catch (err: any) {
+      console.error('[Main] read-directory error:', err)
+      return { success: false, error: err?.message || 'Failed to read directory' }
+    }
+  })
+
+  ipcMain.handle('workbench:open-path', async (_, filePath: string) => {
+    try {
+      const errMsg = await shell.openPath(filePath)
+      if (errMsg) {
+        return { success: false, error: errMsg }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to open file' }
+    }
+  })
+
+  ipcMain.on('workbench:show-item-in-folder', (_, filePath: string) => {
+    try {
+      shell.showItemInFolder(filePath)
+    } catch (err) {
+      console.error('[Main] showItemInFolder error:', err)
+    }
+  })
+
+  ipcMain.handle(
+    'workbench:create-file',
+    async (_, { parentPath, fileName, content }: { parentPath: string; fileName: string; content?: string }) => {
+      try {
+        const filePath = path.join(parentPath, fileName)
+        if (fs.existsSync(filePath)) {
+          return { success: false, error: 'A file with this name already exists' }
+        }
+        await fs.promises.writeFile(filePath, content || '', 'utf-8')
+        return { success: true }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to create file' }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'workbench:create-folder',
+    async (_, { parentPath, folderName }: { parentPath: string; folderName: string }) => {
+      try {
+        const folderPath = path.join(parentPath, folderName)
+        if (fs.existsSync(folderPath)) {
+          return { success: false, error: 'A folder with this name already exists' }
+        }
+        await fs.promises.mkdir(folderPath, { recursive: true })
+        return { success: true }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to create folder' }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'workbench:rename-item',
+    async (_, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
+      try {
+        await fs.promises.rename(oldPath, newPath)
+        return { success: true }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to rename item' }
+      }
+    }
+  )
+
+  ipcMain.handle('workbench:delete-item', async (_, itemPath: string) => {
+    try {
+      await shell.trashItem(itemPath)
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete item' }
+    }
   })
 }
 
