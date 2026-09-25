@@ -1,7 +1,6 @@
 import React from 'react'
+import { BookOpen } from 'lucide-react'
 import { PaneToolbar } from '../PaneToolbar'
-import { BookDeleteLoginModal } from '../BookDeleteLoginModal'
-import { BookSourceModal } from '../BookSourceModal'
 import { NavState, BookSource } from '../../types/electron'
 
 export interface BookPaneProps {
@@ -17,14 +16,9 @@ export interface BookPaneProps {
   onSelectBookSource: (id: string) => void
   onOpenBookSourceModal: () => void
   isAskingAI: boolean
-  isDeleteLoginOpen: boolean
   onOpenDeleteLogin: () => void
-  onCloseDeleteLogin: () => void
-  onNotify: (msg: string) => void
-  isSourceModalOpen: boolean
-  onCloseSourceModal: () => void
-  onSaveSources: (sources: BookSource[], newActiveId?: string) => Promise<void>
 }
+
 
 export const BookPane: React.FC<BookPaneProps> = ({
   style,
@@ -39,17 +33,9 @@ export const BookPane: React.FC<BookPaneProps> = ({
   onSelectBookSource,
   onOpenBookSourceModal,
   isAskingAI,
-  isDeleteLoginOpen,
   onOpenDeleteLogin,
-  onCloseDeleteLogin,
-  onNotify,
-  isSourceModalOpen,
-  onCloseSourceModal,
-  onSaveSources,
 }) => {
-  const activeBookSource =
-    bookSources.find((s) => s.id === activeBookSourceId) ||
-    bookSources[0] || { id: 'oreilly', name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/' }
+  const currentSource = bookSources.find((s) => s.id === activeBookSourceId) || { name: "O'Reilly Learning" }
 
   return (
     <div className="pane-wrapper book-pane" style={style}>
@@ -67,31 +53,14 @@ export const BookPane: React.FC<BookPaneProps> = ({
         onOpenBookSourceModal={onOpenBookSourceModal}
         isAskingAI={isAskingAI}
       />
-      <div className="native-view-anchor" ref={anchorRef} />
-
-      {/* Pane-Scoped Delete Login Modal */}
-      {isDeleteLoginOpen && (
-        <BookDeleteLoginModal
-          isOpen={isDeleteLoginOpen}
-          activeSource={activeBookSource}
-          sources={bookSources}
-          onClose={onCloseDeleteLogin}
-          onNotify={onNotify}
-        />
-      )}
-
-      {/* Pane-Scoped Configure Book Sites Modal */}
-      {isSourceModalOpen && (
-        <BookSourceModal
-          isOpen={isSourceModalOpen}
-          sources={bookSources}
-          activeSourceId={activeBookSourceId}
-          onClose={onCloseSourceModal}
-          onSelectSource={onSelectBookSource}
-          onSaveSources={onSaveSources}
-          onNotify={onNotify}
-        />
-      )}
+      <div className="native-view-anchor" ref={anchorRef}>
+        <div className="pane-ghost-placeholder">
+          <BookOpen size={36} className="ghost-icon text-red" />
+          <span className="ghost-title">Bookview</span>
+          <span className="ghost-subtitle">{currentSource.name}</span>
+        </div>
+      </div>
     </div>
   )
 }
+

@@ -1,8 +1,7 @@
 import React from 'react'
+import { BookMarked } from 'lucide-react'
 import { PaneToolbar } from '../PaneToolbar'
 import { OneNoteApp } from '../OneNoteApp'
-import { NoteDeleteModal } from '../NoteDeleteModal'
-import { NoteSourceModal } from '../NoteSourceModal'
 import { NavState, NoteSource } from '../../types/electron'
 
 export interface NotePaneProps {
@@ -17,14 +16,8 @@ export interface NotePaneProps {
   onClearClippedText: () => void
   noteResetTrigger: number
   onNoteReset: () => void
-  isDeleteDataOpen: boolean
   onOpenDeleteData: () => void
-  onCloseDeleteData: () => void
   onNotify: (msg: string) => void
-  isSourceModalOpen: boolean
-  onCloseSourceModal: () => void
-  onSelectNoteSource: (id: string) => void
-  onSaveSources: (sources: NoteSource[], newActiveId?: string) => Promise<void>
 }
 
 export const NotePane: React.FC<NotePaneProps> = ({
@@ -38,19 +31,10 @@ export const NotePane: React.FC<NotePaneProps> = ({
   clippedText,
   onClearClippedText,
   noteResetTrigger,
-  onNoteReset,
-  isDeleteDataOpen,
   onOpenDeleteData,
-  onCloseDeleteData,
   onNotify,
-  isSourceModalOpen,
-  onCloseSourceModal,
-  onSelectNoteSource,
-  onSaveSources,
 }) => {
-  const activeNoteSource =
-    noteSources.find((s) => s.id === activeNoteSourceId) ||
-    noteSources[0] || { id: 'onenote', name: 'Microsoft OneNote', url: 'https://www.onenote.com/notebooks' }
+  const currentSource = noteSources.find((s) => s.id === activeNoteSourceId) || { name: 'Microsoft OneNote' }
 
   return (
     <div className="pane-wrapper onenote-pane" style={style}>
@@ -73,33 +57,15 @@ export const NotePane: React.FC<NotePaneProps> = ({
           resetTrigger={noteResetTrigger}
         />
       ) : (
-        <div className="native-view-anchor" ref={anchorRef} />
-      )}
-
-      {/* Pane-Scoped Delete Login Modal */}
-      {isDeleteDataOpen && (
-        <NoteDeleteModal
-          isOpen={isDeleteDataOpen}
-          activeSource={activeNoteSource}
-          sources={noteSources}
-          onClose={onCloseDeleteData}
-          onNotify={onNotify}
-          onCleared={onNoteReset}
-        />
-      )}
-
-      {/* Pane-Scoped Configure Note Sources Modal */}
-      {isSourceModalOpen && (
-        <NoteSourceModal
-          isOpen={isSourceModalOpen}
-          sources={noteSources}
-          activeSourceId={activeNoteSourceId}
-          onClose={onCloseSourceModal}
-          onSelectSource={onSelectNoteSource}
-          onSaveSources={onSaveSources}
-          onNotify={onNotify}
-        />
+        <div className="native-view-anchor" ref={anchorRef}>
+          <div className="pane-ghost-placeholder">
+            <BookMarked size={36} className="ghost-icon text-purple" />
+            <span className="ghost-title">Noteview</span>
+            <span className="ghost-subtitle">{currentSource.name}</span>
+          </div>
+        </div>
       )}
     </div>
   )
 }
+

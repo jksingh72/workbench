@@ -662,6 +662,74 @@
   background-color: #ffffff;
 }
 
+/* Fullscreen drag shield during splitter resizing to prevent pointer capture loss */
+.splitter-drag-shield {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 999999;
+  user-select: none;
+  background: transparent;
+}
+
+/* Splitter Preview Bar (Approach B - Ghost Divider Line) */
+.splitter-preview-bar {
+  position: absolute;
+  pointer-events: none;
+  z-index: 100000;
+  transition: none;
+}
+
+.splitter-preview-bar-vertical {
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.8), 0 0 20px rgba(59, 130, 246, 0.4);
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.splitter-preview-bar-horizontal {
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.8), 0 0 20px rgba(59, 130, 246, 0.4);
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.splitter-preview-pill {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(59, 130, 246, 0.6);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 8px rgba(59, 130, 246, 0.3);
+  border-radius: 20px;
+  padding: 4px 10px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.splitter-preview-divider {
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+}
+
 /* Session Management Button in Toolbar */
 .session-manage-btn {
   display: flex;
@@ -695,80 +763,95 @@
   min-height: 0;
   position: relative;
   background-color: #0b0f17;
+  overflow: hidden;
+}
+
+.pane-ghost-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: radial-gradient(circle at center, rgba(30, 41, 59, 0.3) 0%, rgba(11, 15, 23, 0.95) 100%);
+  user-select: none;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pane-ghost-placeholder .ghost-icon {
+  opacity: 0.35;
+  filter: drop-shadow(0 0 12px currentColor);
+}
+
+.pane-ghost-placeholder .ghost-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.pane-ghost-placeholder .ghost-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.text-red {
+  color: #ef4444;
 }
 
 
 
 /* ============================================================
-   Session Modal Styles (Scoped to Individual Panes)
+   Global Centered Modal Backdrop (Centered in full window with blur)
    ============================================================ */
-.modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background-color: rgba(5, 8, 14, 0.88);
-  backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 99999;
-  animation: fadeIn 0.15s ease;
-  padding: 16px;
-  box-sizing: border-box;
-}
-
-/* Pane-scoped Modal Backdrop (positioned inside .pane-wrapper) */
+.modal-backdrop,
 .pane-modal-backdrop {
-  position: absolute;
+  position: fixed;
+  inset: 0;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(5, 8, 14, 0.92);
-  backdrop-filter: blur(8px);
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(5, 8, 14, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 500;
+  z-index: 999999;
   animation: fadeIn 0.15s ease;
-  padding: 16px;
+  padding: 24px;
   box-sizing: border-box;
 }
 
+.modal-container,
 .pane-modal-container {
   width: 100%;
-  max-width: 440px;
-  max-height: 94%;
+  max-width: 500px;
+  max-height: 90vh;
   background: #111726;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-lg);
-  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   animation: scaleUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: auto;
+  position: relative;
+  z-index: 1000000;
 }
 
 .pane-modal-container.book-sources-modal,
 .pane-modal-container.ai-sources-modal,
 .pane-modal-container.note-sources-modal-container {
-  max-width: 480px;
-}
-
-.modal-container {
-  width: 100%;
-  max-width: 440px;
-  max-height: 94%;
-  background: #111726;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  animation: scaleUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 540px;
 }
 
 @keyframes scaleUp {

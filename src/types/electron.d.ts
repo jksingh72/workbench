@@ -44,6 +44,7 @@ export interface ElectronAPI {
   getSessionSettings: () => Promise<SessionSettings>
   updateSessionSettings: (settings: Partial<SessionSettings>) => Promise<{ success: boolean; settings: SessionSettings }>
   setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) => void
+  setViewsDragging?: (isDragging: boolean) => void
   setVerticalSplit: (params: { ratio: number }) => void
   loadNotes: () => Promise<NoteBook[]>
   saveNotes: (notebooks: NoteBook[]) => Promise<{ success: boolean; error?: string }>

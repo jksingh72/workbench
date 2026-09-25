@@ -20,6 +20,8 @@ export class LayoutManager {
   private currentVerticalSplitRatio = 50
   private currentIsSwapped = false
   private modalHidden = { book: false, ai: false, note: false }
+  private isModalOpen = false
+  private isDraggingSplitter = false
 
   constructor(
     mainWindow: BrowserWindow,
@@ -36,60 +38,71 @@ export class LayoutManager {
   public setSplit(ratio: number, isSwapped?: boolean) {
     if (typeof ratio === 'number') this.currentSplitRatio = ratio
     if (typeof isSwapped === 'boolean') this.currentIsSwapped = isSwapped
-    this.applyBounds()
+    if (!this.isDraggingSplitter) {
+      this.applyBounds()
+    }
   }
 
   public setVerticalSplit(ratio: number) {
     if (typeof ratio === 'number') this.currentVerticalSplitRatio = ratio
-    this.applyBounds()
+    if (!this.isDraggingSplitter) {
+      this.applyBounds()
+    }
+  }
+
+  public setViewsDragging(isDragging: boolean) {
+    this.isDraggingSplitter = isDragging
+    if (this.isModalOpen) return
+
+    if (isDragging) {
+      this.bookHandler.setVisible(false)
+      this.aiHandler.setVisible(false)
+      this.noteHandler.setVisible(false)
+    } else {
+      this.bookHandler.setVisible(true)
+      this.aiHandler.setVisible(true)
+      this.noteHandler.setVisible(true)
+      this.applyBounds()
+    }
   }
 
   public setViewsVisible(params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) {
-    if (typeof params === 'boolean') {
-      this.modalHidden = { book: !params, ai: !params, note: !params }
-      this.bookHandler.setVisible(params)
-      this.aiHandler.setVisible(params)
-      this.noteHandler.setVisible(params)
-      if (!params) {
-        this.bookHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-        this.aiHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-        this.noteHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-      } else {
-        this.applyBounds()
-      }
-      return
-    }
+    const visible = typeof params === 'boolean' ? params : params.visible
+    this.isModalOpen = !visible
 
-    const { target = 'all', visible } = params
-    if (target === 'book' || target === 'all') {
-      this.modalHidden.book = !visible
-      this.bookHandler.setVisible(visible)
-      if (!visible) this.bookHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-    }
-    if (target === 'ai' || target === 'all') {
-      this.modalHidden.ai = !visible
-      this.aiHandler.setVisible(visible)
-      if (!visible) this.aiHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-    }
-    if (target === 'note' || target === 'all') {
-      this.modalHidden.note = !visible
-      this.noteHandler.setVisible(visible)
-      if (!visible) this.noteHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-    }
-    if (visible) {
+    if (!visible) {
+      this.modalHidden = { book: true, ai: true, note: true }
+      // Physically detach every single child view from mainWindow
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        while (this.mainWindow.contentView.children.length > 0) {
+          try {
+            this.mainWindow.contentView.removeChildView(this.mainWindow.contentView.children[0])
+          } catch (_) {
+            break
+          }
+        }
+      }
+      this.bookHandler.setVisible(false)
+      this.aiHandler.setVisible(false)
+      this.noteHandler.setVisible(false)
+    } else {
+      this.modalHidden = { book: false, ai: false, note: false }
+      this.bookHandler.setVisible(true)
+      this.aiHandler.setVisible(true)
+      this.noteHandler.setVisible(true)
       this.applyBounds()
     }
   }
 
   public updateMeasuredBounds(bounds: { book?: DOMBounds; ai?: DOMBounds; note?: DOMBounds }) {
+    if (this.isModalOpen || this.isDraggingSplitter) return
+
     const { book, ai, note } = bounds
 
     if (book && typeof book.x === 'number') {
       const isVisible = book.width > 0 && book.height > 0 && !this.modalHidden.book
       this.bookHandler.setVisible(isVisible)
-      if (!isVisible) {
-        this.bookHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-      } else {
+      if (isVisible) {
         this.bookHandler.setBounds({
           x: Math.round(book.x),
           y: Math.round(book.y),
@@ -102,9 +115,7 @@ export class LayoutManager {
     if (ai && typeof ai.x === 'number') {
       const isVisible = ai.width > 0 && ai.height > 0 && !this.modalHidden.ai
       this.aiHandler.setVisible(isVisible)
-      if (!isVisible) {
-        this.aiHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-      } else {
+      if (isVisible) {
         this.aiHandler.setBounds({
           x: Math.round(ai.x),
           y: Math.round(ai.y),
@@ -117,9 +128,7 @@ export class LayoutManager {
     if (note && typeof note.x === 'number') {
       const isVisible = note.width > 0 && note.height > 0 && !this.modalHidden.note
       this.noteHandler.setVisible(isVisible)
-      if (!isVisible) {
-        this.noteHandler.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-      } else {
+      if (isVisible) {
         this.noteHandler.setBounds({
           x: Math.round(note.x),
           y: Math.round(note.y),
@@ -132,6 +141,7 @@ export class LayoutManager {
 
   public applyBounds() {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    if (this.isModalOpen || this.isDraggingSplitter) return
 
     const bounds = this.mainWindow.contentView.getBounds()
     const headerHeight = 44
@@ -144,17 +154,15 @@ export class LayoutManager {
     const availableWorkspaceHeight = Math.max(0, bounds.height - headerHeight)
     const fullContentHeight = Math.max(0, bounds.height - topBarHeight)
 
-    const zeroBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
-
     if (this.currentSplitRatio >= 99) {
       const fullBounds = { x: 0, y: topBarHeight, width: availableWidth, height: fullContentHeight }
       const hiddenBounds = { x: 0, y: topBarHeight, width: 0, height: 0 }
       if (!this.currentIsSwapped) {
-        this.bookHandler.setBounds(this.modalHidden.book ? zeroBounds : fullBounds)
+        this.bookHandler.setBounds(fullBounds)
         this.aiHandler.setBounds(hiddenBounds)
         this.noteHandler.setBounds(hiddenBounds)
       } else {
-        this.aiHandler.setBounds(this.modalHidden.ai ? zeroBounds : fullBounds)
+        this.aiHandler.setBounds(fullBounds)
         this.bookHandler.setBounds(hiddenBounds)
         this.noteHandler.setBounds(hiddenBounds)
       }
@@ -166,11 +174,11 @@ export class LayoutManager {
       const hiddenBounds = { x: 0, y: topBarHeight, width: 0, height: 0 }
       if (!this.currentIsSwapped) {
         this.bookHandler.setBounds(hiddenBounds)
-        this.aiHandler.setBounds(this.modalHidden.ai ? zeroBounds : fullBounds)
+        this.aiHandler.setBounds(fullBounds)
         this.noteHandler.setBounds(hiddenBounds)
       } else {
         this.aiHandler.setBounds(hiddenBounds)
-        this.bookHandler.setBounds(this.modalHidden.book ? zeroBounds : fullBounds)
+        this.bookHandler.setBounds(fullBounds)
         this.noteHandler.setBounds(hiddenBounds)
       }
       return
@@ -194,13 +202,13 @@ export class LayoutManager {
     const noteBounds: Rectangle = { x: rightX, y: noteViewY, width: rightWidth, height: noteViewHeight }
 
     if (!this.currentIsSwapped) {
-      this.bookHandler.setBounds(this.modalHidden.book ? zeroBounds : bookBounds)
-      this.aiHandler.setBounds(this.modalHidden.ai ? zeroBounds : aiBounds)
-      this.noteHandler.setBounds(this.modalHidden.note ? zeroBounds : noteBounds)
+      this.bookHandler.setBounds(bookBounds)
+      this.aiHandler.setBounds(aiBounds)
+      this.noteHandler.setBounds(noteBounds)
     } else {
-      this.aiHandler.setBounds(this.modalHidden.ai ? zeroBounds : { x: 0, y: topBarHeight, width: leftWidth, height: aiViewHeight })
-      this.noteHandler.setBounds(this.modalHidden.note ? zeroBounds : { x: 0, y: noteViewY, width: leftWidth, height: noteViewHeight })
-      this.bookHandler.setBounds(this.modalHidden.book ? zeroBounds : { x: rightX, y: topBarHeight, width: rightWidth, height: fullContentHeight })
+      this.aiHandler.setBounds({ x: 0, y: topBarHeight, width: leftWidth, height: aiViewHeight })
+      this.noteHandler.setBounds({ x: 0, y: noteViewY, width: leftWidth, height: noteViewHeight })
+      this.bookHandler.setBounds({ x: rightX, y: topBarHeight, width: rightWidth, height: fullContentHeight })
     }
   }
 }

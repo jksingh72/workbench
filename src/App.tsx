@@ -5,6 +5,12 @@ import { HorizontalSplitter } from './components/HorizontalSplitter'
 import { BookPane } from './components/panes/BookPane'
 import { ChatPane } from './components/panes/ChatPane'
 import { NotePane } from './components/panes/NotePane'
+import { BookSourceModal } from './components/BookSourceModal'
+import { BookDeleteLoginModal } from './components/BookDeleteLoginModal'
+import { AISourceModal } from './components/AISourceModal'
+import { AIDeleteLoginModal } from './components/AIDeleteLoginModal'
+import { NoteSourceModal } from './components/NoteSourceModal'
+import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
@@ -89,6 +95,11 @@ export const App: React.FC = () => {
   const noteAnchorRef = useRef<HTMLDivElement>(null)
   const notificationTimeoutRef = useRef<any>(null)
   const dragTargetRef = useRef<'none' | 'column' | 'row'>('none')
+  // Approach B: Preview Bar ratios (dragged smoothly, snapped on mouseup)
+  const [previewColumnRatio, setPreviewColumnRatio] = useState<number | null>(null)
+  const [previewRowRatio, setPreviewRowRatio] = useState<number | null>(null)
+  const previewColumnRatioRef = useRef<number | null>(null)
+  const previewRowRatioRef = useRef<number | null>(null)
 
   const showNotification = (msg: string) => {
     if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current)
@@ -120,26 +131,32 @@ export const App: React.FC = () => {
     isAISourceModalOpen ||
     isNoteSourceModalOpen
 
+  const isAnyModalOpenRef = useRef(isAnyModalOpen)
+  isAnyModalOpenRef.current = isAnyModalOpen
+
   // Calculate and sync bounds of native WebContentsViews
   const syncBounds = useCallback(() => {
     if (!window.electron?.updateBounds) return
 
-    const isBookModalOpen = isBookDeleteLoginOpen || isBookSourceModalOpen
-    const isAIModalOpen = isAIDeleteLoginOpen || isAISourceModalOpen
-    const isNoteModalOpen = isNoteDeleteDataOpen || isNoteSourceModalOpen
+    // If any modal is open or if dragging splitters, hide all native views
+    if (isAnyModalOpenRef.current || isAnyModalOpen || dragTargetRef.current !== 'none') {
+      window.electron.updateBounds({
+        book: { x: 0, y: 0, width: 0, height: 0 },
+        ai: { x: 0, y: 0, width: 0, height: 0 },
+        note: { x: 0, y: 0, width: 0, height: 0 },
+      })
+      return
+    }
 
-    const bookRect =
-      activePanes.book && !isBookModalOpen
-        ? bookAnchorRef.current?.getBoundingClientRect()
-        : null
-    const aiRect =
-      activePanes.ai && !isAIModalOpen
-        ? aiAnchorRef.current?.getBoundingClientRect()
-        : null
-    const noteRect =
-      activePanes.note && !isNoteModalOpen
-        ? noteAnchorRef.current?.getBoundingClientRect()
-        : null
+    const bookRect = activePanes.book
+      ? bookAnchorRef.current?.getBoundingClientRect()
+      : null
+    const aiRect = activePanes.ai
+      ? aiAnchorRef.current?.getBoundingClientRect()
+      : null
+    const noteRect = activePanes.note
+      ? noteAnchorRef.current?.getBoundingClientRect()
+      : null
 
     const book = bookRect
       ? {
@@ -171,12 +188,7 @@ export const App: React.FC = () => {
     window.electron.updateBounds({ book, ai, note })
   }, [
     activePanes,
-    isBookDeleteLoginOpen,
-    isBookSourceModalOpen,
-    isAIDeleteLoginOpen,
-    isAISourceModalOpen,
-    isNoteDeleteDataOpen,
-    isNoteSourceModalOpen,
+    isAnyModalOpen,
   ])
 
   // Listen to navigation events from Electron
@@ -285,8 +297,25 @@ export const App: React.FC = () => {
     }
   }, [])
 
-  // Sync split ratios with Electron when not dragging (e.g. presets, double-click, resize)
+  // Whenever any modal opens or closes, strictly sync views with Electron
   useEffect(() => {
+    if (isAnyModalOpen) {
+      window.electron?.setViewsVisible(false)
+      window.electron?.updateBounds({
+        book: { x: 0, y: 0, width: 0, height: 0 },
+        ai: { x: 0, y: 0, width: 0, height: 0 },
+        note: { x: 0, y: 0, width: 0, height: 0 },
+      })
+    } else {
+      window.electron?.setViewsVisible(true)
+      const timer = setTimeout(syncBounds, 60)
+      return () => clearTimeout(timer)
+    }
+  }, [isAnyModalOpen, syncBounds])
+
+  // Sync split ratios with Electron when not dragging and no modal is open (e.g. presets, double-click, resize)
+  useEffect(() => {
+    if (isAnyModalOpen) return
     if (dragTarget === 'none') {
       window.electron?.setSplit({ ratio: splitRatio, isSwapped })
       window.electron?.setVerticalSplit({ ratio: verticalSplitRatio })
@@ -294,15 +323,19 @@ export const App: React.FC = () => {
       const timer = setTimeout(syncBounds, 50)
       return () => clearTimeout(timer)
     }
-  }, [splitRatio, verticalSplitRatio, isSwapped, dragTarget, syncBounds])
+  }, [splitRatio, verticalSplitRatio, isSwapped, dragTarget, isAnyModalOpen, syncBounds])
 
   // Window resize listener
   useEffect(() => {
-    window.addEventListener('resize', syncBounds)
-    return () => window.removeEventListener('resize', syncBounds)
+    const handleResize = () => {
+      if (isAnyModalOpenRef.current) return
+      syncBounds()
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [syncBounds])
 
-  // Drag splitter handling: Column (Left pane vs Right column)
+  // Drag splitter handling: Column (Left pane vs Right column) - Approach B: Preview Bar
   const handleColumnPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isAnyModalOpen) return
     e.preventDefault()
@@ -314,8 +347,11 @@ export const App: React.FC = () => {
     }
     dragTargetRef.current = 'column'
     setDragTarget('column')
+    setPreviewColumnRatio(splitRatio)
+    previewColumnRatioRef.current = splitRatio
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    window.electron?.setViewsDragging?.(true)
   }
 
   const handleColumnPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -327,8 +363,8 @@ export const App: React.FC = () => {
     const offsetX = e.clientX - rect.left
     const newRatio = (offsetX / rect.width) * 100
     const clampedRatio = Math.max(15, Math.min(85, Math.round(newRatio * 10) / 10))
-    setSplitRatio(clampedRatio)
-    window.electron?.setSplit({ ratio: clampedRatio, isSwapped })
+    setPreviewColumnRatio(clampedRatio)
+    previewColumnRatioRef.current = clampedRatio
   }
 
   const handleColumnPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -338,15 +374,23 @@ export const App: React.FC = () => {
           e.currentTarget.releasePointerCapture(e.pointerId)
         }
       } catch {}
+      const finalRatio = previewColumnRatioRef.current ?? splitRatio
       dragTargetRef.current = 'none'
       setDragTarget('none')
+      setPreviewColumnRatio(null)
+      previewColumnRatioRef.current = null
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      syncBounds()
+
+      // Approach B: Snap to the new size on mouse release!
+      setSplitRatio(finalRatio)
+      window.electron?.setSplit({ ratio: finalRatio, isSwapped })
+      window.electron?.setViewsDragging?.(false)
+      setTimeout(syncBounds, 50)
     }
   }
 
-  // Drag splitter handling: Row (ChatGPT top vs OneNote bottom)
+  // Drag splitter handling: Row (ChatGPT top vs OneNote bottom) - Approach B: Preview Bar
   const handleRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isAnyModalOpen) return
     e.preventDefault()
@@ -358,8 +402,11 @@ export const App: React.FC = () => {
     }
     dragTargetRef.current = 'row'
     setDragTarget('row')
+    setPreviewRowRatio(verticalSplitRatio)
+    previewRowRatioRef.current = verticalSplitRatio
     document.body.style.cursor = 'row-resize'
     document.body.style.userSelect = 'none'
+    window.electron?.setViewsDragging?.(true)
   }
 
   const handleRowPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -371,8 +418,8 @@ export const App: React.FC = () => {
     const offsetY = e.clientY - rect.top
     const newRatio = (offsetY / rect.height) * 100
     const clampedRatio = Math.max(15, Math.min(85, Math.round(newRatio * 10) / 10))
-    setVerticalSplitRatio(clampedRatio)
-    window.electron?.setVerticalSplit({ ratio: clampedRatio })
+    setPreviewRowRatio(clampedRatio)
+    previewRowRatioRef.current = clampedRatio
   }
 
   const handleRowPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -382,11 +429,19 @@ export const App: React.FC = () => {
           e.currentTarget.releasePointerCapture(e.pointerId)
         }
       } catch {}
+      const finalRatio = previewRowRatioRef.current ?? verticalSplitRatio
       dragTargetRef.current = 'none'
       setDragTarget('none')
+      setPreviewRowRatio(null)
+      previewRowRatioRef.current = null
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      syncBounds()
+
+      // Approach B: Snap to the new size on mouse release!
+      setVerticalSplitRatio(finalRatio)
+      window.electron?.setVerticalSplit({ ratio: finalRatio })
+      window.electron?.setViewsDragging?.(false)
+      setTimeout(syncBounds, 50)
     }
   }
 
@@ -402,8 +457,8 @@ export const App: React.FC = () => {
         const offsetX = e.clientX - rect.left
         const newRatio = (offsetX / rect.width) * 100
         const clampedRatio = Math.max(15, Math.min(85, Math.round(newRatio * 10) / 10))
-        setSplitRatio(clampedRatio)
-        window.electron?.setSplit({ ratio: clampedRatio, isSwapped })
+        setPreviewColumnRatio(clampedRatio)
+        previewColumnRatioRef.current = clampedRatio
       } else if (dragTargetRef.current === 'row') {
         if (!rightColumnRef.current) return
         const rect = rightColumnRef.current.getBoundingClientRect()
@@ -411,31 +466,62 @@ export const App: React.FC = () => {
         const offsetY = e.clientY - rect.top
         const newRatio = (offsetY / rect.height) * 100
         const clampedRatio = Math.max(15, Math.min(85, Math.round(newRatio * 10) / 10))
-        setVerticalSplitRatio(clampedRatio)
-        window.electron?.setVerticalSplit({ ratio: clampedRatio })
+        setPreviewRowRatio(clampedRatio)
+        previewRowRatioRef.current = clampedRatio
       }
     }
 
     const handleGlobalPointerUp = () => {
+      if (dragTargetRef.current === 'column') {
+        const finalRatio = previewColumnRatioRef.current ?? splitRatio
+        setSplitRatio(finalRatio)
+        window.electron?.setSplit({ ratio: finalRatio, isSwapped })
+      } else if (dragTargetRef.current === 'row') {
+        const finalRatio = previewRowRatioRef.current ?? verticalSplitRatio
+        setVerticalSplitRatio(finalRatio)
+        window.electron?.setVerticalSplit({ ratio: finalRatio })
+      }
+      window.electron?.setViewsDragging?.(false)
       dragTargetRef.current = 'none'
       setDragTarget('none')
+      setPreviewColumnRatio(null)
+      setPreviewRowRatio(null)
+      previewColumnRatioRef.current = null
+      previewRowRatioRef.current = null
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      syncBounds()
+      setTimeout(syncBounds, 50)
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        window.electron?.setViewsDragging?.(false)
+        dragTargetRef.current = 'none'
+        setDragTarget('none')
+        setPreviewColumnRatio(null)
+        setPreviewRowRatio(null)
+        previewColumnRatioRef.current = null
+        previewRowRatioRef.current = null
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        setTimeout(syncBounds, 50)
+      }
     }
 
     window.addEventListener('pointermove', handleWindowPointerMove, { passive: true })
     window.addEventListener('pointerup', handleGlobalPointerUp)
     window.addEventListener('pointercancel', handleGlobalPointerUp)
     window.addEventListener('blur', handleGlobalPointerUp)
+    window.addEventListener('keydown', handleKeyDown)
 
     return () => {
       window.removeEventListener('pointermove', handleWindowPointerMove)
       window.removeEventListener('pointerup', handleGlobalPointerUp)
       window.removeEventListener('pointercancel', handleGlobalPointerUp)
       window.removeEventListener('blur', handleGlobalPointerUp)
+      window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [dragTarget, isSwapped, syncBounds])
+  }, [dragTarget, isSwapped, splitRatio, verticalSplitRatio, syncBounds])
 
   // Navigation actions
   const handleNavAction = (
@@ -445,51 +531,51 @@ export const App: React.FC = () => {
     window.electron?.navAction({ target, command })
   }
 
-  // Book Delete Login modal (scoped strictly to Bookview pane)
+  // Book Delete Login modal
   const handleOpenBookDeleteLogin = () => {
     setIsBookDeleteLoginOpen(true)
-    window.electron?.setViewsVisible({ target: 'book', visible: false })
+    window.electron?.setViewsVisible(false)
   }
 
   const handleCloseBookDeleteLogin = () => {
     setIsBookDeleteLoginOpen(false)
-    window.electron?.setViewsVisible({ target: 'book', visible: true })
+    window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
 
-  // AI Delete Login modal (scoped strictly to ChatView pane)
+  // AI Delete Login modal
   const handleOpenAIDeleteLogin = () => {
     setIsAIDeleteLoginOpen(true)
-    window.electron?.setViewsVisible({ target: 'ai', visible: false })
+    window.electron?.setViewsVisible(false)
   }
 
   const handleCloseAIDeleteLogin = () => {
     setIsAIDeleteLoginOpen(false)
-    window.electron?.setViewsVisible({ target: 'ai', visible: true })
+    window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
 
-  // Note Delete Data modal (scoped strictly to NoteView pane)
+  // Note Delete Data modal
   const handleOpenNoteDeleteData = () => {
     setIsNoteDeleteDataOpen(true)
-    window.electron?.setViewsVisible({ target: 'note', visible: false })
+    window.electron?.setViewsVisible(false)
   }
 
   const handleCloseNoteDeleteData = () => {
     setIsNoteDeleteDataOpen(false)
-    window.electron?.setViewsVisible({ target: 'note', visible: true })
+    window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
 
   // Book source configuration handlers
   const handleOpenBookSourceModal = () => {
     setIsBookSourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'book', visible: false })
+    window.electron?.setViewsVisible(false)
   }
 
   const handleCloseBookSourceModal = () => {
     setIsBookSourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'book', visible: true })
+    window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
 
@@ -518,12 +604,12 @@ export const App: React.FC = () => {
   // AI source configuration handlers
   const handleOpenAISourceModal = () => {
     setIsAISourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'ai', visible: false })
+    window.electron?.setViewsVisible(false)
   }
 
   const handleCloseAISourceModal = () => {
     setIsAISourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'ai', visible: true })
+    window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
 
@@ -552,12 +638,12 @@ export const App: React.FC = () => {
   // Note source configuration handlers
   const handleOpenNoteSourceModal = () => {
     setIsNoteSourceModalOpen(true)
-    window.electron?.setViewsVisible({ target: 'note', visible: false })
+    window.electron?.setViewsVisible(false)
   }
 
   const handleCloseNoteSourceModal = () => {
     setIsNoteSourceModalOpen(false)
-    window.electron?.setViewsVisible({ target: 'note', visible: true })
+    window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
 
@@ -696,13 +782,7 @@ export const App: React.FC = () => {
       onSelectBookSource={handleSelectBookSource}
       onOpenBookSourceModal={handleOpenBookSourceModal}
       isAskingAI={isAskingAI}
-      isDeleteLoginOpen={isBookDeleteLoginOpen}
       onOpenDeleteLogin={handleOpenBookDeleteLogin}
-      onCloseDeleteLogin={handleCloseBookDeleteLogin}
-      onNotify={showNotification}
-      isSourceModalOpen={isBookSourceModalOpen}
-      onCloseSourceModal={handleCloseBookSourceModal}
-      onSaveSources={handleSaveBookSources}
     />
   )
 
@@ -715,17 +795,7 @@ export const App: React.FC = () => {
       aiSources={aiSources}
       activeAISourceId={activeAISourceId}
       onOpenAISourceModal={handleOpenAISourceModal}
-      isDeleteLoginOpen={isAIDeleteLoginOpen}
       onOpenDeleteLogin={handleOpenAIDeleteLogin}
-      onCloseDeleteLogin={handleCloseAIDeleteLogin}
-      onNotify={showNotification}
-      isSourceModalOpen={isAISourceModalOpen}
-      onCloseSourceModal={handleCloseAISourceModal}
-      onSelectAISource={(id) => {
-        handleSelectAISource(id)
-        handleCloseAISourceModal()
-      }}
-      onSaveSources={handleSaveAISources}
     />
   )
 
@@ -742,17 +812,8 @@ export const App: React.FC = () => {
       onClearClippedText={() => setClippedText(null)}
       noteResetTrigger={noteResetTrigger}
       onNoteReset={() => setNoteResetTrigger(Date.now())}
-      isDeleteDataOpen={isNoteDeleteDataOpen}
       onOpenDeleteData={handleOpenNoteDeleteData}
-      onCloseDeleteData={handleCloseNoteDeleteData}
       onNotify={showNotification}
-      isSourceModalOpen={isNoteSourceModalOpen}
-      onCloseSourceModal={handleCloseNoteSourceModal}
-      onSelectNoteSource={(id) => {
-        handleSelectNoteSource(id)
-        handleCloseNoteSourceModal()
-      }}
-      onSaveSources={handleSaveNoteSources}
     />
   )
 
@@ -775,6 +836,20 @@ export const App: React.FC = () => {
       />
 
       {renderNote(noteSubPaneStyle)}
+
+      {/* Approach B: Horizontal Preview Bar (Ghost divider line) */}
+      {dragTarget === 'row' && previewRowRatio !== null && (
+        <div
+          className="splitter-preview-bar splitter-preview-bar-horizontal"
+          style={{ top: `calc(${previewRowRatio}% - 2px)` }}
+        >
+          <div className="splitter-preview-pill">
+            <span>{Math.round(previewRowRatio)}%</span>
+            <span className="splitter-preview-divider">/</span>
+            <span>{Math.round(100 - previewRowRatio)}%</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 
@@ -894,7 +969,96 @@ export const App: React.FC = () => {
             )
           })()
         )}
+
+        {/* Approach B: Vertical Preview Bar (Ghost divider line) */}
+        {dragTarget === 'column' && previewColumnRatio !== null && (
+          <div
+            className="splitter-preview-bar splitter-preview-bar-vertical"
+            style={{ left: `calc(${previewColumnRatio}% - 2px)` }}
+          >
+            <div className="splitter-preview-pill">
+              <span>{Math.round(previewColumnRatio)}%</span>
+              <span className="splitter-preview-divider">|</span>
+              <span>{Math.round(100 - previewColumnRatio)}%</span>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Splitter Drag Shield Overlay to prevent cursor capture loss */}
+      {dragTarget !== 'none' && (
+        <div
+          className="splitter-drag-shield"
+          style={{
+            cursor: dragTarget === 'column' ? 'col-resize' : 'row-resize',
+          }}
+        />
+      )}
+
+      {/* Global Centered Modals (Rendered at Root for Full-Screen Viewport Centering) */}
+      <BookSourceModal
+        isOpen={isBookSourceModalOpen}
+        sources={bookSources}
+        activeSourceId={activeBookSourceId}
+        onClose={handleCloseBookSourceModal}
+        onSelectSource={(id) => {
+          handleSelectBookSource(id)
+          handleCloseBookSourceModal()
+        }}
+        onSaveSources={handleSaveBookSources}
+        onNotify={showNotification}
+      />
+
+      <BookDeleteLoginModal
+        isOpen={isBookDeleteLoginOpen}
+        activeSource={bookSources.find((s) => s.id === activeBookSourceId) || bookSources[0]}
+        sources={bookSources}
+        onClose={handleCloseBookDeleteLogin}
+        onNotify={showNotification}
+      />
+
+      <AISourceModal
+        isOpen={isAISourceModalOpen}
+        sources={aiSources}
+        activeSourceId={activeAISourceId}
+        onClose={handleCloseAISourceModal}
+        onSelectSource={(id) => {
+          handleSelectAISource(id)
+          handleCloseAISourceModal()
+        }}
+        onSaveSources={handleSaveAISources}
+        onNotify={showNotification}
+      />
+
+      <AIDeleteLoginModal
+        isOpen={isAIDeleteLoginOpen}
+        activeSource={aiSources.find((s) => s.id === activeAISourceId) || aiSources[0]}
+        sources={aiSources}
+        onClose={handleCloseAIDeleteLogin}
+        onNotify={showNotification}
+      />
+
+      <NoteSourceModal
+        isOpen={isNoteSourceModalOpen}
+        sources={noteSources}
+        activeSourceId={activeNoteSourceId}
+        onClose={handleCloseNoteSourceModal}
+        onSelectSource={(id) => {
+          handleSelectNoteSource(id)
+          handleCloseNoteSourceModal()
+        }}
+        onSaveSources={handleSaveNoteSources}
+        onNotify={showNotification}
+      />
+
+      <NoteDeleteModal
+        isOpen={isNoteDeleteDataOpen}
+        activeSource={noteSources.find((s) => s.id === activeNoteSourceId) || noteSources[0]}
+        sources={noteSources}
+        onClose={handleCloseNoteDeleteData}
+        onNotify={showNotification}
+        onCleared={() => setNoteResetTrigger(Date.now())}
+      />
     </div>
   )
 }

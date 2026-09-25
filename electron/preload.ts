@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electron', {
   updateSessionSettings: (settings: any) => ipcRenderer.invoke('workbench:update-session-settings', settings),
   setViewsVisible: (params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) =>
     ipcRenderer.send('workbench:set-views-visible', params),
+  setViewsDragging: (isDragging: boolean) =>
+    ipcRenderer.send('workbench:set-views-dragging', isDragging),
   setVerticalSplit: (params: { ratio: number }) => ipcRenderer.send('workbench:set-vertical-split', params),
   loadNotes: () => ipcRenderer.invoke('workbench:load-notes'),
   saveNotes: (notebooks: any) => ipcRenderer.invoke('workbench:save-notes', notebooks),

@@ -77,15 +77,7 @@ function createWindow() {
   sessionManager = new SessionManager(bookHandler, aiHandler, noteHandler)
   layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler, noteHandler)
 
-  // Attach native child views to the window's content view
-  const bookView = bookHandler.getView()
-  const aiView = aiHandler.getView()
-  const noteView = noteHandler.getView()
-  if (bookView) mainWindow.contentView.addChildView(bookView)
-  if (aiView) mainWindow.contentView.addChildView(aiView)
-  if (noteView) mainWindow.contentView.addChildView(noteView)
-
-  // Set initial bounds
+  // Set initial bounds (handlers manage attaching their own views)
   layoutManager.applyBounds()
 
   // Window resize listeners
@@ -120,6 +112,10 @@ function registerIpcHandlers() {
 
   ipcMain.on('workbench:set-views-visible', (_, params: boolean | { target?: 'book' | 'ai' | 'note' | 'all'; visible: boolean }) => {
     layoutManager?.setViewsVisible(params)
+  })
+
+  ipcMain.on('workbench:set-views-dragging', (_, isDragging: boolean) => {
+    layoutManager?.setViewsDragging(isDragging)
   })
 
   // Navigation

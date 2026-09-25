@@ -44,11 +44,11 @@ export class NoteViewHandler {
   }
 
   private detachView(v: WebContentsView) {
-    if (this.attachedViews.has(v) && this.mainWindow && !this.mainWindow.isDestroyed()) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
         this.mainWindow.contentView.removeChildView(v)
       } catch (err) {
-        console.warn('[NoteView] detachView error:', err)
+        // ignore if not attached
       } finally {
         this.attachedViews.delete(v)
       }
@@ -137,8 +137,10 @@ export class NoteViewHandler {
 
     this.wireNavEventsForView(newView, source.id)
 
-    wc.loadURL(source.url).catch((err) => {
-      console.error(`[NoteView] Failed to load initial URL for '${source.name}':`, err)
+    wc.loadURL(source.url).catch((err: any) => {
+      if (err?.code !== 'ERR_ABORTED') {
+        console.error(`[NoteView] Failed to load initial URL for '${source.name}':`, err)
+      }
     })
 
     this.views.set(source.id, newView)
@@ -208,7 +210,7 @@ export class NoteViewHandler {
       this.currentBounds = bounds
     }
     if (this.view && this.isWebSource(this.noteSourceManager?.getActiveSource())) {
-      if (!this.isVisible) {
+      if (!this.isVisible || bounds.width <= 0 || bounds.height <= 0) {
         try {
           this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
         } catch (_) {}

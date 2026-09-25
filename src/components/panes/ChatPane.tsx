@@ -1,7 +1,6 @@
 import React from 'react'
+import { Bot } from 'lucide-react'
 import { PaneToolbar } from '../PaneToolbar'
-import { AIDeleteLoginModal } from '../AIDeleteLoginModal'
-import { AISourceModal } from '../AISourceModal'
 import { NavState, AISource } from '../../types/electron'
 
 export interface ChatPaneProps {
@@ -12,14 +11,7 @@ export interface ChatPaneProps {
   aiSources: AISource[]
   activeAISourceId: string
   onOpenAISourceModal: () => void
-  isDeleteLoginOpen: boolean
   onOpenDeleteLogin: () => void
-  onCloseDeleteLogin: () => void
-  onNotify: (msg: string) => void
-  isSourceModalOpen: boolean
-  onCloseSourceModal: () => void
-  onSelectAISource: (id: string) => void
-  onSaveSources: (sources: AISource[], newActiveId?: string) => Promise<void>
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
@@ -30,18 +22,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   aiSources,
   activeAISourceId,
   onOpenAISourceModal,
-  isDeleteLoginOpen,
   onOpenDeleteLogin,
-  onCloseDeleteLogin,
-  onNotify,
-  isSourceModalOpen,
-  onCloseSourceModal,
-  onSelectAISource,
-  onSaveSources,
 }) => {
-  const activeAISource =
-    aiSources.find((s) => s.id === activeAISourceId) ||
-    aiSources[0] || { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/' }
+  const currentSource = aiSources.find((s) => s.id === activeAISourceId) || { name: 'ChatGPT' }
 
   return (
     <div className="pane-wrapper ai-pane" style={style}>
@@ -54,31 +37,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         activeAISourceId={activeAISourceId}
         onOpenAISourceModal={onOpenAISourceModal}
       />
-      <div className="native-view-anchor" ref={anchorRef} />
-
-      {/* Pane-Scoped Delete Login Modal */}
-      {isDeleteLoginOpen && (
-        <AIDeleteLoginModal
-          isOpen={isDeleteLoginOpen}
-          activeSource={activeAISource}
-          sources={aiSources}
-          onClose={onCloseDeleteLogin}
-          onNotify={onNotify}
-        />
-      )}
-
-      {/* Pane-Scoped Configure AI Platforms Modal */}
-      {isSourceModalOpen && (
-        <AISourceModal
-          isOpen={isSourceModalOpen}
-          sources={aiSources}
-          activeSourceId={activeAISourceId}
-          onClose={onCloseSourceModal}
-          onSelectSource={onSelectAISource}
-          onSaveSources={onSaveSources}
-          onNotify={onNotify}
-        />
-      )}
+      <div className="native-view-anchor" ref={anchorRef}>
+        <div className="pane-ghost-placeholder">
+          <Bot size={36} className="ghost-icon text-emerald" />
+          <span className="ghost-title">Chatview</span>
+          <span className="ghost-subtitle">{currentSource.name}</span>
+        </div>
+      </div>
     </div>
   )
 }
+
