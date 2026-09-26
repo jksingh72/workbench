@@ -194,6 +194,150 @@ function registerIpcHandlers() {
     }
   })
 
+  // Cross-Pane: Extract Last AI Response or Selection with Markdown formatting
+  ipcMain.handle('workbench:extract-last-response', async () => {
+    if (!aiHandler) return { success: false, error: 'AI handler not ready' }
+    try {
+      const data = await aiHandler.extractLastResponse()
+      return { success: true, data }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to extract last response' }
+    }
+  })
+
+  // Cross-Pane: Extract Code Blocks from Chat
+  ipcMain.handle('workbench:extract-ai-code-blocks', async () => {
+    if (!aiHandler) return { success: false, error: 'AI handler not ready', blocks: [] }
+    try {
+      const blocks = await aiHandler.extractCodeBlocks()
+      return { success: true, blocks }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to extract code blocks', blocks: [] }
+    }
+  })
+
+  // Cross-Pane: Extract Full Conversation Transcript
+  ipcMain.handle('workbench:extract-ai-transcript', async () => {
+    if (!aiHandler) return { success: false, error: 'AI handler not ready' }
+    try {
+      const transcript = await aiHandler.extractFullTranscript()
+      return { success: true, transcript }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to extract transcript' }
+    }
+  })
+
+  // Cross-Pane: Save AI Response, Code Blocks, or Transcript to NoteView
+  ipcMain.handle(
+    'workbench:save-ai-content',
+    async (
+      _,
+      {
+        type = 'response',
+        targetDir,
+        activeFilePath,
+      }: {
+        type?: 'response' | 'code' | 'transcript'
+        targetDir?: string
+        activeFilePath?: string
+      }
+    ) => {
+      if (!aiHandler) return { success: false, error: 'AI handler not ready' }
+
+      try {
+        const effectiveDir =
+          targetDir ||
+          (activeFilePath ? path.dirname(activeFilePath) : null) ||
+          app.getPath('documents')
+
+        if (type === 'response') {
+          const res = await aiHandler.extractLastResponse()
+          if (!res.fullMarkdown) {
+            return { success: false, error: 'No AI response or selection found to save' }
+          }
+
+          let savePath = activeFilePath
+
+          if (!savePath || !fs.existsSync(savePath)) {
+            savePath = path.join(effectiveDir, 'Clippings.md')
+          }
+
+          let existing = ''
+          if (fs.existsSync(savePath)) {
+            existing = await fs.promises.readFile(savePath, 'utf-8')
+          }
+          const separator =
+            existing.length > 0 && !existing.endsWith('\n\n')
+              ? existing.endsWith('\n')
+                ? '\n'
+                : '\n\n'
+              : ''
+          await fs.promises.writeFile(savePath, existing + separator + res.fullMarkdown, 'utf-8')
+
+          const fileName = path.basename(savePath)
+          return {
+            success: true,
+            filePath: savePath,
+            fileName,
+            hasSelection: !!res.selectedText,
+            message: `📥 Saved ${res.selectedText ? 'selection' : 'AI response'} to ${fileName}`,
+          }
+        } else if (type === 'code') {
+          const blocks = await aiHandler.extractCodeBlocks()
+          if (!blocks || blocks.length === 0) {
+            return { success: false, error: 'No code blocks found in current chat view' }
+          }
+
+          const savedFiles: string[] = []
+          for (const block of blocks) {
+            let targetName = block.suggestedFileName
+            let targetPath = path.join(effectiveDir, targetName)
+            let counter = 1
+            while (fs.existsSync(targetPath)) {
+              const ext = path.extname(targetName)
+              const base = path.basename(targetName, ext)
+              targetPath = path.join(effectiveDir, `${base}-${counter}${ext}`)
+              counter++
+            }
+            await fs.promises.writeFile(targetPath, block.code, 'utf-8')
+            savedFiles.push(path.basename(targetPath))
+          }
+
+          return {
+            success: true,
+            count: savedFiles.length,
+            files: savedFiles,
+            message: `💾 Extracted ${savedFiles.length} code file(s) into folder`,
+          }
+        } else if (type === 'transcript') {
+          const transcript = await aiHandler.extractFullTranscript()
+          if (!transcript) {
+            return { success: false, error: 'No chat messages found to export' }
+          }
+
+          const now = new Date()
+          const pad = (n: number) => String(n).padStart(2, '0')
+          const dateTag = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
+          const fileName = `Chat-Session-${dateTag}.md`
+          const targetPath = path.join(effectiveDir, fileName)
+
+          await fs.promises.writeFile(targetPath, transcript, 'utf-8')
+          return {
+            success: true,
+            filePath: targetPath,
+            fileName,
+            message: `📜 Exported full chat transcript to ${fileName}`,
+          }
+        }
+
+        return { success: false, error: 'Unknown save type' }
+      } catch (err: any) {
+        console.error('[Main] save-ai-content error:', err)
+        return { success: false, error: err?.message || 'Failed to save AI content' }
+      }
+    }
+  )
+
   // Cross-Pane: Send Text Directly to AI
   ipcMain.handle('workbench:send-text-to-ai', async (_, { text, templateKey = 'raw', customPrompt }: { text: string; templateKey?: string; customPrompt?: string }) => {
     if (!aiHandler) return { success: false, error: 'AI handler not ready' }

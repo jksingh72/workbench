@@ -523,6 +523,7 @@ export const App: React.FC = () => {
     }
   }, [dragTarget, isSwapped, splitRatio, verticalSplitRatio, syncBounds])
 
+
   // Navigation actions
   const handleNavAction = (
     target: 'book' | 'ai' | 'note',
@@ -708,20 +709,68 @@ export const App: React.FC = () => {
       showNotification('📝 Noteview is currently disabled. Enable Noteview in the top bar.')
       return
     }
-    let text = rawText || ''
-    if (!text && window.electron?.extractSelection) {
-      const res = await window.electron.extractSelection('ai')
-      if (res.success && res.text) text = res.text
-    }
-    if (!text) {
-      showNotification('⚠️ Highlight some text in Chatview to save to Notes')
+
+    if (rawText) {
+      if (activeNoteSourceId === 'onenote') {
+        await navigator.clipboard.writeText(rawText)
+        showNotification('📋 AI content copied to clipboard! Paste into OneNote.')
+      } else {
+        setClippedText(rawText)
+      }
       return
     }
-    if (activeNoteSourceId === 'onenote') {
-      await navigator.clipboard.writeText(text)
-      showNotification('📋 AI answer copied to clipboard! Paste into OneNote.')
+
+    // 1-Click Smart Save: Extract either highlighted selection or complete latest AI response
+    if (window.electron?.extractLastResponse) {
+      const res = await window.electron.extractLastResponse()
+      if (res.success && res.data) {
+        const { selectedText, fullMarkdown, response } = res.data
+        const content = selectedText || fullMarkdown || response
+        if (content) {
+          if (activeNoteSourceId === 'onenote') {
+            await navigator.clipboard.writeText(content)
+            showNotification('📋 AI response copied to clipboard! Paste into OneNote.')
+          } else {
+            setClippedText(content)
+            showNotification(`📥 Saved ${selectedText ? 'selection' : 'AI response'} to Notes!`)
+          }
+          return
+        }
+      }
+    }
+
+    // Fallback: extractSelection
+    if (window.electron?.extractSelection) {
+      const res = await window.electron.extractSelection('ai')
+      if (res.success && res.text) {
+        setClippedText(res.text)
+        showNotification('📥 Saved selection to Notes!')
+        return
+      }
+    }
+
+    showNotification('⚠️ No AI response or text selection found in Chatview to save')
+  }
+
+  const handleExtractAICode = async () => {
+    if (!window.electron?.saveAIContent) return
+    showNotification('💻 Extracting code blocks from Chat...')
+    const res = await window.electron.saveAIContent({ type: 'code' })
+    if (res.success) {
+      showNotification(`💾 ${res.message || 'Extracted code blocks!'}`)
     } else {
-      setClippedText(text)
+      showNotification(`⚠️ ${res.error || 'No code blocks found'}`)
+    }
+  }
+
+  const handleExportAITranscript = async () => {
+    if (!window.electron?.saveAIContent) return
+    showNotification('📜 Exporting chat transcript...')
+    const res = await window.electron.saveAIContent({ type: 'transcript' })
+    if (res.success) {
+      showNotification(`📜 ${res.message || 'Exported chat transcript!'}`)
+    } else {
+      showNotification(`⚠️ ${res.error || 'Failed to export chat'}`)
     }
   }
 
@@ -760,6 +809,14 @@ export const App: React.FC = () => {
       }
     })
 
+    const unsubCode = window.electron?.onExtractCodeTrigger?.(() => {
+      handleExtractAICode()
+    })
+
+    const unsubTranscript = window.electron?.onExportTranscriptTrigger?.(() => {
+      handleExportAITranscript()
+    })
+
     const unsubAskAIWithText = window.electron?.onAskAIWithText?.((data) => {
       if (window.electron?.sendTextToAI) {
         window.electron.sendTextToAI({ text: data.text, templateKey: data.templateKey })
@@ -771,12 +828,23 @@ export const App: React.FC = () => {
       showNotification(msg)
     })
 
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'n')) {
+        e.preventDefault()
+        handleSaveAIToNote()
+      }
+    }
+    window.addEventListener('keydown', handleGlobalShortcuts)
+
     return () => {
       unsubClip?.()
+      unsubCode?.()
+      unsubTranscript?.()
       unsubAskAIWithText?.()
       unsubNotify?.()
+      window.removeEventListener('keydown', handleGlobalShortcuts)
     }
-  }, [activeNoteSourceId, activePanes])
+  }, [activeNoteSourceId, activePanes, handleSaveAIToNote, handleExtractAICode, handleExportAITranscript])
 
   // Ask AI handler
   const handleAskAI = async (
@@ -893,6 +961,8 @@ export const App: React.FC = () => {
       onOpenAISourceModal={handleOpenAISourceModal}
       onOpenDeleteLogin={handleOpenAIDeleteLogin}
       onSaveAIToNote={() => handleSaveAIToNote()}
+      onExtractCode={() => handleExtractAICode()}
+      onExportTranscript={() => handleExportAITranscript()}
       onNotify={showNotification}
     />
   )

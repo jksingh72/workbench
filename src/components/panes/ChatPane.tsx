@@ -13,6 +13,8 @@ export interface ChatPaneProps {
   onOpenAISourceModal: () => void
   onOpenDeleteLogin: () => void
   onSaveAIToNote?: () => void
+  onExtractCode?: () => void
+  onExportTranscript?: () => void
   onNotify?: (msg: string) => void
 }
 
@@ -26,6 +28,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onOpenAISourceModal,
   onOpenDeleteLogin,
   onSaveAIToNote,
+  onExtractCode,
+  onExportTranscript,
   onNotify,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false)
@@ -145,6 +149,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         onNavAction={onNavAction}
         onOpenSessionModal={onOpenDeleteLogin}
         onSaveAIToNote={onSaveAIToNote}
+        onExtractAICode={onExtractCode}
+        onExportAITranscript={onExportTranscript}
         aiSources={aiSources}
         activeAISourceId={activeAISourceId}
         onOpenAISourceModal={onOpenAISourceModal}

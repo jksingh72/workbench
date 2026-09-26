@@ -85,6 +85,10 @@ export interface ElectronAPI {
   sendFileToAI: (filePath: string, instruction?: string) => Promise<{ success: boolean; uploaded?: boolean; fileName?: string; error?: string }>
   sendTextToAI: (params: { text: string; templateKey?: string; customPrompt?: string }) => Promise<AskAIResult>
   extractSelection: (target?: 'book' | 'ai' | 'note') => Promise<{ success: boolean; text?: string; error?: string }>
+  extractLastResponse?: () => Promise<{ success: boolean; data?: { selectedText: string; prompt: string; response: string; fullMarkdown: string }; error?: string }>
+  extractAICodeBlocks?: () => Promise<{ success: boolean; blocks: Array<{ index: number; language: string; extension: string; code: string; suggestedFileName: string }>; error?: string }>
+  extractAITranscript?: () => Promise<{ success: boolean; transcript?: string; error?: string }>
+  saveAIContent?: (params: { type?: 'response' | 'code' | 'transcript'; targetDir?: string; activeFilePath?: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; hasSelection?: boolean; count?: number; files?: string[]; message?: string; error?: string }>
   readFileContent: (filePath: string) => Promise<{ success: boolean; content?: string; fileName?: string; isBinary?: boolean; error?: string }>
   appendToFile: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
   copyFilesToClipboard?: (paths: string[], isCut?: boolean) => Promise<{ success: boolean; count?: number; error?: string }>
@@ -93,6 +97,8 @@ export interface ElectronAPI {
 
   onClipSelectionText?: (callback: (data: { source: 'book' | 'ai'; text: string }) => void) => () => void
   onAskAIWithText?: (callback: (data: { templateKey: string; text: string }) => void) => () => void
+  onExtractCodeTrigger?: (callback: () => void) => () => void
+  onExportTranscriptTrigger?: (callback: () => void) => () => void
   onNotification?: (callback: (msg: string) => void) => () => void
 }
 

@@ -32,6 +32,8 @@ interface PaneToolbarProps {
   onOpenSessionModal?: (target: 'book' | 'ai' | 'note') => void
   onClipToNote?: () => void
   onSaveAIToNote?: () => void
+  onExtractAICode?: () => void
+  onExportAITranscript?: () => void
   onSendNoteToAI?: () => void
   bookSources?: BookSource[]
   activeBookSourceId?: string
@@ -55,6 +57,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   onOpenSessionModal,
   onClipToNote,
   onSaveAIToNote,
+  onExtractAICode,
+  onExportAITranscript,
   onSendNoteToAI,
   bookSources = [],
   activeBookSourceId = 'oreilly',
@@ -448,14 +452,36 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         )}
 
         {isAI && (
-          <button
-            className="clip-note-btn ai-save-note-btn"
-            onClick={onSaveAIToNote}
-            title="Save selected text or answer from AI to Notes (Ctrl+Shift+N)"
-          >
-            <BookMarked size={12} className="text-purple" />
-            <span>Save to Note</span>
-          </button>
+          <>
+            <button
+              className="clip-note-btn ai-save-note-btn"
+              onClick={onSaveAIToNote}
+              title="Save selected text or latest response from AI to Notes (Ctrl+Shift+S)"
+            >
+              <BookMarked size={12} className="text-purple" />
+              <span>Save to Note</span>
+            </button>
+            {onExtractAICode && (
+              <button
+                className="clip-note-btn ai-extract-code-btn"
+                onClick={onExtractAICode}
+                title="Extract code blocks from chat into project files"
+              >
+                <Code2 size={12} className="text-cyan" />
+                <span>Extract Code</span>
+              </button>
+            )}
+            {onExportAITranscript && (
+              <button
+                className="clip-note-btn ai-export-chat-btn"
+                onClick={onExportAITranscript}
+                title="Export full chat session as a Markdown note"
+              >
+                <FileText size={12} className="text-amber" />
+                <span>Export Chat</span>
+              </button>
+            )}
+          </>
         )}
 
         {isNote && !isLocalFolder && (

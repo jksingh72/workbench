@@ -126,6 +126,14 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:send-text-to-ai', params),
   extractSelection: (target: 'book' | 'ai' | 'note' = 'book') =>
     ipcRenderer.invoke('workbench:extract-selection', target),
+  extractLastResponse: () =>
+    ipcRenderer.invoke('workbench:extract-last-response'),
+  extractAICodeBlocks: () =>
+    ipcRenderer.invoke('workbench:extract-ai-code-blocks'),
+  extractAITranscript: () =>
+    ipcRenderer.invoke('workbench:extract-ai-transcript'),
+  saveAIContent: (params: { type?: 'response' | 'code' | 'transcript'; targetDir?: string; activeFilePath?: string }) =>
+    ipcRenderer.invoke('workbench:save-ai-content', params),
   readFileContent: (filePath: string) =>
     ipcRenderer.invoke('workbench:read-file-content', filePath),
   appendToFile: (filePath: string, content: string) =>
@@ -156,6 +164,20 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('workbench:ask-ai-with-text', listener)
     return () => {
       ipcRenderer.removeListener('workbench:ask-ai-with-text', listener)
+    }
+  },
+  onExtractCodeTrigger: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:extract-code-trigger', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:extract-code-trigger', listener)
+    }
+  },
+  onExportTranscriptTrigger: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:export-transcript-trigger', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:export-transcript-trigger', listener)
     }
   },
   onNotification: (callback: (msg: string) => void) => {

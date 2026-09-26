@@ -145,7 +145,7 @@ export class AIViewHandler {
       if (selection) {
         menuTemplate.push(
           {
-            label: '📝 Save Selection to Notes (Ctrl+Shift+N)',
+            label: '📝 Save Selection to Notes (Ctrl+Shift+S)',
             click: () => {
               if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 this.mainWindow.webContents.send('workbench:clip-selection-text', {
@@ -156,7 +156,7 @@ export class AIViewHandler {
             },
           },
           {
-            label: '💬 Re-insert to Prompt',
+            label: '💬 Re-insert Selection to Prompt',
             click: () => {
               this.doAskAI('raw', selection)
             },
@@ -169,14 +169,48 @@ export class AIViewHandler {
         )
       } else {
         menuTemplate.push(
-          { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
-          { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
-          { label: 'Reload', click: () => wc.reload() },
-          { type: 'separator' },
-          { label: 'Paste', role: 'paste' },
-          { label: 'Select All', role: 'selectAll' }
+          {
+            label: '📥 Save Latest AI Response to Notes (Ctrl+Shift+S)',
+            click: async () => {
+              const res = await this.extractLastResponse()
+              const text = res.fullMarkdown || res.response
+              if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:clip-selection-text', {
+                  source: 'ai',
+                  text,
+                })
+              }
+            },
+          }
         )
       }
+
+      menuTemplate.push(
+        { type: 'separator' },
+        {
+          label: '💻 Extract Code Blocks to Files...',
+          click: () => {
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send('workbench:extract-code-trigger')
+            }
+          },
+        },
+        {
+          label: '📜 Export Full Chat Transcript...',
+          click: () => {
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send('workbench:export-transcript-trigger')
+            }
+          },
+        },
+        { type: 'separator' },
+        { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+        { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+        { label: 'Reload', click: () => wc.reload() },
+        { type: 'separator' },
+        { label: 'Paste (Ctrl+V)', role: 'paste' },
+        { label: 'Select All (Ctrl+A)', role: 'selectAll' }
+      )
 
       const menu = Menu.buildFromTemplate(menuTemplate)
       menu.popup({ window: this.mainWindow })
@@ -187,8 +221,9 @@ export class AIViewHandler {
       const isCtrlOrMeta = input.control || input.meta
       if (isCtrlOrMeta && input.shift) {
         const key = input.key.toLowerCase()
-        if (key === 'n' || key === 'c') {
-          const text = await this.extractSelection()
+        if (key === 's' || key === 'n' || key === 'c') {
+          const res = await this.extractLastResponse()
+          const text = res.selectedText || res.fullMarkdown || res.response
           if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send('workbench:clip-selection-text', { source: 'ai', text })
           }
@@ -562,6 +597,227 @@ export class AIViewHandler {
       return (selectedText || '').trim()
     } catch (err) {
       console.error('[AIView] Failed to extract selection:', err)
+      return ''
+    }
+  }
+
+  /**
+   * Extracts the user's selection or the complete latest AI assistant response,
+   * along with the preceding prompt and ready-to-save Markdown formatting.
+   */
+  public async extractLastResponse(): Promise<{
+    selectedText: string
+    prompt: string
+    response: string
+    fullMarkdown: string
+  }> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { selectedText: '', prompt: '', response: '', fullMarkdown: '' }
+    }
+    try {
+      const data: { selectedText?: string; assistantText?: string; promptText?: string } =
+        await this.view.webContents.executeJavaScript(`
+          (function() {
+            var sel = window.getSelection();
+            var selectedText = sel ? sel.toString().trim() : '';
+
+            var assistantText = '';
+            var promptText = '';
+
+            // 1. ChatGPT selectors
+            var gptAssistant = document.querySelectorAll('[data-message-author-role="assistant"]');
+            if (gptAssistant && gptAssistant.length > 0) {
+              var lastMsg = gptAssistant[gptAssistant.length - 1];
+              assistantText = (lastMsg.innerText || lastMsg.textContent || '').trim();
+
+              var gptUser = document.querySelectorAll('[data-message-author-role="user"]');
+              if (gptUser && gptUser.length > 0) {
+                promptText = (gptUser[gptUser.length - 1].innerText || '').trim();
+              }
+            }
+
+            // 2. Claude selectors
+            if (!assistantText) {
+              var claudeMessages = document.querySelectorAll('.font-claude-message, [data-is-streaming], .standard-markdown');
+              if (claudeMessages && claudeMessages.length > 0) {
+                var lastClaude = claudeMessages[claudeMessages.length - 1];
+                assistantText = (lastClaude.innerText || lastClaude.textContent || '').trim();
+              }
+              var claudeUser = document.querySelectorAll('.font-user-message');
+              if (claudeUser && claudeUser.length > 0) {
+                promptText = (claudeUser[claudeUser.length - 1].innerText || '').trim();
+              }
+            }
+
+            // 3. Generic fallback
+            if (!assistantText) {
+              var articles = document.querySelectorAll('article');
+              if (articles && articles.length > 0) {
+                assistantText = (articles[articles.length - 1].innerText || '').trim();
+              }
+            }
+
+            return {
+              selectedText: selectedText,
+              assistantText: assistantText,
+              promptText: promptText
+            };
+          })()
+        `)
+
+      const selectedText = (data?.selectedText || '').trim()
+      const prompt = (data?.promptText || '').trim()
+      const response = (data?.assistantText || '').trim()
+
+      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const dateStr = new Date().toLocaleDateString()
+
+      let fullMarkdown = ''
+      if (selectedText) {
+        fullMarkdown = `\n\n---\n### 💬 Clipped from AI (${dateStr} ${timestamp})\n> ${selectedText.replace(/\n/g, '\n> ')}\n`
+      } else if (response) {
+        fullMarkdown = `\n\n---\n`
+        if (prompt) {
+          fullMarkdown += `### ❓ Prompt (${dateStr} ${timestamp})\n> ${prompt.replace(/\n/g, '\n> ')}\n\n`
+        }
+        fullMarkdown += `### 🤖 AI Response\n\n${response}\n`
+      }
+
+      return {
+        selectedText,
+        prompt,
+        response,
+        fullMarkdown,
+      }
+    } catch (err) {
+      console.error('[AIView] Failed to extract last response:', err)
+      return { selectedText: '', prompt: '', response: '', fullMarkdown: '' }
+    }
+  }
+
+  /**
+   * Extracts isolated code blocks from the chat along with detected programming languages.
+   */
+  public async extractCodeBlocks(): Promise<
+    Array<{
+      index: number
+      language: string
+      extension: string
+      code: string
+      suggestedFileName: string
+    }>
+  > {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return []
+    }
+    try {
+      return await this.view.webContents.executeJavaScript(`
+        (function() {
+          var blocks = [];
+          var preElements = document.querySelectorAll('pre');
+          var extMap = {
+            python: 'py', py: 'py',
+            typescript: 'ts', ts: 'ts',
+            javascript: 'js', js: 'js',
+            tsx: 'tsx', jsx: 'jsx',
+            html: 'html', css: 'css', scss: 'scss',
+            json: 'json', yaml: 'yml', yml: 'yml',
+            xml: 'xml', sql: 'sql',
+            sh: 'sh', bash: 'sh', shell: 'sh',
+            powershell: 'ps1', ps1: 'ps1',
+            c: 'c', cpp: 'cpp', csharp: 'cs', cs: 'cs',
+            java: 'java', rust: 'rs', rs: 'rs',
+            go: 'go', ruby: 'rb', rb: 'rb',
+            php: 'php', swift: 'swift', kotlin: 'kt', kt: 'kt',
+            markdown: 'md', md: 'md', txt: 'txt'
+          };
+
+          preElements.forEach(function(pre, idx) {
+            var codeEl = pre.querySelector('code');
+            var rawCode = (codeEl ? codeEl.innerText : pre.innerText) || '';
+            if (!rawCode.trim()) return;
+
+            var lang = 'txt';
+            var classStr = ((codeEl ? codeEl.className : '') + ' ' + pre.className).toLowerCase();
+            var match = classStr.match(/language-([a-z0-9_\\-#+]+)/i);
+            if (match) {
+              lang = match[1].toLowerCase();
+            } else {
+              var headerEl = pre.querySelector('div, span, button');
+              if (headerEl && headerEl.innerText && headerEl.innerText.length < 15) {
+                var candidate = headerEl.innerText.trim().toLowerCase();
+                if (extMap[candidate]) lang = candidate;
+              }
+            }
+
+            var extension = extMap[lang] || 'txt';
+            var suggestedFileName = 'snippet-' + (idx + 1) + '.' + extension;
+
+            blocks.push({
+              index: idx + 1,
+              language: lang,
+              extension: extension,
+              code: rawCode.trim(),
+              suggestedFileName: suggestedFileName
+            });
+          });
+
+          return blocks;
+        })()
+      `)
+    } catch (err) {
+      console.error('[AIView] Failed to extract code blocks:', err)
+      return []
+    }
+  }
+
+  /**
+   * Extracts the full chat conversation into a clean Markdown transcript.
+   */
+  public async extractFullTranscript(): Promise<string> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return ''
+    }
+    try {
+      const turns: Array<{ role: string; text: string }> = await this.view.webContents.executeJavaScript(`
+        (function() {
+          var turns = [];
+          var gptTurns = document.querySelectorAll('[data-message-author-role]');
+          if (gptTurns && gptTurns.length > 0) {
+            gptTurns.forEach(function(node) {
+              var role = node.getAttribute('data-message-author-role') === 'assistant' ? '🤖 Assistant' : '👤 User';
+              var text = (node.innerText || '').trim();
+              if (text) turns.push({ role: role, text: text });
+            });
+          } else {
+            var userNodes = document.querySelectorAll('.font-user-message');
+            var assistantNodes = document.querySelectorAll('.font-claude-message');
+            var maxLen = Math.max(userNodes.length, assistantNodes.length);
+            for (var i = 0; i < maxLen; i++) {
+              if (userNodes[i]) {
+                var uText = (userNodes[i].innerText || '').trim();
+                if (uText) turns.push({ role: '👤 User', text: uText });
+              }
+              if (assistantNodes[i]) {
+                var aText = (assistantNodes[i].innerText || '').trim();
+                if (aText) turns.push({ role: '🤖 Assistant', text: aText });
+              }
+            }
+          }
+          return turns;
+        })()
+      `)
+
+      if (!turns || turns.length === 0) return ''
+
+      const dateStr = new Date().toLocaleDateString()
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const title = `# AI Chat Session (${dateStr} ${timeStr})\n\n`
+      const body = turns.map((t) => `### ${t.role}\n\n${t.text}\n\n---`).join('\n\n')
+
+      return title + body
+    } catch (err) {
+      console.error('[AIView] Failed to extract full transcript:', err)
       return ''
     }
   }
