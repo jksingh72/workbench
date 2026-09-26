@@ -118,4 +118,51 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:move-item', { srcPath, destDir }),
   getSystemRoots: () =>
     ipcRenderer.invoke('workbench:get-system-roots'),
+
+  // Cross-Pane Movement & Transfer APIs
+  sendFileToAI: (filePath: string, instruction?: string) =>
+    ipcRenderer.invoke('workbench:send-file-to-ai', { filePath, instruction }),
+  sendTextToAI: (params: { text: string; templateKey?: string; customPrompt?: string }) =>
+    ipcRenderer.invoke('workbench:send-text-to-ai', params),
+  extractSelection: (target: 'book' | 'ai' | 'note' = 'book') =>
+    ipcRenderer.invoke('workbench:extract-selection', target),
+  readFileContent: (filePath: string) =>
+    ipcRenderer.invoke('workbench:read-file-content', filePath),
+  appendToFile: (filePath: string, content: string) =>
+    ipcRenderer.invoke('workbench:append-to-file', { filePath, content }),
+  copyFilesToClipboard: (paths: string[], isCut?: boolean) =>
+    ipcRenderer.invoke('workbench:copy-files-to-clipboard', { paths, isCut }),
+
+  startDragFile: (filePath: string | string[]) =>
+    ipcRenderer.send('workbench:start-drag-file', filePath),
+  onDragEnded: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:drag-ended', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:drag-ended', listener)
+    }
+  },
+
+  // Cross-Pane Event Listeners (from context-menu and keyboard shortcuts)
+  onClipSelectionText: (callback: (data: { source: 'book' | 'ai'; text: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:clip-selection-text', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:clip-selection-text', listener)
+    }
+  },
+  onAskAIWithText: (callback: (data: { templateKey: string; text: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:ask-ai-with-text', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:ask-ai-with-text', listener)
+    }
+  },
+  onNotification: (callback: (msg: string) => void) => {
+    const listener = (_: any, msg: string) => callback(msg)
+    ipcRenderer.on('workbench:notify', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:notify', listener)
+    }
+  },
 })

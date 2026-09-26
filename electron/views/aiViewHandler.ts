@@ -1,5 +1,6 @@
 import { WebContentsView, BrowserWindow, session, clipboard, Menu, Rectangle } from 'electron'
 import fs from 'node:fs'
+import path from 'node:path'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { AISourceManager, AISource } from '../services/aiSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
@@ -120,7 +121,10 @@ export class AIViewHandler {
 
     wc.on('did-start-loading', onStateChange)
     wc.on('did-stop-loading', onStateChange)
-    wc.on('did-finish-load', onStateChange)
+    wc.on('did-finish-load', () => {
+      onStateChange()
+      this.attachDropAndUploadInterceptor(viewInstance)
+    })
     wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
       if (this.currentSourceId === sourceId) {
         console.warn(`[AIView] Load failed (${errorCode}):`, errorDescription, validatedURL)
@@ -128,8 +132,69 @@ export class AIViewHandler {
       }
     })
     wc.on('did-navigate', onStateChange)
-    wc.on('did-navigate-in-page', onStateChange)
+    wc.on('did-navigate-in-page', () => {
+      onStateChange()
+      this.attachDropAndUploadInterceptor(viewInstance)
+    })
     wc.on('page-title-updated', onStateChange)
+
+    wc.on('context-menu', (_e, params) => {
+      const selection = (params.selectionText || '').trim()
+      const menuTemplate: Electron.MenuItemConstructorOptions[] = []
+
+      if (selection) {
+        menuTemplate.push(
+          {
+            label: '📝 Save Selection to Notes (Ctrl+Shift+N)',
+            click: () => {
+              if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:clip-selection-text', {
+                  source: 'ai',
+                  text: selection,
+                })
+              }
+            },
+          },
+          {
+            label: '💬 Re-insert to Prompt',
+            click: () => {
+              this.doAskAI('raw', selection)
+            },
+          },
+          { type: 'separator' },
+          {
+            label: '📋 Copy Selection (Ctrl+C)',
+            role: 'copy',
+          }
+        )
+      } else {
+        menuTemplate.push(
+          { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+          { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+          { label: 'Reload', click: () => wc.reload() },
+          { type: 'separator' },
+          { label: 'Paste', role: 'paste' },
+          { label: 'Select All', role: 'selectAll' }
+        )
+      }
+
+      const menu = Menu.buildFromTemplate(menuTemplate)
+      menu.popup({ window: this.mainWindow })
+    })
+
+    wc.on('before-input-event', async (_e, input) => {
+      if (input.type !== 'keyDown') return
+      const isCtrlOrMeta = input.control || input.meta
+      if (isCtrlOrMeta && input.shift) {
+        const key = input.key.toLowerCase()
+        if (key === 'n' || key === 'c') {
+          const text = await this.extractSelection()
+          if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('workbench:clip-selection-text', { source: 'ai', text })
+          }
+        }
+      }
+    })
   }
 
   public getView(): WebContentsView | null {
@@ -482,4 +547,250 @@ export class AIViewHandler {
       return { success: false, error: err.message || 'Failed to clear AI session' }
     }
   }
+
+  public async extractSelection(): Promise<string> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return ''
+    }
+    try {
+      const selectedText: string = await this.view.webContents.executeJavaScript(`
+        (function() {
+          const sel = window.getSelection();
+          return sel ? sel.toString() : '';
+        })()
+      `)
+      return (selectedText || '').trim()
+    } catch (err) {
+      console.error('[AIView] Failed to extract selection:', err)
+      return ''
+    }
+  }
+
+  public async sendFileToAI(
+    filePath: string,
+    customInstruction?: string
+  ): Promise<{ success: boolean; uploaded?: boolean; fileName?: string; error?: string }> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { success: false, error: 'AI view is not ready' }
+    }
+
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: 'File does not exist' }
+      }
+
+      const stat = await fs.promises.stat(filePath)
+      if (stat.isDirectory()) {
+        return { success: false, error: 'Cannot send a folder to AI' }
+      }
+
+      if (stat.size > 25 * 1024 * 1024) {
+        return { success: false, error: 'File is too large (>25MB)' }
+      }
+
+      const fileName = path.basename(filePath)
+      const ext = path.extname(fileName).toLowerCase().replace('.', '')
+      const textExtensions = [
+        'txt', 'md', 'markdown', 'js', 'ts', 'jsx', 'tsx', 'py', 'json', 'html', 'htm',
+        'css', 'scss', 'csv', 'xml', 'yaml', 'yml', 'sql', 'sh', 'bat', 'ps1',
+        'c', 'cpp', 'h', 'hpp', 'java', 'rs', 'go', 'rb', 'php', 'swift', 'kt', 'log', 'ini', 'env'
+      ]
+      const isKnownTextExt = textExtensions.includes(ext)
+
+      // Read buffer
+      const fileBuffer = await fs.promises.readFile(filePath)
+      const base64Data = fileBuffer.toString('base64')
+
+      // Detect if strictly text (known extension and no null bytes in sample)
+      let isText = false
+      let textContent = ''
+      if (isKnownTextExt) {
+        const sample = fileBuffer.subarray(0, Math.min(fileBuffer.length, 1024))
+        if (!sample.includes(0)) {
+          isText = true
+          try {
+            textContent = fileBuffer.toString('utf-8')
+          } catch (_) {
+            isText = false
+          }
+        }
+      }
+
+      const mimeTypes: Record<string, string> = {
+        pdf: 'application/pdf',
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        svg: 'image/svg+xml',
+        json: 'application/json',
+        csv: 'text/csv',
+        txt: 'text/plain',
+        md: 'text/markdown',
+        js: 'text/javascript',
+        ts: 'text/typescript',
+        py: 'text/x-python',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        zip: 'application/zip',
+      }
+      const mimeType = mimeTypes[ext] || 'application/octet-stream'
+
+      // Optional user prompt instruction only (never dump file content if file is uploaded)
+      const userInstruction = (customInstruction || '').trim()
+
+      const result = await this.view.webContents.executeJavaScript(`
+        (async function(base64Data, fileName, mimeType, isText, textContent, userInstruction) {
+          let fileUploaded = false;
+          try {
+            const fileInput = document.querySelector('input[type="file"]');
+            if (fileInput) {
+              const byteCharacters = atob(base64Data);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: mimeType });
+              const file = new File([blob], fileName, { type: mimeType, lastModified: Date.now() });
+
+              const dt = new DataTransfer();
+              dt.items.add(file);
+              fileInput.files = dt.files;
+              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+              fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+              fileUploaded = true;
+            }
+          } catch (e) {
+            console.warn('[AIView] File upload injection failed:', e);
+          }
+
+          // If the file was successfully uploaded, we do NOT dump the file content into the prompt!
+          // We only inject userInstruction if one was provided.
+          // If file upload failed, we only fall back to text paste if the file is genuinely plain text.
+          let textToInject = '';
+          if (fileUploaded) {
+            textToInject = userInstruction;
+          } else if (isText && textContent) {
+            const extName = fileName.split('.').pop() || 'txt';
+            textToInject = (userInstruction ? userInstruction + '\\n\\n' : '') +
+              'File: \`' + fileName + '\`\\n\`\`\`' + extName + '\\n' + textContent + '\\n\`\`\`';
+          }
+
+          if (textToInject) {
+            try {
+              const input = document.querySelector('#prompt-textarea') || 
+                            document.querySelector('div[contenteditable="true"]') || 
+                            document.querySelector('textarea');
+              if (input) {
+                input.focus();
+                if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+                  const existing = input.value ? input.value + '\\n\\n' : '';
+                  input.value = existing + textToInject;
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                } else {
+                  const selection = window.getSelection();
+                  const range = document.createRange();
+                  range.selectNodeContents(input);
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                  document.execCommand('insertText', false, textToInject);
+                  input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInject }));
+                }
+              }
+            } catch (e) {
+              console.warn('[AIView] Text insertion error:', e);
+            }
+          }
+
+          return { success: true, fileUploaded };
+        })(${JSON.stringify(base64Data)}, ${JSON.stringify(fileName)}, ${JSON.stringify(mimeType)}, ${isText}, ${JSON.stringify(textContent)}, ${JSON.stringify(userInstruction)})
+      `)
+
+      this.view.webContents.focus()
+      return { success: true, uploaded: result?.fileUploaded, fileName }
+    } catch (err: any) {
+      console.error('[AIView] sendFileToAI error:', err)
+      return { success: false, error: err.message || 'Failed to send file to AI' }
+    }
+  }
+
+  // =========================================================================
+  // Modular Section: Drag & Drop File Upload Interceptor
+  // =========================================================================
+  private currentDraggingFile: string | null = null
+  private currentClipboardFile: string | null = null
+
+  public setDraggingFile(filePath: string | null) {
+    this.currentDraggingFile = filePath
+  }
+
+  public getDraggingFile(): string | null {
+    return this.currentDraggingFile
+  }
+
+  public setClipboardFile(filePath: string | null) {
+    this.currentClipboardFile = filePath
+    if (filePath && this.view && !this.view.webContents.isDestroyed()) {
+      this.view.webContents.send('workbench:staged-file-copied', { fileName: path.basename(filePath) })
+    }
+  }
+
+  public consumeClipboardFile(): string | null {
+    const file = this.currentClipboardFile
+    this.currentClipboardFile = null
+    return file
+  }
+
+  public getClipboardFile(): string | null {
+    return this.currentClipboardFile
+  }
+
+  /**
+   * Injects drop listeners into the AI guest page (Claude / ChatGPT) so that
+   * dropped files are reliably forwarded to the chatbot's file upload input
+   * rather than pasting raw text paths into textareas.
+   */
+  public attachDropAndUploadInterceptor(viewInstance: WebContentsView) {
+    if (!viewInstance || viewInstance.webContents.isDestroyed()) return
+
+    viewInstance.webContents
+      .executeJavaScript(`
+        (function() {
+          if (window.__wb_drop_interceptor_active) return;
+          window.__wb_drop_interceptor_active = true;
+
+          // Prevent default browser behavior that pastes text paths into inputs
+          document.addEventListener('dragover', function(e) {
+            if (e.dataTransfer) {
+              const types = Array.from(e.dataTransfer.types || []);
+              if (types.includes('Files') || types.includes('application/x-workbench-file')) {
+                e.dataTransfer.dropEffect = 'copy';
+              }
+            }
+          }, true);
+
+          document.addEventListener('drop', function(e) {
+            const hasFiles = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0;
+            if (hasFiles) {
+              // Direct the dropped file into the chatbot's native file input
+              const fileInput = document.querySelector('input[type="file"]');
+              if (fileInput) {
+                try {
+                  fileInput.files = e.dataTransfer.files;
+                  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                  fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+                } catch (_) {}
+              }
+            }
+          }, false);
+        })();
+      `)
+      .catch(() => {
+        // Silently ignore navigation/unload race conditions
+      })
+  }
 }
+

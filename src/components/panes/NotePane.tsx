@@ -18,6 +18,7 @@ export interface NotePaneProps {
   noteResetTrigger: number
   onNoteReset: () => void
   onOpenDeleteData: () => void
+  onSendNoteToAI?: () => void
   onNotify: (msg: string) => void
 }
 
@@ -33,6 +34,7 @@ export const NotePane: React.FC<NotePaneProps> = ({
   onClearClippedText,
   noteResetTrigger,
   onOpenDeleteData,
+  onSendNoteToAI,
   onNotify,
 }) => {
   const currentSource: NoteSource = noteSources.find((s) => s.id === activeNoteSourceId) || {
@@ -53,6 +55,7 @@ export const NotePane: React.FC<NotePaneProps> = ({
         navState={navState}
         onNavAction={onNavAction}
         onOpenSessionModal={onOpenDeleteData}
+        onSendNoteToAI={onSendNoteToAI}
         noteSources={noteSources}
         activeNoteSourceId={activeNoteSourceId}
         onOpenNoteSourceModal={onOpenNoteSourceModal}

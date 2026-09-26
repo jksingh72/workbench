@@ -31,6 +31,8 @@ interface PaneToolbarProps {
   onShowNativeMenu?: () => void
   onOpenSessionModal?: (target: 'book' | 'ai' | 'note') => void
   onClipToNote?: () => void
+  onSaveAIToNote?: () => void
+  onSendNoteToAI?: () => void
   bookSources?: BookSource[]
   activeBookSourceId?: string
   onSelectBookSource?: (sourceId: string) => void
@@ -52,6 +54,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   onShowNativeMenu,
   onOpenSessionModal,
   onClipToNote,
+  onSaveAIToNote,
+  onSendNoteToAI,
   bookSources = [],
   activeBookSourceId = 'oreilly',
   onOpenBookSourceModal,
@@ -435,12 +439,34 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
             <button
               className="clip-note-btn"
               onClick={onClipToNote}
-              title="Clip highlighted text from book directly into OneNote"
+              title="Clip highlighted text from book directly into Notes (Ctrl+Shift+N)"
             >
               <BookMarked size={12} className="text-purple" />
               <span>Clip to Note</span>
             </button>
           </>
+        )}
+
+        {isAI && (
+          <button
+            className="clip-note-btn ai-save-note-btn"
+            onClick={onSaveAIToNote}
+            title="Save selected text or answer from AI to Notes (Ctrl+Shift+N)"
+          >
+            <BookMarked size={12} className="text-purple" />
+            <span>Save to Note</span>
+          </button>
+        )}
+
+        {isNote && !isLocalFolder && (
+          <button
+            className="clip-note-btn note-send-ai-btn text-emerald"
+            onClick={onSendNoteToAI}
+            title="Send selection from Note to AI Chat (Ctrl+Shift+A)"
+          >
+            <Bot size={12} className="text-emerald" />
+            <span>Send to AI</span>
+          </button>
         )}
 
         {/* Delete Login / Credentials button */}

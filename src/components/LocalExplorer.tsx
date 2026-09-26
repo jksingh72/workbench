@@ -34,7 +34,9 @@ import {
   Download,
   Home,
   Monitor,
-  Cloud
+  Cloud,
+  Bot,
+  ClipboardCopy
 } from 'lucide-react'
 import { FileItem, SystemRootItem } from '../types/electron'
 
@@ -187,6 +189,55 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     }
   }, [currentPath])
 
+  // Auto-append clipped text to active note file by default, or create Clippings.md
+  useEffect(() => {
+    if (!clippedText) return
+
+    const applyClip = async () => {
+      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const quoteBlock = `\n\n---\n> **Quote clipped at ${timestamp}:**\n> "${clippedText.replace(/\n/g, '\n> ')}"\n`
+
+      // 1. Check if an existing text/note file is selected
+      const selectedItem = items.find((i) => i.path === selectedPath && !i.isDirectory)
+      const isTextFile = selectedItem && ['txt', 'md', 'markdown', 'log', 'note'].includes(
+        selectedItem.extension.toLowerCase().replace('.', '')
+      )
+
+      if (selectedItem && isTextFile && window.electron?.appendToFile) {
+        const res = await window.electron.appendToFile(selectedItem.path, quoteBlock)
+        if (res.success) {
+          onNotify(`📝 Appended quote to ${selectedItem.name}`)
+          loadDirectory(currentPath)
+          onClearClippedText?.()
+          return
+        }
+      }
+
+      // 2. Default: Append to or create Clippings.md in current folder
+      const targetClippingsPath = currentPath.endsWith('\\') || currentPath.endsWith('/')
+        ? `${currentPath}Clippings.md`
+        : `${currentPath}\\Clippings.md`
+
+      if (window.electron?.appendToFile) {
+        const header = `\n## Clipped Note (${new Date().toLocaleDateString()} ${timestamp})\n> "${clippedText.replace(/\n/g, '\n> ')}"\n`
+        const res = await window.electron.appendToFile(targetClippingsPath, header)
+        if (res.success) {
+          onNotify(`📝 Saved quote to Clippings.md`)
+          setSelectedPath(targetClippingsPath)
+          loadDirectory(currentPath)
+          onClearClippedText?.()
+          return
+        }
+      }
+
+      // Fallback: Show clip modal if auto-append had an issue
+      setClipFileName('Clippings.md')
+      setShowClipModal(true)
+    }
+
+    applyClip()
+  }, [clippedText])
+
   // Navigation handlers
   const navigateTo = (newPath: string) => {
     if (newPath === currentPath) return
@@ -267,12 +318,18 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   // --- Copy, Cut, Paste Handlers ---
   const handleCopy = (paths: string[]) => {
     setClipboard({ action: 'copy', paths })
-    onNotify(`📋 Copied ${paths.length} item${paths.length > 1 ? 's' : ''}`)
+    if (window.electron?.copyFilesToClipboard) {
+      window.electron.copyFilesToClipboard(paths, false)
+    }
+    onNotify(`📋 Copied ${paths.length} file${paths.length > 1 ? 's' : ''} to clipboard`)
   }
 
   const handleCut = (paths: string[]) => {
     setClipboard({ action: 'cut', paths })
-    onNotify(`✂️ Cut ${paths.length} item${paths.length > 1 ? 's' : ''}`)
+    if (window.electron?.copyFilesToClipboard) {
+      window.electron.copyFilesToClipboard(paths, true)
+    }
+    onNotify(`✂️ Cut ${paths.length} file${paths.length > 1 ? 's' : ''} (ready to move or paste)`)
   }
 
   const handlePaste = async (destDir: string = currentPath) => {
@@ -308,10 +365,79 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     onNotify(`📋 Pasted ${successCount} item${successCount > 1 ? 's' : ''} into ${folderName}`)
   }
 
-  // --- Drag and Drop Handlers ---
+  // --- Cross-Pane Movement & Transfer Actions ---
+  const handleSendFileToAI = async (item: FileItem) => {
+    if (item.isDirectory) {
+      onNotify('⚠️ Select a file to send to AI, not a folder')
+      return
+    }
+    if (!window.electron?.sendFileToAI) return
+    onNotify(`🤖 Sending ${item.name} to Chat...`)
+    try {
+      const res = await window.electron.sendFileToAI(item.path)
+      if (res.success) {
+        if (res.uploaded) {
+          onNotify(`🚀 Uploaded ${item.name} to Chat!`)
+        } else {
+          onNotify(`✨ Pasted ${item.name} into AI prompt!`)
+        }
+      } else {
+        onNotify(`⚠️ ${res.error || 'Failed to send file to AI'}`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ Error: ${err.message}`)
+    }
+  }
+
+  const handleCopyFileContent = async (item: FileItem) => {
+    if (item.isDirectory) return
+    if (window.electron?.readFileContent) {
+      const res = await window.electron.readFileContent(item.path)
+      if (res.success && res.content !== undefined) {
+        await navigator.clipboard.writeText(res.content)
+        onNotify(`📋 Copied content of ${item.name} to clipboard`)
+      } else if (res.isBinary) {
+        onNotify(`⚠️ Cannot copy binary content as text. Use "Copy File" (Ctrl+C) instead.`)
+      } else {
+        onNotify(`⚠️ ${res.error || 'Could not read file'}`)
+      }
+    }
+  }
+
+  // --- Drag and Drop State & Handlers ---
+  const draggedItemRef = useRef<FileItem | null>(null)
+
+  useEffect(() => {
+    const unsub = window.electron?.onDragEnded?.(() => {
+      draggedItemRef.current = null
+      ;(window as any).__workbench_dragged_file = null
+      setDropTargetFolder(null)
+      setIsDraggingOverSelf(false)
+    })
+    return () => unsub?.()
+  }, [])
+
   const handleDragStartItem = (e: React.DragEvent, item: FileItem) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ paths: [item.path] }))
-    e.dataTransfer.effectAllowed = 'copyMove'
+    draggedItemRef.current = item
+    ;(window as any).__workbench_dragged_file = item.path
+
+    try {
+      e.dataTransfer.setData('application/json', JSON.stringify({ paths: [item.path] }))
+      e.dataTransfer.setData('application/x-workbench-file', item.path)
+      e.dataTransfer.effectAllowed = 'copyMove'
+    } catch (_) {}
+
+    // Initiate native OS file drag without canceling the drag sequence
+    if (window.electron?.startDragFile) {
+      window.electron.startDragFile(item.path)
+    }
+  }
+
+  const handleDragEndItem = () => {
+    draggedItemRef.current = null
+    ;(window as any).__workbench_dragged_file = null
+    setDropTargetFolder(null)
+    setIsDraggingOverSelf(false)
   }
 
   const handleDropOnFolder = async (e: React.DragEvent, targetFolder: string) => {
@@ -320,30 +446,48 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     setDropTargetFolder(null)
     setIsDraggingOverSelf(false)
 
+    // Check if target is a specific markdown or text file
+    const isTargetFile = targetFolder.toLowerCase().endsWith('.md') || targetFolder.toLowerCase().endsWith('.txt')
+    const actualFolder = isTargetFile ? currentPath : targetFolder
+
     // 1. Internal application drag
-    const jsonData = e.dataTransfer.getData('application/json')
-    if (jsonData) {
-      try {
-        const { paths } = JSON.parse(jsonData) as { paths: string[] }
-        if (paths && paths.length > 0) {
-          const isCopy = e.ctrlKey
-          let count = 0
-          for (const p of paths) {
-            if (p === targetFolder) continue
-            if (isCopy && window.electron?.copyItem) {
-              const res = await window.electron.copyItem(p, targetFolder)
-              if (res.success) count++
-            } else if (window.electron?.moveItem) {
-              const res = await window.electron.moveItem(p, targetFolder)
-              if (res.success) count++
-            }
-          }
-          loadDirectory(currentPath)
-          const folderName = targetFolder.split(/[\\/]/).filter(Boolean).pop() || 'folder'
-          onNotify(`${isCopy ? '📋 Copied' : '📦 Moved'} ${count} item(s) to ${folderName}`)
-          return
+    const draggedItem = draggedItemRef.current
+    let draggedPaths: string[] = []
+
+    const globalDragged = (window as any).__workbench_dragged_file
+    if (globalDragged) {
+      draggedPaths = [globalDragged]
+    } else if (draggedItem) {
+      draggedPaths = [draggedItem.path]
+    } else {
+      const jsonData = e.dataTransfer.getData('application/json')
+      if (jsonData) {
+        try {
+          const { paths } = JSON.parse(jsonData) as { paths: string[] }
+          if (paths && paths.length > 0) draggedPaths = paths
+        } catch (_) {}
+      }
+    }
+
+    if (draggedPaths.length > 0) {
+      const isCopy = e.ctrlKey
+      let count = 0
+      for (const p of draggedPaths) {
+        if (p === actualFolder || p === targetFolder) continue
+        if (isCopy && window.electron?.copyItem) {
+          const res = await window.electron.copyItem(p, actualFolder)
+          if (res.success) count++
+        } else if (window.electron?.moveItem) {
+          const res = await window.electron.moveItem(p, actualFolder)
+          if (res.success) count++
         }
-      } catch (_) {}
+      }
+      draggedItemRef.current = null
+      ;(window as any).__workbench_dragged_file = null
+      loadDirectory(currentPath)
+      const folderName = actualFolder.split(/[\\/]/).filter(Boolean).pop() || 'folder'
+      onNotify(`${isCopy ? '📋 Copied' : '📦 Moved'} ${count} item(s) to ${folderName}`)
+      return
     }
 
     // 2. External OS drag
@@ -353,13 +497,41 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         const file = e.dataTransfer.files[i]
         const filePath = (file as any).path
         if (filePath && window.electron?.copyItem) {
-          const res = await window.electron.copyItem(filePath, targetFolder)
+          const res = await window.electron.copyItem(filePath, actualFolder)
           if (res.success) count++
         }
       }
       loadDirectory(currentPath)
-      const folderName = targetFolder.split(/[\\/]/).filter(Boolean).pop() || 'folder'
+      const folderName = actualFolder.split(/[\\/]/).filter(Boolean).pop() || 'folder'
       onNotify(`📥 Imported ${count} file(s) into ${folderName}`)
+      return
+    }
+
+    // 3. Dropped text snippet (from BookView or ChatView)
+    const plainText = e.dataTransfer.getData('text/plain')
+    if (plainText && plainText.trim() && !plainText.startsWith('{') && !plainText.includes(':\\')) {
+      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      let targetFile = ''
+      if (isTargetFile) {
+        targetFile = targetFolder
+      } else if (selectedPath && (selectedPath.toLowerCase().endsWith('.md') || selectedPath.toLowerCase().endsWith('.txt'))) {
+        targetFile = selectedPath
+      } else {
+        const targetClean = actualFolder || currentPath
+        targetFile = targetClean.endsWith('\\') || targetClean.endsWith('/')
+          ? `${targetClean}Clippings.md`
+          : `${targetClean}\\Clippings.md`
+      }
+
+      const fileName = targetFile.split(/[\\/]/).pop() || 'Clippings.md'
+      const entry = `\n## Clipped Quote (${new Date().toLocaleDateString()} ${timestamp})\n> "${plainText.trim().replace(/\n/g, '\n> ')}"\n`
+      if (window.electron?.appendToFile) {
+        await window.electron.appendToFile(targetFile, entry)
+        onNotify(`📥 Saved quote into ${fileName}`)
+        setSelectedPath(targetFile)
+        loadDirectory(currentPath)
+        return
+      }
     }
   }
 
@@ -414,7 +586,11 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         return
       }
 
-      if (e.ctrlKey && e.key.toLowerCase() === 'c' && selectedPath) {
+      if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'p' || e.key.toLowerCase() === 'a') && selectedPath) {
+        e.preventDefault()
+        const item = items.find((i) => i.path === selectedPath)
+        if (item) handleSendFileToAI(item)
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'c' && selectedPath) {
         e.preventDefault()
         handleCopy([selectedPath])
       } else if (e.ctrlKey && e.key.toLowerCase() === 'x' && selectedPath) {
@@ -913,6 +1089,20 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
             <span>Note</span>
           </button>
 
+          {selectedPath && !items.find((i) => i.path === selectedPath)?.isDirectory && (
+            <button
+              className="action-icon-btn btn-send-ai text-emerald"
+              onClick={() => {
+                const item = items.find((i) => i.path === selectedPath)
+                if (item) handleSendFileToAI(item)
+              }}
+              title="Send selected file to AI Chatview (Ctrl+Shift+P)"
+            >
+              <Bot size={14} className="text-emerald" />
+              <span>Send to AI</span>
+            </button>
+          )}
+
           {clipboard && (
             <button
               className="action-icon-btn btn-paste-active"
@@ -1233,7 +1423,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 {sortedAndFilteredItems.map((item) => {
                   const isSelected = selectedPath === item.path
                   const isCut = clipboard?.action === 'cut' && clipboard.paths.includes(item.path)
-                  const isOver = dropTargetFolder === item.path && item.isDirectory
+                  const isNoteFile = item.extension === '.md' || item.extension === '.txt'
+                  const isOver = dropTargetFolder === item.path && (item.isDirectory || isNoteFile)
 
                   return (
                     <div
@@ -1243,9 +1434,10 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                       } ${isOver ? 'drop-active' : ''}`}
                       draggable={true}
                       onDragStart={(e) => handleDragStartItem(e, item)}
+                      onDragEnd={handleDragEndItem}
                       onDragOver={(e) => {
-                        if (item.isDirectory) {
-                          e.preventDefault()
+                        e.preventDefault()
+                        if (item.isDirectory || isNoteFile) {
                           setDropTargetFolder(item.path)
                         }
                       }}
@@ -1253,7 +1445,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                         if (dropTargetFolder === item.path) setDropTargetFolder(null)
                       }}
                       onDrop={(e) => {
-                        if (item.isDirectory) handleDropOnFolder(e, item.path)
+                        handleDropOnFolder(e, item.path)
                       }}
                       onClick={() => setSelectedPath(item.path)}
                       onDoubleClick={() => handleItemDoubleClick(item)}
@@ -1311,7 +1503,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               {sortedAndFilteredItems.map((item) => {
                 const isSelected = selectedPath === item.path
                 const isCut = clipboard?.action === 'cut' && clipboard.paths.includes(item.path)
-                const isOver = dropTargetFolder === item.path && item.isDirectory
+                const isNoteFile = item.extension === '.md' || item.extension === '.txt'
+                const isOver = dropTargetFolder === item.path && (item.isDirectory || isNoteFile)
 
                 return (
                   <div
@@ -1321,9 +1514,10 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                     } ${isOver ? 'drop-active' : ''}`}
                     draggable={true}
                     onDragStart={(e) => handleDragStartItem(e, item)}
+                    onDragEnd={handleDragEndItem}
                     onDragOver={(e) => {
-                      if (item.isDirectory) {
-                        e.preventDefault()
+                      e.preventDefault()
+                      if (item.isDirectory || isNoteFile) {
                         setDropTargetFolder(item.path)
                       }
                     }}
@@ -1331,7 +1525,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                       if (dropTargetFolder === item.path) setDropTargetFolder(null)
                     }}
                     onDrop={(e) => {
-                      if (item.isDirectory) handleDropOnFolder(e, item.path)
+                      handleDropOnFolder(e, item.path)
                     }}
                     onClick={() => setSelectedPath(item.path)}
                     onDoubleClick={() => handleItemDoubleClick(item)}
@@ -1368,6 +1562,31 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         >
           {activeContextMenu.item ? (
             <>
+              {!activeContextMenu.item.isDirectory && (
+                <>
+                  <button
+                    className="menu-option menu-option-highlight text-emerald"
+                    onClick={() => {
+                      handleSendFileToAI(activeContextMenu.item!)
+                      setActiveContextMenu(null)
+                    }}
+                  >
+                    <Bot size={13} className="text-emerald" />
+                    <span>Send to AI Chat (Upload File)</span>
+                  </button>
+                  <button
+                    className="menu-option"
+                    onClick={() => {
+                      handleCopyFileContent(activeContextMenu.item!)
+                      setActiveContextMenu(null)
+                    }}
+                  >
+                    <ClipboardCopy size={13} />
+                    <span>Copy File Content</span>
+                  </button>
+                  <div className="menu-divider" />
+                </>
+              )}
               <button
                 className="menu-option"
                 onClick={() => {

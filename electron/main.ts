@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { exec } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { BookViewHandler, CHROME_DESKTOP_UA } from './views/bookViewHandler'
 import { AIViewHandler } from './views/aiViewHandler'
@@ -11,6 +12,36 @@ import { AuthCoordinator } from './auth/authCoordinator'
 import { BookSourceManager, BookSource } from './services/bookSourceManager'
 import { AISourceManager, AISource } from './services/aiSourceManager'
 import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
+
+const BINARY_EXTENSIONS = new Set([
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'tiff', 'svgz',
+  'zip', 'tar', 'gz', '7z', 'rar', 'bz2', 'xz',
+  'exe', 'dll', 'so', 'dylib', 'bin', 'iso', 'dmg',
+  'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv',
+  'ttf', 'otf', 'woff', 'woff2', 'eot'
+])
+
+async function isBinaryFile(filePath: string): Promise<boolean> {
+  try {
+    const ext = path.extname(filePath).toLowerCase().replace('.', '')
+    if (BINARY_EXTENSIONS.has(ext)) return true
+
+    // Check first 512 bytes for null byte
+    const fd = await fs.promises.open(filePath, 'r')
+    const buffer = Buffer.alloc(512)
+    const { bytesRead } = await fd.read(buffer, 0, 512, 0)
+    await fd.close()
+
+    for (let i = 0; i < bytesRead; i++) {
+      if (buffer[i] === 0) return true
+    }
+    return false
+  } catch (_) {
+    return false
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -144,6 +175,151 @@ function registerIpcHandlers() {
   ipcMain.handle('workbench:clip-selection', async () => {
     if (!noteHandler || !bookHandler) return { success: false, error: 'Handlers not ready' }
     return await noteHandler.clipSelection(() => bookHandler!.extractSelection())
+  })
+
+  // Cross-Pane: Extract Selection from any active pane
+  ipcMain.handle('workbench:extract-selection', async (_, target: 'book' | 'ai' | 'note' = 'book') => {
+    try {
+      let text = ''
+      if (target === 'book' && bookHandler) {
+        text = await bookHandler.extractSelection()
+      } else if (target === 'ai' && aiHandler) {
+        text = await aiHandler.extractSelection()
+      } else if (target === 'note' && noteHandler) {
+        text = await noteHandler.extractSelection()
+      }
+      return { success: true, text }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to extract selection' }
+    }
+  })
+
+  // Cross-Pane: Send Text Directly to AI
+  ipcMain.handle('workbench:send-text-to-ai', async (_, { text, templateKey = 'raw', customPrompt }: { text: string; templateKey?: string; customPrompt?: string }) => {
+    if (!aiHandler) return { success: false, error: 'AI handler not ready' }
+    return await aiHandler.doAskAI(templateKey, customPrompt, async () => text)
+  })
+
+  // Cross-Pane: Send File from Notes to AI (Upload + Prompt Paste)
+  ipcMain.handle('workbench:send-file-to-ai', async (_, { filePath, instruction }: { filePath: string; instruction?: string }) => {
+    if (!aiHandler) return { success: false, error: 'AI handler not ready' }
+    return await aiHandler.sendFileToAI(filePath, instruction)
+  })
+
+  // Cross-Pane: Native File Drag & Drop (OS-level drag to external apps, AI view, or folders)
+  ipcMain.on('workbench:start-drag-file', (event, filePath: string | string[]) => {
+    try {
+      const paths = Array.isArray(filePath) ? filePath : [filePath]
+      const validPaths = paths.filter((p) => p && fs.existsSync(p))
+      if (validPaths.length === 0) return
+
+      const dragIcon = nativeImage.createFromDataURL(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAExJREFUWEft0rERwCAMBEEa/TfpvE4LhBhyyD2c9SvdjR2PZfX4mAC4/fEZAOAJAOABAOABAOABAOAJAOABAOABAOABAOABAOAJAOABAODnAX5sUo1k8zI4/AAAAABJRU5ErkJggg=='
+      )
+
+      aiHandler?.setDraggingFile(validPaths[0])
+
+      event.sender.startDrag({
+        file: validPaths[0],
+        files: validPaths.length > 1 ? validPaths : undefined,
+        icon: dragIcon,
+      })
+
+      // Retain the dragged file reference during the drag loop.
+      // Auto-clear after 15s if the drag was abandoned without drop
+      setTimeout(() => {
+        if (aiHandler?.getDraggingFile() === validPaths[0]) {
+          aiHandler.setDraggingFile(null)
+        }
+      }, 15000)
+
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('workbench:drag-ended')
+      }
+    } catch (err) {
+      console.error('[Main] Failed to start native drag:', err)
+      aiHandler?.setDraggingFile(null)
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('workbench:drag-ended')
+      }
+    }
+  })
+
+  // Modular Handler: ChatView Dropped File Upload
+  ipcMain.on('workbench:chatview-file-dropped', async (_, data: { fileName?: string; filePath?: string }) => {
+    try {
+      const targetPath = data?.filePath || aiHandler?.getDraggingFile()
+      aiHandler?.setDraggingFile(null)
+
+      if (targetPath && aiHandler) {
+        const res = await aiHandler.sendFileToAI(targetPath)
+        const fileName = path.basename(targetPath)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (res.success) {
+            mainWindow.webContents.send(
+              'workbench:notify',
+              `🚀 Uploaded ${res.fileName || fileName} to Chat!`
+            )
+          } else {
+            mainWindow.webContents.send(
+              'workbench:notify',
+              `⚠️ ${res.error || 'Failed to upload file to Chat'}`
+            )
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('[Main] chatview-file-dropped error:', err)
+    }
+  })
+
+  // Modular Handler: ChatView Pasted File Upload (Ctrl+V into ChatView)
+  ipcMain.on('workbench:chatview-file-pasted', async (_, data: { fileName?: string; filePath?: string }) => {
+    try {
+      const targetPath = data?.filePath || aiHandler?.consumeClipboardFile()
+      if (targetPath && aiHandler) {
+        const res = await aiHandler.sendFileToAI(targetPath)
+        const fileName = path.basename(targetPath)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (res.success) {
+            mainWindow.webContents.send(
+              'workbench:notify',
+              `📎 Attached ${res.fileName || fileName} to Chat!`
+            )
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('[Main] chatview-file-pasted error:', err)
+    }
+  })
+
+  // Modular Handler: Copy / Cut Files to System Clipboard (CF_HDROP on Windows)
+  ipcMain.handle('workbench:copy-files-to-clipboard', async (_, { paths, isCut: _isCut }: { paths: string[]; isCut?: boolean }) => {
+    try {
+      const validPaths = paths.filter((p) => p && fs.existsSync(p))
+      if (validPaths.length === 0) return { success: false, error: 'No valid files to copy' }
+
+      // Strictly single-file staging: only track the file from this single latest copy event
+      const singleFile = validPaths[0]
+      aiHandler?.setClipboardFile(singleFile)
+
+      // Fallback plain text in clipboard
+      clipboard.writeText(singleFile)
+
+      // On Windows: Execute PowerShell Set-Clipboard -Path to populate true OS CF_HDROP format
+      if (process.platform === 'win32') {
+        const escapedPath = `'${singleFile.replace(/'/g, "''")}'`
+        const psCommand = `powershell.exe -NoProfile -Command "Set-Clipboard -Path ${escapedPath}"`
+        exec(psCommand, { windowsHide: true }, (err) => {
+          if (err) console.warn('[Main] Set-Clipboard warning:', err)
+        })
+      }
+
+      return { success: true, count: 1 }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to copy files to clipboard' }
+    }
   })
 
   ipcMain.handle('workbench:load-notes', () => {
@@ -467,6 +643,47 @@ function registerIpcHandlers() {
       shell.showItemInFolder(filePath)
     } catch (err) {
       console.error('[Main] showItemInFolder error:', err)
+    }
+  })
+
+  ipcMain.handle('workbench:read-file-content', async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+      const stat = await fs.promises.stat(filePath)
+      if (stat.isDirectory()) return { success: false, error: 'Cannot read folder as text' }
+      if (stat.size > 10 * 1024 * 1024) return { success: false, error: 'File too large (>10MB)' }
+
+      if (await isBinaryFile(filePath)) {
+        return {
+          success: false,
+          isBinary: true,
+          error: 'Binary file detected. Use "Copy File" (Ctrl+C) to copy the file itself, or "Send to AI Chat" to upload it.',
+        }
+      }
+
+      const content = await fs.promises.readFile(filePath, 'utf-8')
+      return { success: true, content, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to read file' }
+    }
+  })
+
+  ipcMain.handle('workbench:append-to-file', async (_, { filePath, content }: { filePath: string; content: string }) => {
+    try {
+      const dir = path.dirname(filePath)
+      if (!fs.existsSync(dir)) {
+        await fs.promises.mkdir(dir, { recursive: true })
+      }
+      let existing = ''
+      if (fs.existsSync(filePath)) {
+        existing = await fs.promises.readFile(filePath, 'utf-8')
+      }
+      const separator = existing.length > 0 && !existing.endsWith('\n\n') ? (existing.endsWith('\n') ? '\n' : '\n\n') : ''
+      const updated = existing + separator + content
+      await fs.promises.writeFile(filePath, updated, 'utf-8')
+      return { success: true, filePath, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to append to file' }
     }
   })
 

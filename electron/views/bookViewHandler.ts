@@ -1,4 +1,4 @@
-import { WebContentsView, BrowserWindow, session, Rectangle } from 'electron'
+import { WebContentsView, BrowserWindow, session, Rectangle, Menu } from 'electron'
 import fs from 'node:fs'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { CHROME_DESKTOP_UA } from '../auth/strategies/defaultAuthStrategy'
@@ -133,6 +133,84 @@ export class BookViewHandler {
     wc.on('did-navigate', onStateChange)
     wc.on('did-navigate-in-page', onStateChange)
     wc.on('page-title-updated', onStateChange)
+
+    wc.on('context-menu', (_e, params) => {
+      const selection = (params.selectionText || '').trim()
+      const menuTemplate: Electron.MenuItemConstructorOptions[] = []
+
+      if (selection) {
+        menuTemplate.push(
+          {
+            label: '📝 Clip Selection to Notes (Ctrl+Shift+N)',
+            click: () => {
+              if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:clip-selection-text', {
+                  source: 'book',
+                  text: selection,
+                })
+              }
+            },
+          },
+          {
+            label: '🤖 Ask AI (Explain Concept)',
+            click: () => {
+              if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:ask-ai-with-text', {
+                  templateKey: 'explain',
+                  text: selection,
+                })
+              }
+            },
+          },
+          {
+            label: '💬 Send to AI Prompt (Raw)',
+            click: () => {
+              if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:ask-ai-with-text', {
+                  templateKey: 'raw',
+                  text: selection,
+                })
+              }
+            },
+          },
+          { type: 'separator' },
+          {
+            label: '📋 Copy Selection (Ctrl+C)',
+            role: 'copy',
+          }
+        )
+      } else {
+        menuTemplate.push(
+          { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+          { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+          { label: 'Reload', click: () => wc.reload() },
+          { type: 'separator' },
+          { label: 'Select All', role: 'selectAll' }
+        )
+      }
+
+      const menu = Menu.buildFromTemplate(menuTemplate)
+      menu.popup({ window: this.mainWindow })
+    })
+
+    wc.on('before-input-event', async (_e, input) => {
+      if (input.type !== 'keyDown') return
+      const isCtrlOrMeta = input.control || input.meta
+      if (isCtrlOrMeta && input.shift) {
+        const key = input.key.toLowerCase()
+        if (key === 'a') {
+          const text = await this.extractSelection()
+          if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('workbench:ask-ai-with-text', { templateKey: 'explain', text })
+          }
+        } else if (key === 'n' || key === 'c') {
+          const text = await this.extractSelection()
+          if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('workbench:clip-selection-text', { source: 'book', text })
+          }
+        }
+      }
+    })
   }
 
   public getView(): WebContentsView | null {

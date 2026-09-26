@@ -1,4 +1,4 @@
-import { webFrame } from 'electron'
+import { webFrame, ipcRenderer } from 'electron'
 
 /**
  * Isolated View Preload Script
@@ -188,6 +188,30 @@ const injectionCode = `
       }
     } catch (_) {}
 
+    // 4. Intercept file drops to prevent browser from inserting file path into prompt textareas
+    window.addEventListener('dragover', function(e) {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    }, true);
+
+    window.addEventListener('drop', function(e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var fileInput = document.querySelector('input[type="file"]');
+        if (fileInput) {
+          try {
+            fileInput.files = e.dataTransfer.files;
+            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+          } catch (_) {}
+        }
+      }
+    }, true);
+
   } catch (err) {
     // Fail silently so as not to break page loading
   }
@@ -199,3 +223,71 @@ try {
 } catch (err) {
   console.error('[viewPreload] Failed to inject emulation script:', err)
 }
+
+// =========================================================================
+// Modular Section: Drag & Drop and File Paste Interceptor
+// Intercepts file drops/pastes on guest chat pages (ChatGPT / Claude)
+// to prevent Chromium from pasting raw text paths into the textarea,
+// and ensures the file is uploaded to the chatbot.
+// =========================================================================
+try {
+  window.addEventListener('dragover', (e: DragEvent) => {
+    if (e.dataTransfer) {
+      const types = Array.from(e.dataTransfer.types || [])
+      if (types.includes('Files') || types.includes('application/x-workbench-file')) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }
+    }
+  }, true)
+
+  window.addEventListener('drop', (e: DragEvent) => {
+    // Intercept drops with files or workbench file tags
+    const hasFiles = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0
+    const hasWbFile = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('application/x-workbench-file')
+
+    if (hasFiles || hasWbFile) {
+      e.preventDefault()
+      e.stopPropagation()
+
+      let filePath = ''
+      let fileName = ''
+      if (hasFiles && e.dataTransfer!.files[0]) {
+        const file = e.dataTransfer!.files[0]
+        fileName = file.name
+        filePath = (file as any).path || ''
+      }
+
+      try {
+        ipcRenderer.send('workbench:chatview-file-dropped', {
+          fileName,
+          filePath,
+        })
+      } catch (_) {}
+    }
+  }, true)
+
+  // Single-File Staging Tracker:
+  // When a file is copied in NoteView, main process signals 'workbench:staged-file-copied'.
+  // When the user pastes in ChatView, this intercepts the paste, blocks any stale files
+  // lingering in the OS clipboard from being pasted by the web page, and uploads only
+  // the exact single file from the latest copy event.
+  let hasPendingWorkbenchFile = false
+
+  ipcRenderer.on('workbench:staged-file-copied', () => {
+    hasPendingWorkbenchFile = true
+  })
+
+  window.addEventListener('paste', (e: ClipboardEvent) => {
+    if (hasPendingWorkbenchFile) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      hasPendingWorkbenchFile = false
+
+      try {
+        ipcRenderer.send('workbench:chatview-file-pasted', {})
+      } catch (_) {}
+    }
+  }, true)
+} catch (_) {}
+

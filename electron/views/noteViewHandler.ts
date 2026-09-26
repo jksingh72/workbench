@@ -1,4 +1,4 @@
-import { app, WebContentsView, BrowserWindow, session, Rectangle, shell } from 'electron'
+import { app, WebContentsView, BrowserWindow, session, Rectangle, shell, Menu } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { AuthCoordinator } from '../auth/authCoordinator'
@@ -200,6 +200,71 @@ export class NoteViewHandler {
     wc.on('did-navigate', onStateChange)
     wc.on('did-navigate-in-page', onStateChange)
     wc.on('page-title-updated', onStateChange)
+
+    wc.on('context-menu', (_e, params) => {
+      const selection = (params.selectionText || '').trim()
+      const menuTemplate: Electron.MenuItemConstructorOptions[] = []
+
+      if (selection) {
+        menuTemplate.push(
+          {
+            label: '🤖 Send Selection to AI Chat (Explain)',
+            click: () => {
+              if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:ask-ai-with-text', {
+                  templateKey: 'explain',
+                  text: selection,
+                })
+              }
+            },
+          },
+          {
+            label: '💬 Send Selection to AI Prompt (Raw)',
+            click: () => {
+              if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('workbench:ask-ai-with-text', {
+                  templateKey: 'raw',
+                  text: selection,
+                })
+              }
+            },
+          },
+          { type: 'separator' },
+          {
+            label: '📋 Copy Selection (Ctrl+C)',
+            role: 'copy',
+          }
+        )
+      } else {
+        menuTemplate.push(
+          { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+          { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+          { label: 'Reload', click: () => wc.reload() },
+          { type: 'separator' },
+          { label: 'Paste', role: 'paste' },
+          { label: 'Select All', role: 'selectAll' }
+        )
+      }
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        const menu = Menu.buildFromTemplate(menuTemplate)
+        menu.popup({ window: this.mainWindow })
+      }
+    })
+
+    wc.on('before-input-event', async (_e, input) => {
+      if (input.type !== 'keyDown') return
+      const isCtrlOrMeta = input.control || input.meta
+      if (isCtrlOrMeta && input.shift) {
+        const key = input.key.toLowerCase()
+        if (key === 'a') {
+          const text = await this.extractSelection()
+          if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('workbench:ask-ai-with-text', { templateKey: 'explain', text })
+          }
+        }
+      }
+    })
   }
 
   public getView(): WebContentsView | null {
@@ -371,6 +436,24 @@ export class NoteViewHandler {
       return { success: true, text }
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to extract text' }
+    }
+  }
+
+  public async extractSelection(): Promise<string> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return ''
+    }
+    try {
+      const selectedText: string = await this.view.webContents.executeJavaScript(`
+        (function() {
+          const sel = window.getSelection();
+          return sel ? sel.toString() : '';
+        })()
+      `)
+      return (selectedText || '').trim()
+    } catch (err) {
+      console.error('[NoteView] Failed to extract selection:', err)
+      return ''
     }
   }
 

@@ -80,6 +80,20 @@ export interface ElectronAPI {
   copyItem: (srcPath: string, destDir: string) => Promise<{ success: boolean; targetPath?: string; error?: string }>
   moveItem: (srcPath: string, destDir: string) => Promise<{ success: boolean; targetPath?: string; error?: string }>
   getSystemRoots: () => Promise<{ success: boolean; roots: SystemRootItem[]; error?: string }>
+
+  // Cross-Pane Movement & Transfer APIs
+  sendFileToAI: (filePath: string, instruction?: string) => Promise<{ success: boolean; uploaded?: boolean; fileName?: string; error?: string }>
+  sendTextToAI: (params: { text: string; templateKey?: string; customPrompt?: string }) => Promise<AskAIResult>
+  extractSelection: (target?: 'book' | 'ai' | 'note') => Promise<{ success: boolean; text?: string; error?: string }>
+  readFileContent: (filePath: string) => Promise<{ success: boolean; content?: string; fileName?: string; isBinary?: boolean; error?: string }>
+  appendToFile: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
+  copyFilesToClipboard?: (paths: string[], isCut?: boolean) => Promise<{ success: boolean; count?: number; error?: string }>
+  startDragFile?: (filePath: string | string[]) => void
+  onDragEnded?: (callback: () => void) => () => void
+
+  onClipSelectionText?: (callback: (data: { source: 'book' | 'ai'; text: string }) => void) => () => void
+  onAskAIWithText?: (callback: (data: { templateKey: string; text: string }) => void) => () => void
+  onNotification?: (callback: (msg: string) => void) => () => void
 }
 
 export interface SystemRootItem {

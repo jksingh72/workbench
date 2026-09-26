@@ -669,24 +669,114 @@ export const App: React.FC = () => {
     }
   }
 
-  // Clip highlighted book text to OneNote
-  const handleClipToNote = async () => {
+  // Clip highlighted book text to Notes
+  const handleClipToNote = async (source: 'book' | 'ai' = 'book', rawText?: string) => {
     if (!activePanes.note) {
       showNotification('📝 Noteview is currently disabled. Enable Noteview in the top bar to clip notes.')
       return
     }
-    if (!window.electron?.clipSelection) return
-    try {
-      const res = await window.electron.clipSelection()
+    let text = rawText || ''
+    if (!text && window.electron?.extractSelection) {
+      const res = await window.electron.extractSelection(source)
       if (res.success && res.text) {
-        setClippedText(res.text)
-      } else {
-        showNotification(`⚠️ ${res.error || 'Please highlight some text in Bookview first'}`)
+        text = res.text
+      } else if (source === 'book' && window.electron?.clipSelection) {
+        const clipRes = await window.electron.clipSelection()
+        if (clipRes.success && clipRes.text) text = clipRes.text
       }
-    } catch (err: any) {
-      showNotification(`⚠️ Clip error: ${err.message}`)
+    } else if (!text && window.electron?.clipSelection) {
+      const res = await window.electron.clipSelection()
+      if (res.success && res.text) text = res.text
+    }
+
+    if (!text) {
+      showNotification('⚠️ Please highlight some text in Bookview or Chatview first')
+      return
+    }
+
+    if (activeNoteSourceId === 'onenote') {
+      await navigator.clipboard.writeText(text)
+      showNotification('📋 Highlight copied to clipboard! Paste into OneNote with Ctrl+V.')
+    } else {
+      setClippedText(text)
     }
   }
+
+  // Save AI response or selection to Notes
+  const handleSaveAIToNote = async (rawText?: string) => {
+    if (!activePanes.note) {
+      showNotification('📝 Noteview is currently disabled. Enable Noteview in the top bar.')
+      return
+    }
+    let text = rawText || ''
+    if (!text && window.electron?.extractSelection) {
+      const res = await window.electron.extractSelection('ai')
+      if (res.success && res.text) text = res.text
+    }
+    if (!text) {
+      showNotification('⚠️ Highlight some text in Chatview to save to Notes')
+      return
+    }
+    if (activeNoteSourceId === 'onenote') {
+      await navigator.clipboard.writeText(text)
+      showNotification('📋 AI answer copied to clipboard! Paste into OneNote.')
+    } else {
+      setClippedText(text)
+    }
+  }
+
+  // Send Note selection to AI Chat
+  const handleSendNoteToAI = async (rawText?: string) => {
+    if (!activePanes.ai) {
+      showNotification('🤖 Chatview is currently disabled. Enable Chatview in the top bar.')
+      return
+    }
+    let text = rawText || ''
+    if (!text && window.electron?.extractSelection) {
+      const res = await window.electron.extractSelection('note')
+      if (res.success && res.text) text = res.text
+    }
+    if (!text) {
+      showNotification('⚠️ Highlight some text in your Note to send to AI')
+      return
+    }
+    if (window.electron?.sendTextToAI) {
+      const res = await window.electron.sendTextToAI({ text, templateKey: 'explain' })
+      if (res.success) {
+        showNotification('✨ Transferred note selection to AI Chat!')
+      } else {
+        showNotification(`⚠️ ${res.error || 'Failed to send to AI'}`)
+      }
+    }
+  }
+
+  // Cross-pane event listeners (context menus & WebContents shortcuts)
+  useEffect(() => {
+    const unsubClip = window.electron?.onClipSelectionText?.((data) => {
+      if (data.source === 'ai') {
+        handleSaveAIToNote(data.text)
+      } else {
+        handleClipToNote('book', data.text)
+      }
+    })
+
+    const unsubAskAIWithText = window.electron?.onAskAIWithText?.((data) => {
+      if (window.electron?.sendTextToAI) {
+        window.electron.sendTextToAI({ text: data.text, templateKey: data.templateKey })
+        showNotification('✨ Transferred selection to ChatGPT!')
+      }
+    })
+
+    const unsubNotify = window.electron?.onNotification?.((msg) => {
+      showNotification(msg)
+    })
+
+    return () => {
+      unsubClip?.()
+      unsubAskAIWithText?.()
+      unsubNotify?.()
+    }
+  }, [activeNoteSourceId, activePanes])
 
   // Ask AI handler
   const handleAskAI = async (
@@ -714,17 +804,23 @@ export const App: React.FC = () => {
     }
   }
 
-  // Global keyboard shortcuts (Ctrl+Shift+A to Ask AI)
+  // Global keyboard shortcuts (Ctrl+Shift+A to Ask AI, Ctrl+Shift+N / Ctrl+Shift+C to Clip to Note)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
-        e.preventDefault()
-        handleAskAI('explain')
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+        const key = e.key.toLowerCase()
+        if (key === 'a') {
+          e.preventDefault()
+          handleAskAI('explain')
+        } else if (key === 'n' || key === 'c') {
+          e.preventDefault()
+          handleClipToNote('book')
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [activePanes, activeNoteSourceId])
 
   // Calculate widths for columns (Left Pane vs Right Pane)
   const leftPercent = splitRatio
@@ -796,6 +892,8 @@ export const App: React.FC = () => {
       activeAISourceId={activeAISourceId}
       onOpenAISourceModal={handleOpenAISourceModal}
       onOpenDeleteLogin={handleOpenAIDeleteLogin}
+      onSaveAIToNote={() => handleSaveAIToNote()}
+      onNotify={showNotification}
     />
   )
 
@@ -813,6 +911,7 @@ export const App: React.FC = () => {
       noteResetTrigger={noteResetTrigger}
       onNoteReset={() => setNoteResetTrigger(Date.now())}
       onOpenDeleteData={handleOpenNoteDeleteData}
+      onSendNoteToAI={() => handleSendNoteToAI()}
       onNotify={showNotification}
     />
   )
