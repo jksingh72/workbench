@@ -996,14 +996,26 @@ function registerIpcHandlers() {
         roots.push({ name: 'User Home', path: app.getPath('home'), icon: 'home' })
       } catch (_) {}
 
-      const driveLetters = ['C', 'D', 'E', 'F', 'G']
-      for (const letter of driveLetters) {
-        const drivePath = `${letter}:\\`
-        try {
-          if (fs.existsSync(drivePath)) {
-            roots.push({ name: `Local Disk (${letter}:)`, path: drivePath, icon: 'drive' })
-          }
-        } catch (_) {}
+      if (process.platform === 'win32') {
+        const driveLetters = ['C', 'D', 'E', 'F', 'G']
+        for (const letter of driveLetters) {
+          const drivePath = `${letter}:\\`
+          try {
+            if (fs.existsSync(drivePath)) {
+              roots.push({ name: `Local Disk (${letter}:)`, path: drivePath, icon: 'drive' })
+            }
+          } catch (_) {}
+        }
+      } else {
+        roots.push({ name: 'Root Filesystem', path: '/', icon: 'drive' })
+        if (fs.existsSync('/Volumes')) {
+          try {
+            const vols = fs.readdirSync('/Volumes')
+            for (const v of vols) {
+              roots.push({ name: v, path: path.join('/Volumes', v), icon: 'drive' })
+            }
+          } catch (_) {}
+        }
       }
 
       return { success: true, roots }

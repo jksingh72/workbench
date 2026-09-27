@@ -1,13 +1,49 @@
 {
   "name": "workbench",
-  "version": "1.0.0",
-  "description": "Dual-pane desktop workbench for O'Reilly and ChatGPT",
+  "version": "0.0.1",
+  "description": "Desktop workbench for technical reading, AI synthesis, and notes",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "package:win": "npm run build && electron-builder --win",
+    "package:portable": "npm run build && electron-builder --win portable",
+    "package:mac": "npm run build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.workbench.desktop",
+    "productName": "Workbench",
+    "directories": {
+      "output": "Releases/Release-Test V0.01"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Workbench.exe"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": ["universal", "arm64", "x64"]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "Workbench-mac-${arch}.zip"
+    }
   },
   "dependencies": {
     "lucide-react": "^1.16.0",
@@ -20,6 +56,7 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^34.2.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.7.3",
     "vite": "^6.1.0",
     "vite-plugin-electron": "^0.29.0",

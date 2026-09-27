@@ -5,7 +5,12 @@ node_modules/
 dist/
 dist-electron/
 release/
+Releases/
 out/
+
+# Ignored configs & guides
+.github/
+CLAUDE.md
 
 # Environment & credentials
 .env

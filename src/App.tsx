@@ -36,7 +36,7 @@ export const App: React.FC = () => {
   const [noteResetTrigger, setNoteResetTrigger] = useState<number>(0)
   const [clippedText, setClippedText] = useState<string | null>(null)
   const [bookSources, setBookSources] = useState<BookSource[]>([
-    { id: 'oreilly', name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/', isPreset: true },
+    { id: 'oreilly', name: "O'Reilly Learning", url: 'https://learning.oreilly.com/home/', isPreset: true },
     { id: 'kindle', name: 'Amazon Kindle', url: 'https://read.amazon.com/', isPreset: true },
   ])
   const [activeBookSourceId, setActiveBookSourceId] = useState<string>('oreilly')
@@ -44,9 +44,9 @@ export const App: React.FC = () => {
 
   const [aiSources, setAiSources] = useState<AISource[]>([
     { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', isPreset: true },
-    { id: 'claude', name: 'Anthropic Claude', url: 'https://claude.ai/', isPreset: true },
     { id: 'gemini', name: 'Google Gemini', url: 'https://gemini.google.com/', isPreset: true },
-    { id: 'perplexity', name: 'Perplexity AI', url: 'https://www.perplexity.ai/', isPreset: true },
+    { id: 'claude', name: 'Anthropic Claude', url: 'https://claude.ai/', isPreset: true },
+    { id: 'grok', name: 'Grok', url: 'https://grok.com/', isPreset: true },
   ])
   const [activeAISourceId, setActiveAISourceId] = useState<string>('chatgpt')
   const [isAISourceModalOpen, setIsAISourceModalOpen] = useState<boolean>(false)

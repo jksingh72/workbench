@@ -22,21 +22,21 @@ export const DEFAULT_AI_SOURCES: AISource[] = [
     isPreset: true,
   },
   {
-    id: 'claude',
-    name: 'Anthropic Claude',
-    url: 'https://claude.ai/',
-    isPreset: true,
-  },
-  {
     id: 'gemini',
     name: 'Google Gemini',
     url: 'https://gemini.google.com/',
     isPreset: true,
   },
   {
-    id: 'perplexity',
-    name: 'Perplexity AI',
-    url: 'https://www.perplexity.ai/',
+    id: 'claude',
+    name: 'Anthropic Claude',
+    url: 'https://claude.ai/',
+    isPreset: true,
+  },
+  {
+    id: 'grok',
+    name: 'Grok',
+    url: 'https://grok.com/',
     isPreset: true,
   },
 ]
