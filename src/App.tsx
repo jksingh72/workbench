@@ -802,6 +802,7 @@ export const App: React.FC = () => {
   // Cross-pane event listeners (context menus & WebContents shortcuts)
   useEffect(() => {
     const unsubClip = window.electron?.onClipSelectionText?.((data) => {
+      setActivePanes((prev) => (!prev.note ? { ...prev, note: true } : prev))
       if (data.source === 'ai') {
         handleSaveAIToNote(data.text)
       } else {
@@ -818,9 +819,16 @@ export const App: React.FC = () => {
     })
 
     const unsubAskAIWithText = window.electron?.onAskAIWithText?.((data) => {
+      setActivePanes((prev) => (!prev.ai ? { ...prev, ai: true } : prev))
       if (window.electron?.sendTextToAI) {
         window.electron.sendTextToAI({ text: data.text, templateKey: data.templateKey })
-        showNotification('✨ Transferred selection to ChatGPT!')
+        const labelMap: Record<string, string> = {
+          explain: '💡 Transferred excerpt to AI (Explain)!',
+          code: '💻 Transferred excerpt to AI (Code Example)!',
+          quiz: '❓ Transferred excerpt to AI (Quiz)!',
+          raw: '✨ Transferred selection to AI Chat!',
+        }
+        showNotification(labelMap[data.templateKey] || '✨ Transferred selection to AI Chat!')
       }
     })
 

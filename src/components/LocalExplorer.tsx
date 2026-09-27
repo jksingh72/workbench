@@ -195,7 +195,16 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
 
     const applyClip = async () => {
       const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      const quoteBlock = `\n\n---\n> **Quote clipped at ${timestamp}:**\n> "${clippedText.replace(/\n/g, '\n> ')}"\n`
+      const isAlreadyFormatted =
+        clippedText.includes('> —') ||
+        clippedText.includes('### 📖') ||
+        clippedText.includes('### 💬') ||
+        clippedText.trim().startsWith('---') ||
+        (clippedText.trim().startsWith('>') && clippedText.includes('—'))
+
+      const blockToAppend = isAlreadyFormatted
+        ? (clippedText.trim().startsWith('---') ? `\n\n${clippedText.trim()}\n` : `\n\n---\n${clippedText.trim()}\n`)
+        : `\n\n---\n> **Quote clipped at ${timestamp}:**\n> "${clippedText.replace(/\n/g, '\n> ')}"\n`
 
       // 1. Check if an existing text/note file is selected
       const selectedItem = items.find((i) => i.path === selectedPath && !i.isDirectory)
@@ -204,9 +213,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       )
 
       if (selectedItem && isTextFile && window.electron?.appendToFile) {
-        const res = await window.electron.appendToFile(selectedItem.path, quoteBlock)
+        const res = await window.electron.appendToFile(selectedItem.path, blockToAppend)
         if (res.success) {
-          onNotify(`📝 Appended quote to ${selectedItem.name}`)
+          onNotify(`📝 Appended excerpt to ${selectedItem.name}`)
           loadDirectory(currentPath)
           onClearClippedText?.()
           return
@@ -219,10 +228,13 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         : `${currentPath}\\Clippings.md`
 
       if (window.electron?.appendToFile) {
-        const header = `\n## Clipped Note (${new Date().toLocaleDateString()} ${timestamp})\n> "${clippedText.replace(/\n/g, '\n> ')}"\n`
-        const res = await window.electron.appendToFile(targetClippingsPath, header)
+        const defaultBlock = isAlreadyFormatted
+          ? (clippedText.trim().startsWith('---') ? `\n\n${clippedText.trim()}\n` : `\n\n---\n${clippedText.trim()}\n`)
+          : `\n## Clipped Note (${new Date().toLocaleDateString()} ${timestamp})\n> "${clippedText.replace(/\n/g, '\n> ')}"\n`
+
+        const res = await window.electron.appendToFile(targetClippingsPath, defaultBlock)
         if (res.success) {
-          onNotify(`📝 Saved quote to Clippings.md`)
+          onNotify(`📝 Saved excerpt to Clippings.md`)
           setSelectedPath(targetClippingsPath)
           loadDirectory(currentPath)
           onClearClippedText?.()

@@ -171,10 +171,43 @@ function registerIpcHandlers() {
     aiHandler.showAskAIMenu(() => bookHandler!.extractSelection())
   })
 
+  function formatBookCitation(
+    text: string,
+    metadata?: { title?: string; chapter?: string; url?: string }
+  ): string {
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const dateStr = new Date().toLocaleDateString()
+
+    const rawTitle = metadata?.title || ''
+    const cleanTitle = rawTitle.replace(/\s*[-–|]\s*(O'Reilly|Amazon Kindle|Book|Learning).*$/i, '').trim() || 'Reading Excerpt'
+    const cleanChapter = (metadata?.chapter || '').trim()
+    const url = metadata?.url || ''
+
+    const quotedLines = text.split('\n').map((l) => `> ${l}`).join('\n')
+    let attr = `> \n> — `
+    if (cleanChapter && cleanTitle && cleanChapter !== cleanTitle) {
+      attr += `*${cleanTitle}* (${cleanChapter})`
+    } else if (cleanTitle) {
+      attr += `*${cleanTitle}*`
+    } else if (cleanChapter) {
+      attr += `*${cleanChapter}*`
+    }
+
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      attr += ` · [🔗 Open in Book](${url})`
+    }
+    attr += ` · *${dateStr} ${timestamp}*`
+
+    return `\n\n---\n### 📖 Book Excerpt\n${quotedLines}\n${attr}\n\n`
+  }
+
   // OneNote & Clipping
   ipcMain.handle('workbench:clip-selection', async () => {
     if (!noteHandler || !bookHandler) return { success: false, error: 'Handlers not ready' }
-    return await noteHandler.clipSelection(() => bookHandler!.extractSelection())
+    return await noteHandler.clipSelection(async () => {
+      const res = await bookHandler!.extractSelectionWithCitation()
+      return res.formattedCitation || res.rawText
+    })
   })
 
   // Cross-Pane: Extract Selection from any active pane
@@ -182,7 +215,8 @@ function registerIpcHandlers() {
     try {
       let text = ''
       if (target === 'book' && bookHandler) {
-        text = await bookHandler.extractSelection()
+        const res = await bookHandler.extractSelectionWithCitation()
+        text = res.formattedCitation || res.rawText
       } else if (target === 'ai' && aiHandler) {
         text = await aiHandler.extractSelection()
       } else if (target === 'note' && noteHandler) {
@@ -191,6 +225,41 @@ function registerIpcHandlers() {
       return { success: true, text }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to extract selection' }
+    }
+  })
+
+  // BookView In-Page Floating Bubble Action
+  ipcMain.on('workbench:book-bubble-action', async (_, data: {
+    action: 'clip-note' | 'ask-ai'
+    templateKey?: string
+    text: string
+    metadata?: { title?: string; chapter?: string; url?: string }
+  }) => {
+    try {
+      if (data.action === 'clip-note') {
+        const citation = formatBookCitation(data.text, data.metadata)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('workbench:clip-selection-text', {
+            source: 'book',
+            text: citation,
+            rawText: data.text,
+            metadata: data.metadata,
+          })
+          mainWindow.webContents.send('workbench:notify', '📝 Clipped excerpt to Notes with citation!')
+        }
+      } else if (data.action === 'ask-ai') {
+        const templateKey = data.templateKey || 'explain'
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('workbench:ask-ai-with-text', {
+            templateKey,
+            text: data.text,
+          })
+        } else if (aiHandler) {
+          await aiHandler.doAskAI(templateKey, undefined, async () => data.text)
+        }
+      }
+    } catch (err: any) {
+      console.error('[Main] book-bubble-action error:', err)
     }
   })
 

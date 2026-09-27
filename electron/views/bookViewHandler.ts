@@ -142,11 +142,14 @@ export class BookViewHandler {
         menuTemplate.push(
           {
             label: '📝 Clip Selection to Notes (Ctrl+Shift+N)',
-            click: () => {
+            click: async () => {
+              const res = await this.extractSelectionWithCitation()
               if (this.mainWindow && !this.mainWindow.isDestroyed()) {
                 this.mainWindow.webContents.send('workbench:clip-selection-text', {
                   source: 'book',
-                  text: selection,
+                  text: res.formattedCitation || selection,
+                  rawText: selection,
+                  metadata: res,
                 })
               }
             },
@@ -204,9 +207,15 @@ export class BookViewHandler {
             this.mainWindow.webContents.send('workbench:ask-ai-with-text', { templateKey: 'explain', text })
           }
         } else if (key === 'n' || key === 'c') {
-          const text = await this.extractSelection()
-          if (text && this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send('workbench:clip-selection-text', { source: 'book', text })
+          const res = await this.extractSelectionWithCitation()
+          const clipText = res.formattedCitation || res.rawText
+          if (clipText && this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('workbench:clip-selection-text', {
+              source: 'book',
+              text: clipText,
+              rawText: res.rawText,
+              metadata: res,
+            })
           }
         }
       }
@@ -350,6 +359,95 @@ export class BookViewHandler {
     } catch (err) {
       console.error('[BookView] Failed to extract selection:', err)
       return ''
+    }
+  }
+
+  public async extractSelectionWithCitation(): Promise<{
+    rawText: string
+    title: string
+    chapter: string
+    url: string
+    formattedCitation: string
+  }> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { rawText: '', title: '', chapter: '', url: '', formattedCitation: '' }
+    }
+    try {
+      const data = await this.view.webContents.executeJavaScript(`
+        (function() {
+          var sel = window.getSelection();
+          var rawText = (sel ? sel.toString() : '').trim();
+          if (!rawText) return { rawText: '', title: '', chapter: '', url: '' };
+
+          var pageTitle = document.title || '';
+          var pageUrl = window.location.href || '';
+          
+          var chapter = '';
+          var selectors = [
+            'h1.title',
+            '[data-testid="header-title"]',
+            '.chapter-title',
+            'header h1',
+            'article h1',
+            'h1',
+            'h2.title',
+            'h2'
+          ];
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el && el.innerText && el.innerText.trim()) {
+              chapter = el.innerText.trim();
+              break;
+            }
+          }
+
+          return {
+            rawText: rawText,
+            title: pageTitle,
+            chapter: chapter,
+            url: pageUrl
+          };
+        })()
+      `)
+
+      if (!data || !data.rawText) {
+        return { rawText: '', title: '', chapter: '', url: '', formattedCitation: '' }
+      }
+
+      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const dateStr = new Date().toLocaleDateString()
+      
+      const cleanTitle = (data.title || '').replace(/\s*[-–|]\s*(O'Reilly|Amazon Kindle|Book|Learning).*$/i, '').trim() || 'Reading Excerpt'
+      const cleanChapter = (data.chapter || '').trim()
+      const url = data.url || ''
+      
+      const quotedLines = data.rawText.split('\n').map((l: string) => `> ${l}`).join('\n')
+      let attr = `> \n> — `
+      if (cleanChapter && cleanTitle && cleanChapter !== cleanTitle) {
+        attr += `*${cleanTitle}* (${cleanChapter})`
+      } else if (cleanTitle) {
+        attr += `*${cleanTitle}*`
+      } else if (cleanChapter) {
+        attr += `*${cleanChapter}*`
+      }
+      
+      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        attr += ` · [🔗 Open in Book](${url})`
+      }
+      attr += ` · *${dateStr} ${timestamp}*`
+
+      const formattedCitation = `\n\n---\n### 📖 Book Excerpt\n${quotedLines}\n${attr}\n\n`
+
+      return {
+        rawText: data.rawText,
+        title: cleanTitle,
+        chapter: cleanChapter,
+        url,
+        formattedCitation,
+      }
+    } catch (err) {
+      console.error('[BookView] extractSelectionWithCitation error:', err)
+      return { rawText: '', title: '', chapter: '', url: '', formattedCitation: '' }
     }
   }
 

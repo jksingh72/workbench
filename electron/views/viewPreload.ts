@@ -291,3 +291,308 @@ try {
   }, true)
 } catch (_) {}
 
+// =========================================================================
+// Floating Selection Action Bubble (In-Book Instant Tooltip)
+// =========================================================================
+try {
+  (function initSelectionBubble() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+    let bubbleHost: HTMLDivElement | null = null
+    let shadowRoot: ShadowRoot | null = null
+    let bubbleEl: HTMLDivElement | null = null
+    let isMouseInsideBubble = false
+    let hideTimeout: any = null
+
+    function getBookMetadata() {
+      const pageTitle = document.title || ''
+      const pageUrl = window.location.href || ''
+      let chapter = ''
+      const selectors = [
+        'h1.title',
+        '[data-testid="header-title"]',
+        '.chapter-title',
+        'header h1',
+        'article h1',
+        'h1',
+        'h2.title',
+        'h2'
+      ]
+      for (const s of selectors) {
+        const el = document.querySelector(s) as HTMLElement | null
+        if (el && el.innerText && el.innerText.trim()) {
+          chapter = el.innerText.trim()
+          break
+        }
+      }
+      return { title: pageTitle, chapter, url: pageUrl }
+    }
+
+    function createBubbleDOM() {
+      if (bubbleHost) return
+      bubbleHost = document.createElement('div')
+      bubbleHost.id = 'workbench-selection-bubble-host'
+      bubbleHost.style.position = 'fixed'
+      bubbleHost.style.top = '0'
+      bubbleHost.style.left = '0'
+      bubbleHost.style.width = '0'
+      bubbleHost.style.height = '0'
+      bubbleHost.style.zIndex = '2147483647'
+      bubbleHost.style.pointerEvents = 'none'
+
+      shadowRoot = bubbleHost.attachShadow({ mode: 'open' })
+
+      const style = document.createElement('style')
+      style.textContent = `
+        .wb-bubble {
+          position: fixed;
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          padding: 4px 6px;
+          background: rgba(15, 23, 42, 0.95);
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 9999px;
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+          opacity: 0;
+          transform: scale(0.92) translateY(4px);
+          transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+          pointer-events: auto;
+          user-select: none;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          font-size: 11.5px;
+          color: #f1f5f9;
+          visibility: hidden;
+        }
+        .wb-bubble.visible {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+          visibility: visible;
+        }
+        .wb-btn {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 5px 9px;
+          background: transparent;
+          border: none;
+          border-radius: 9999px;
+          color: #e2e8f0;
+          cursor: pointer;
+          font-size: 11.5px;
+          font-weight: 500;
+          line-height: 1;
+          white-space: nowrap;
+          transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
+        }
+        .wb-btn:hover {
+          background: rgba(255, 255, 255, 0.16);
+          color: #ffffff;
+          transform: translateY(-1px);
+        }
+        .wb-btn:active {
+          transform: translateY(0);
+        }
+        .wb-btn-primary {
+          background: rgba(16, 185, 129, 0.22);
+          color: #34d399;
+        }
+        .wb-btn-primary:hover {
+          background: rgba(16, 185, 129, 0.38);
+          color: #6ee7b7;
+        }
+        .wb-btn-note {
+          background: rgba(168, 85, 247, 0.22);
+          color: #c084fc;
+        }
+        .wb-btn-note:hover {
+          background: rgba(168, 85, 247, 0.38);
+          color: #d8b4fe;
+        }
+        .wb-divider {
+          width: 1px;
+          height: 14px;
+          background: rgba(255, 255, 255, 0.16);
+          margin: 0 1px;
+        }
+        .wb-icon {
+          display: inline-block;
+          flex-shrink: 0;
+        }
+      `
+      shadowRoot.appendChild(style)
+
+      bubbleEl = document.createElement('div')
+      bubbleEl.className = 'wb-bubble'
+      bubbleEl.innerHTML = `
+        <button class="wb-btn wb-btn-primary" data-action="explain" title="Ask AI to explain this excerpt">
+          <svg class="wb-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+          <span>Explain</span>
+        </button>
+        <button class="wb-btn" data-action="code" title="Ask AI for a practical code example">
+          <svg class="wb-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          <span>Code</span>
+        </button>
+        <div class="wb-divider"></div>
+        <button class="wb-btn wb-btn-note" data-action="clip" title="Clip highlighted text directly into Notes with citation">
+          <svg class="wb-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+          <span>Clip to Note</span>
+        </button>
+        <div class="wb-divider"></div>
+        <button class="wb-btn" data-action="quiz" title="Quiz yourself on this excerpt">
+          <svg class="wb-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+          <span>Quiz</span>
+        </button>
+      `
+
+      bubbleEl.addEventListener('mouseenter', () => { isMouseInsideBubble = true })
+      bubbleEl.addEventListener('mouseleave', () => { isMouseInsideBubble = false })
+      bubbleEl.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      })
+
+      bubbleEl.addEventListener('click', (e) => {
+        const target = (e.target as HTMLElement)?.closest('button')
+        if (!target) return
+        const action = target.getAttribute('data-action')
+        if (!action) return
+
+        const sel = window.getSelection()
+        const text = (sel ? sel.toString() : '').trim() || currentSelectionText
+        if (!text) return
+
+        const metadata = getBookMetadata()
+
+        if (action === 'clip') {
+          try {
+            ipcRenderer.send('workbench:book-bubble-action', {
+              action: 'clip-note',
+              text,
+              metadata,
+            })
+            flashHighlight()
+          } catch (_) {}
+        } else if (action === 'explain' || action === 'code' || action === 'quiz') {
+          try {
+            ipcRenderer.send('workbench:book-bubble-action', {
+              action: 'ask-ai',
+              templateKey: action,
+              text,
+              metadata,
+            })
+          } catch (_) {}
+        }
+
+        hideBubble()
+      })
+
+      shadowRoot.appendChild(bubbleEl)
+      if (document.body) {
+        document.body.appendChild(bubbleHost)
+      } else {
+        document.documentElement.appendChild(bubbleHost)
+      }
+    }
+
+    let currentSelectionText = ''
+    let currentSelectionRange: Range | null = null
+
+    function flashHighlight() {
+      try {
+        const sel = window.getSelection()
+        const range = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0) : currentSelectionRange
+        if (!range) return
+        const span = document.createElement('span')
+        span.style.background = 'rgba(168, 85, 247, 0.35)'
+        span.style.borderRadius = '3px'
+        span.style.transition = 'background 0.8s ease'
+        range.surroundContents(span)
+        setTimeout(() => {
+          span.style.background = 'rgba(168, 85, 247, 0.15)'
+        }, 500)
+      } catch (_) {}
+    }
+
+    function hideBubble() {
+      if (bubbleEl) {
+        bubbleEl.classList.remove('visible')
+      }
+    }
+
+    function handleSelectionCheck() {
+      if (isMouseInsideBubble) return
+      if (hideTimeout) clearTimeout(hideTimeout)
+
+      hideTimeout = setTimeout(() => {
+        const activeEl = document.activeElement as HTMLElement | null
+        if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT' || activeEl.isContentEditable)) {
+          hideBubble()
+          return
+        }
+
+        // Avoid showing inside chat interfaces (ChatGPT, Claude, Gemini, Grok)
+        const host = window.location.hostname.toLowerCase()
+        if (host.includes('chatgpt') || host.includes('claude') || host.includes('gemini') || host.includes('grok')) {
+          hideBubble()
+          return
+        }
+
+        const sel = window.getSelection()
+        const text = (sel ? sel.toString() : '').trim()
+
+        if (!text || text.length < 2 || !sel || sel.isCollapsed || !sel.rangeCount) {
+          hideBubble()
+          return
+        }
+
+        const range = sel.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+        if (!rect || (rect.width === 0 && rect.height === 0)) {
+          hideBubble()
+          return
+        }
+
+        currentSelectionText = text
+        try {
+          currentSelectionRange = range.cloneRange()
+        } catch (_) {}
+
+        createBubbleDOM()
+        if (!bubbleEl) return
+
+        const bubbleWidth = bubbleEl.offsetWidth || 315
+        const bubbleHeight = bubbleEl.offsetHeight || 36
+
+        let left = rect.left + (rect.width / 2) - (bubbleWidth / 2)
+        let top = rect.top - bubbleHeight - 8
+
+        if (left < 10) left = 10
+        if (left + bubbleWidth > window.innerWidth - 10) {
+          left = window.innerWidth - bubbleWidth - 10
+        }
+
+        if (top < 10) {
+          top = rect.bottom + 8
+        }
+
+        bubbleEl.style.left = `${Math.round(left)}px`
+        bubbleEl.style.top = `${Math.round(top)}px`
+        bubbleEl.classList.add('visible')
+      }, 60)
+    }
+
+    document.addEventListener('mouseup', handleSelectionCheck, true)
+    document.addEventListener('keyup', handleSelectionCheck, true)
+    document.addEventListener('mousedown', () => {
+      if (isMouseInsideBubble) return
+      hideBubble()
+    }, true)
+    window.addEventListener('scroll', () => {
+      if (!isMouseInsideBubble) hideBubble()
+    }, { passive: true })
+  })()
+} catch (_) {}
+
