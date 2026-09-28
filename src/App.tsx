@@ -1040,8 +1040,8 @@ export const App: React.FC = () => {
     if (activePanes.book && activePanes.note) {
       return { left: renderBook, right: renderNote }
     }
-    // ai + note
-    return { left: renderChat, right: renderNote }
+    // ai + note: when book view is disabled, note view is on the left by default
+    return { left: renderNote, right: renderChat }
   }
 
   return (
@@ -1072,7 +1072,7 @@ export const App: React.FC = () => {
       <div className="workspace-container" ref={workspaceRef}>
         {isTripleMode ? (
           !isSwapped ? (
-            <React.Fragment key="triple-normal">
+            <React.Fragment>
               {renderBook(leftColumnStyle)}
               <Splitter
                 onPointerDown={handleColumnPointerDown}
@@ -1089,7 +1089,7 @@ export const App: React.FC = () => {
               {renderStackedRightColumn(rightColumnStyle)}
             </React.Fragment>
           ) : (
-            <React.Fragment key="triple-swapped">
+            <React.Fragment>
               {renderStackedRightColumn(leftColumnStyle)}
               <Splitter
                 onPointerDown={handleColumnPointerDown}
@@ -1110,7 +1110,7 @@ export const App: React.FC = () => {
           (() => {
             const { left: LeftPane, right: RightPane } = getDualPanes()
             return !isSwapped ? (
-              <React.Fragment key="dual-normal">
+              <React.Fragment>
                 {LeftPane(leftColumnStyle)}
                 <Splitter
                   onPointerDown={handleColumnPointerDown}
@@ -1127,7 +1127,7 @@ export const App: React.FC = () => {
                 {RightPane(rightColumnStyle)}
               </React.Fragment>
             ) : (
-              <React.Fragment key="dual-swapped">
+              <React.Fragment>
                 {RightPane(leftColumnStyle)}
                 <Splitter
                   onPointerDown={handleColumnPointerDown}

@@ -65,6 +65,39 @@ interface LocalExplorerProps {
 type SortColumn = 'name' | 'date' | 'type' | 'size'
 type SortDirection = 'asc' | 'desc'
 
+const STORAGE_KEY = 'workbench_local_explorer_state'
+
+interface PersistentExplorerState {
+  currentPath?: string
+  history?: string[]
+  historyIndex?: number
+  openTabs?: OpenDocTab[]
+  activeTabId?: string
+  selectedPath?: string | null
+  viewMode?: 'list' | 'grid'
+  sortCol?: SortColumn
+  sortDir?: SortDirection
+}
+
+function loadPersistedExplorerState(): PersistentExplorerState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch (_) {}
+  return {}
+}
+
+function savePersistedExplorerState(state: Partial<PersistentExplorerState>) {
+  try {
+    const prev = loadPersistedExplorerState()
+    const next = { ...prev, ...state }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  } catch (_) {}
+}
+
+// In-memory directory cache for instant SWR loading without screen flash
+const dirCache: Record<string, FileItem[]> = {}
+
 export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   rootPath,
   clippedText,
@@ -72,20 +105,64 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   onNotify,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
+  const persisted = useMemo(() => loadPersistedExplorerState(), [])
 
   // Navigation & Directory state
-  const [currentPath, setCurrentPath] = useState<string>(rootPath || '')
-  const [history, setHistory] = useState<string[]>([])
-  const [historyIndex, setHistoryIndex] = useState<number>(-1)
-  const [items, setItems] = useState<FileItem[]>([])
-  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [currentPath, setCurrentPath] = useState<string>(() => {
+    return persisted.currentPath || rootPath || ''
+  })
+  const [history, setHistory] = useState<string[]>(() => {
+    return persisted.history && persisted.history.length > 0 ? persisted.history : (rootPath ? [rootPath] : [])
+  })
+  const [historyIndex, setHistoryIndex] = useState<number>(() => {
+    return typeof persisted.historyIndex === 'number' ? persisted.historyIndex : (rootPath ? 0 : -1)
+  })
+  const [items, setItems] = useState<FileItem[]>(() => {
+    const initPath = persisted.currentPath || rootPath || ''
+    return dirCache[initPath] || []
+  })
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    const initPath = persisted.currentPath || rootPath || ''
+    return !dirCache[initPath]
+  })
   const [searchQuery, setSearchQuery] = useState<string>('')
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
-  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(() => {
+    return persisted.viewMode || 'list'
+  })
+  const [selectedPath, setSelectedPath] = useState<string | null>(() => {
+    return persisted.selectedPath || null
+  })
 
   // Tabbed Document Workspace State
-  const [openTabs, setOpenTabs] = useState<OpenDocTab[]>([])
-  const [activeTabId, setActiveTabId] = useState<string>('__explorer__')
+  const [openTabs, setOpenTabs] = useState<OpenDocTab[]>(() => {
+    return persisted.openTabs || []
+  })
+  const [activeTabId, setActiveTabId] = useState<string>(() => {
+    return persisted.activeTabId || '__explorer__'
+  })
+
+  // Sorting State - default to Name Descending as requested!
+  const [sortCol, setSortCol] = useState<SortColumn>(() => {
+    return persisted.sortCol || 'name'
+  })
+  const [sortDir, setSortDir] = useState<SortDirection>(() => {
+    return persisted.sortDir || 'desc'
+  })
+
+  // Save persistent state whenever key navigation or tab properties change
+  useEffect(() => {
+    savePersistedExplorerState({
+      currentPath,
+      history,
+      historyIndex,
+      openTabs,
+      activeTabId,
+      selectedPath,
+      viewMode,
+      sortCol,
+      sortDir,
+    })
+  }, [currentPath, history, historyIndex, openTabs, activeTabId, selectedPath, viewMode, sortCol, sortDir])
 
   const handleOpenDocInTab = async (item: FileItem) => {
     const ext = item.extension.toLowerCase()
@@ -208,9 +285,6 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     startWidth: number
   } | null>(null)
 
-  // --- Sorting State ---
-  const [sortCol, setSortCol] = useState<SortColumn>('name')
-  const [sortDir, setSortDir] = useState<SortDirection>('asc')
 
   // --- Clipboard State (Copy / Cut / Paste) ---
   const [clipboard, setClipboard] = useState<{
@@ -233,25 +307,30 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     }
   }, [])
 
-  // Initialize or update path when rootPath changes
+  // Initialize or update path only if currentPath is not yet set
   useEffect(() => {
-    if (rootPath) {
+    if (!currentPath && rootPath) {
       setCurrentPath(rootPath)
       setHistory([rootPath])
       setHistoryIndex(0)
     }
-  }, [rootPath])
+  }, [rootPath, currentPath])
 
-  // Load directory items
+  // Load directory items with SWR (stale-while-revalidate) pattern
   const loadDirectory = async (targetDir: string) => {
     if (!targetDir || !window.electron?.readDirectory) return
-    setIsLoading(true)
-    setSelectedPath(null)
-    setActiveContextMenu(null)
+
+    // If directory was previously cached, show items immediately for instant smooth transition
+    if (dirCache[targetDir]) {
+      setItems(dirCache[targetDir])
+    } else {
+      setIsLoading(true)
+    }
 
     try {
       const res = await window.electron.readDirectory(targetDir)
       if (res.success && res.items) {
+        dirCache[targetDir] = res.items
         setItems(res.items)
         if (res.currentPath && res.currentPath !== currentPath) {
           setCurrentPath(res.currentPath)
@@ -842,7 +921,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortCol(col)
-      setSortDir('asc')
+      setSortDir(col === 'name' ? 'desc' : 'asc')
     }
   }
 
@@ -1620,12 +1699,12 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
             setActiveContextMenu({ isBackground: true, x: e.clientX, y: e.clientY })
           }}
         >
-          {isLoading ? (
+          {isLoading && items.length === 0 ? (
             <div className="explorer-loading-state">
               <RotateCw size={24} className="spin text-cyan" />
               <span>Reading directory...</span>
             </div>
-          ) : sortedAndFilteredItems.length === 0 ? (
+          ) : sortedAndFilteredItems.length === 0 && !isLoading ? (
             <div className="explorer-empty-state">
               <Folder size={40} className="text-muted" style={{ opacity: 0.4 }} />
               <p className="empty-title">
@@ -1637,8 +1716,11 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                   : 'Create a new note or folder using the toolbar buttons above, or drag files here'}
               </p>
             </div>
-          ) : viewMode === 'list' ? (
-            <div className="explorer-details-table">
+          ) : (
+            <>
+              {isLoading && <div className="wb-explorer-top-loader" />}
+              {viewMode === 'list' ? (
+                <div className="explorer-details-table">
               {/* Resizable Column Headers */}
               <div className="details-header-row">
                 {/* Column 1: Name */}
@@ -1867,6 +1949,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 )
               })}
             </div>
+          )}
+            </>
           )}
         </div>
       </div>

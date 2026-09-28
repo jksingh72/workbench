@@ -4721,3 +4721,20 @@ input:checked + .slider-round:before {
   border-color: rgba(245, 158, 11, 0.5);
   color: #fef08a;
 }
+
+.wb-explorer-top-loader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #06b6d4, #3b82f6, #06b6d4);
+  background-size: 200% 100%;
+  animation: wb-top-loader-slide 1.2s infinite ease-in-out;
+  z-index: 10;
+}
+
+@keyframes wb-top-loader-slide {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
