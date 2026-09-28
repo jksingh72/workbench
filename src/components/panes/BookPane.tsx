@@ -85,6 +85,7 @@ export const BookPane: React.FC<BookPaneProps> = ({
           storageKey="workbench_book_explorer_state"
           rootPath={localRootPath}
           onNotify={onNotify || (() => {})}
+          zoomFactor={navState.zoomFactor}
         />
       </div>
 

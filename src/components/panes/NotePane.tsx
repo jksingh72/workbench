@@ -77,6 +77,7 @@ export const NotePane: React.FC<NotePaneProps> = ({
           clippedText={isLocalFolder ? clippedText : null}
           onClearClippedText={onClearClippedText}
           onNotify={onNotify}
+          zoomFactor={navState.zoomFactor}
         />
       </div>
 

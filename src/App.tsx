@@ -592,6 +592,34 @@ export const App: React.FC = () => {
     target: 'book' | 'ai' | 'note',
     command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset'
   ) => {
+    // If target is in local folder mode (Local Books or Local Notes), handle zoom in React state
+    const currentBook = bookSources.find((s) => s.id === activeBookSourceId)
+    const isBookLocal = target === 'book' && (currentBook?.isLocal || currentBook?.id === 'local-books' || (!!currentBook?.url && !currentBook.url.startsWith('http')))
+    const currentNote = noteSources.find((s) => s.id === activeNoteSourceId)
+    const isNoteLocal = target === 'note' && (currentNote?.isLocal || currentNote?.id === 'local-explorer' || (!!currentNote?.url && !currentNote.url.startsWith('http')))
+
+    if (isBookLocal && (command === 'zoom-in' || command === 'zoom-out' || command === 'zoom-reset')) {
+      setBookNavState((prev) => {
+        let current = prev.zoomFactor || 1.0
+        if (command === 'zoom-in') current = Math.min(+(current + 0.1).toFixed(1), 2.5)
+        else if (command === 'zoom-out') current = Math.max(+(current - 0.1).toFixed(1), 0.5)
+        else if (command === 'zoom-reset') current = 1.0
+        return { ...prev, zoomFactor: current }
+      })
+      return
+    }
+
+    if (isNoteLocal && (command === 'zoom-in' || command === 'zoom-out' || command === 'zoom-reset')) {
+      setNoteNavState((prev) => {
+        let current = prev.zoomFactor || 1.0
+        if (command === 'zoom-in') current = Math.min(+(current + 0.1).toFixed(1), 2.5)
+        else if (command === 'zoom-out') current = Math.max(+(current - 0.1).toFixed(1), 0.5)
+        else if (command === 'zoom-reset') current = 1.0
+        return { ...prev, zoomFactor: current }
+      })
+      return
+    }
+
     window.electron?.navAction({ target, command })
   }
 

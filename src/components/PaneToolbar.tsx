@@ -313,32 +313,33 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
       {/* Right section: Actions & Zoom */}
       <div className="toolbar-section-right">
+        {/* Zoom Controls (Enabled for all panes: Book, AI Chat, Notes) */}
+        <div className="zoom-controls">
+          <button
+            className="zoom-btn"
+            onClick={() => onNavAction('zoom-out')}
+            title="Zoom Out (Ctrl+-)"
+          >
+            <ZoomOut size={12} />
+          </button>
+          <button
+            className="zoom-reset-btn"
+            onClick={() => onNavAction('zoom-reset')}
+            title="Reset Zoom to 100%"
+          >
+            {zoomPercent}%
+          </button>
+          <button
+            className="zoom-btn"
+            onClick={() => onNavAction('zoom-in')}
+            title="Zoom In (Ctrl++)"
+          >
+            <ZoomIn size={12} />
+          </button>
+        </div>
+
         {isBook && (
           <>
-            {/* Zoom Controls */}
-            <div className="zoom-controls">
-              <button
-                className="zoom-btn"
-                onClick={() => onNavAction('zoom-out')}
-                title="Zoom Out"
-              >
-                <ZoomOut size={12} />
-              </button>
-              <button
-                className="zoom-reset-btn"
-                onClick={() => onNavAction('zoom-reset')}
-                title="Reset Zoom to 100%"
-              >
-                {zoomPercent}%
-              </button>
-              <button
-                className="zoom-btn"
-                onClick={() => onNavAction('zoom-in')}
-                title="Zoom In"
-              >
-                <ZoomIn size={12} />
-              </button>
-            </div>
 
             {/* "Ask AI" Action Dropdown */}
             <div className="ask-ai-wrapper" ref={dropdownRef}>

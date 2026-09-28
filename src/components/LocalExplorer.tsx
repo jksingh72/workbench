@@ -62,6 +62,7 @@ interface LocalExplorerProps {
   onNotify: (msg: string) => void
   storageKey?: string
   target?: 'note' | 'book'
+  zoomFactor?: number
 }
 
 type SortColumn = 'name' | 'date' | 'type' | 'size'
@@ -111,6 +112,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   onNotify,
   storageKey = DEFAULT_STORAGE_KEY,
   target = 'note',
+  zoomFactor = 1.0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const persisted = useMemo(() => loadPersistedExplorerState(storageKey), [storageKey])
@@ -1222,6 +1224,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       ref={containerRef}
       tabIndex={0}
       className="local-explorer-container"
+      style={zoomFactor && zoomFactor !== 1 ? { zoom: `${Math.round(zoomFactor * 100)}%` } : undefined}
       onClick={() => {
         setActiveContextMenu(null)
         setTabContextMenu(null)
