@@ -1095,8 +1095,11 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('workbench:read-pdf', async (_, filePath: string) => {
+  ipcMain.handle('workbench:read-pdf', async (_, params: string | { filePath: string; maxPages?: number }) => {
     try {
+      const filePath = typeof params === 'string' ? params : params.filePath
+      const maxPages = typeof params === 'object' && params.maxPages !== undefined ? params.maxPages : 30
+
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
       const buffer = await fs.promises.readFile(filePath)
       
@@ -1110,9 +1113,15 @@ function registerIpcHandlers() {
         const { createRequire } = await import('module')
         const req = createRequire(import.meta.url)
         const pdfModule = req('pdf-parse')
+        
+        const parseOptions: any = {}
+        if (maxPages && maxPages > 0) {
+          parseOptions.first = maxPages
+        }
+
         if (pdfModule.PDFParse) {
           const parser = new pdfModule.PDFParse({ data: buffer })
-          const textResult = await parser.getText()
+          const textResult = await parser.getText(parseOptions)
           text = textResult.text || ''
           pageCount = textResult.total || textResult.pages?.length || 0
           pages = textResult.pages || []
@@ -1133,21 +1142,20 @@ function registerIpcHandlers() {
         console.warn('[Main] PDF text extraction warning:', parseErr?.message)
       }
 
-      const normalized = filePath.replace(/\\/g, '/')
-      const fileUrl = `local-file://${normalized}`
-      const dataUrl = `data:application/pdf;base64,${buffer.toString('base64')}`
+      const cleanPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
+      const fileUrl = `local-file:///${cleanPath}`
 
       return {
         success: true,
         filePath,
         fileName: path.basename(filePath),
         fileUrl,
-        dataUrl,
         text,
         pageCount,
         pages,
         title,
         author,
+        truncated: pageCount > (maxPages || 30),
       }
     } catch (err: any) {
       console.error('[Main] read-pdf error:', err)
@@ -1355,9 +1363,25 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.whenReady().then(() => {
   protocol.handle('local-file', (request) => {
-    let rawPath = request.url.replace(/^local-file:\/\//i, '')
-    const decodedPath = decodeURIComponent(rawPath)
-    return net.fetch(pathToFileURL(decodedPath).toString())
+    try {
+      let rawPath = request.url.replace(/^local-file:\/\//i, '')
+      let p = decodeURIComponent(rawPath).replace(/^\/+/, '')
+      if (process.platform === 'win32') {
+        // Restore drive colon if stripped by Chromium host parsing (e.g. 'd/folder' -> 'd:/folder')
+        if (/^[a-zA-Z]\//.test(p)) {
+          p = p[0] + ':/' + p.slice(2)
+        }
+      }
+      const normalizedPath = path.normalize(p)
+      if (!fs.existsSync(normalizedPath)) {
+        console.error('[Protocol] local-file not found on disk:', normalizedPath, 'from request:', request.url)
+        return new Response('File not found', { status: 404 })
+      }
+      return net.fetch(pathToFileURL(normalizedPath).toString())
+    } catch (err: any) {
+      console.error('[Protocol] local-file error:', err)
+      return new Response('File not found', { status: 404 })
+    }
   })
   createWindow()
 })

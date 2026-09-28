@@ -11,7 +11,8 @@ import {
   Eye,
   Edit3,
   BookOpen,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react'
 
 interface PdfEditorProps {
@@ -22,15 +23,6 @@ interface PdfEditorProps {
   onShowInFolder?: () => void
 }
 
-interface PdfMetadata {
-  pageCount: number
-  title?: string
-  author?: string
-  fileUrl: string
-  dataUrl?: string
-  text: string
-}
-
 export const PdfEditor: React.FC<PdfEditorProps> = ({
   filePath,
   fileName,
@@ -38,8 +30,14 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   onOpenOutside,
   onShowInFolder
 }) => {
-  const [pdfMeta, setPdfMeta] = useState<PdfMetadata | null>(null)
-  const [isLoading, setIsLoading] = useState<boolean>(true)
+  // Visual URL is instant and never blocked
+  const cleanPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  const pdfUrl = encodeURI(`local-file:///${cleanPath}`)
+
+  const [pageCount, setPageCount] = useState<number | null>(null)
+  const [isExtracting, setIsExtracting] = useState<boolean>(true)
+  const [isExtractingAll, setIsExtractingAll] = useState<boolean>(false)
+  const [isTruncated, setIsTruncated] = useState<boolean>(false)
   const [viewMode, setViewMode] = useState<'split' | 'visual' | 'notes'>('split')
   
   // Editable text & annotations
@@ -51,45 +49,17 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const companionPath = `${filePath}.notes.md`
+  const hasUserEdited = useRef<boolean>(false)
 
-  // Load PDF and companion notes
+  // Fast background text & companion notes loader (non-blocking)
   useEffect(() => {
     let isMounted = true
-    const loadPdf = async () => {
-      setIsLoading(true)
+    hasUserEdited.current = false
+    setIsExtracting(true)
+
+    const loadNotesAndText = async () => {
       try {
-        // 1. Read PDF metadata and text extraction via IPC
-        let extractedText = ''
-        let count = 0
-        let pTitle = ''
-        let pAuthor = ''
-        let fUrl = `local-file://${filePath.replace(/\\/g, '/')}`
-        let dUrl: string | undefined
-
-        if (window.electron?.readPdf) {
-          const res = await window.electron.readPdf(filePath)
-          if (res.success) {
-            extractedText = res.text || ''
-            count = res.pageCount || 0
-            pTitle = res.title || ''
-            pAuthor = res.author || ''
-            if (res.fileUrl) fUrl = res.fileUrl
-            if (res.dataUrl) dUrl = res.dataUrl
-          }
-        }
-
-        if (!isMounted) return
-
-        setPdfMeta({
-          pageCount: count,
-          title: pTitle,
-          author: pAuthor,
-          fileUrl: fUrl,
-          dataUrl: dUrl,
-          text: extractedText
-        })
-
-        // 2. Check if a companion notes file already exists
+        // 1. Immediately check for existing companion notes file (<fileName>.notes.md)
         let loadedNotes = ''
         if (window.electron?.readFileContent) {
           const companionRes = await window.electron.readFileContent(companionPath)
@@ -98,26 +68,68 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
           }
         }
 
-        // If no companion notes exist yet, format extracted text as initial content
-        if (!loadedNotes.trim()) {
-          const header = `# Notes & Highlights: ${fileName}\n\n*Extracted from PDF (${count > 0 ? count + ' pages' : 'Document'})*\n\n---\n\n`
-          loadedNotes = header + (extractedText.trim() ? extractedText : '*(No text extracted or document is image-based. You can write your custom notes and annotations here.)*')
+        if (loadedNotes.trim()) {
+          if (isMounted) {
+            setNotesContent(loadedNotes)
+            setIsDirty(false)
+          }
         }
 
-        setNotesContent(loadedNotes)
-        setIsDirty(false)
+        // 2. Fetch fast initial preview of PDF (first 30 pages max to prevent freezes)
+        if (window.electron?.readPdf) {
+          const res = await window.electron.readPdf({ filePath, maxPages: 30 })
+          if (!isMounted) return
+
+          if (res.success) {
+            if (res.pageCount) setPageCount(res.pageCount)
+            setIsTruncated(!!res.truncated)
+
+            // If user has not written custom notes and no companion file existed, populate extracted text
+            if (!loadedNotes.trim() && !hasUserEdited.current) {
+              const header = `# Notes & Highlights: ${fileName}\n\n*Extracted from PDF (${res.pageCount ? res.pageCount + ' pages' : 'Document'})*\n\n---\n\n`
+              const initialBody = res.text?.trim()
+                ? res.text
+                : '*(No text extracted or document is image-based. You can write your custom notes and annotations here.)*'
+              setNotesContent(header + initialBody)
+              setIsDirty(false)
+            }
+          }
+        }
       } catch (err: any) {
-        onNotify(`⚠️ Error opening PDF: ${err.message}`)
+        console.warn('[PdfEditor] Background extraction error:', err?.message)
       } finally {
-        if (isMounted) setIsLoading(false)
+        if (isMounted) setIsExtracting(false)
       }
     }
 
-    loadPdf()
+    loadNotesAndText()
     return () => {
       isMounted = false
     }
   }, [filePath, fileName, companionPath])
+
+  // Extract all pages on demand for massive documents
+  const handleExtractAllPages = async () => {
+    if (!window.electron?.readPdf) return
+    setIsExtractingAll(true)
+    onNotify(`⚡ Extracting all pages for ${fileName}...`)
+    try {
+      const res = await window.electron.readPdf({ filePath, maxPages: 0 })
+      if (res.success && res.text) {
+        const fullHeader = `# Full Notes & Text: ${fileName}\n\n*Extracted all ${res.pageCount || ''} pages*\n\n---\n\n`
+        setNotesContent(fullHeader + res.text)
+        setIsTruncated(false)
+        setIsDirty(true)
+        onNotify(`✨ Extracted full text (${res.pageCount || ''} pages)`)
+      } else {
+        onNotify(`⚠️ Failed to extract full text: ${res.error}`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ Error: ${err.message}`)
+    } finally {
+      setIsExtractingAll(false)
+    }
+  }
 
   // Word and character count calculation
   useEffect(() => {
@@ -179,6 +191,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     const updated = notesContent.substring(0, start) + replacement + notesContent.substring(end)
     setNotesContent(updated)
     setIsDirty(true)
+    hasUserEdited.current = true
     setTimeout(() => {
       ta.focus()
       ta.selectionStart = start + prefix.length
@@ -192,6 +205,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     const template = `\n\n### 📌 Annotation (${timestamp})\n> **Key takeaway:** \n\n- Action Item: \n`
     setNotesContent((prev) => prev + template)
     setIsDirty(true)
+    hasUserEdited.current = true
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.scrollTop = textareaRef.current.scrollHeight
@@ -201,17 +215,6 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     onNotify('✨ Added annotation section')
   }
 
-  if (isLoading) {
-    return (
-      <div className="wb-doc-loading">
-        <RotateCw size={24} className="spin text-cyan" />
-        <span>Loading PDF document & extracting text...</span>
-      </div>
-    )
-  }
-
-  const pdfUrl = pdfMeta?.dataUrl || pdfMeta?.fileUrl || `local-file://${filePath.replace(/\\/g, '/')}`
-
   return (
     <div className="wb-doc-editor wb-pdf-editor">
       {/* PDF Main Toolbar */}
@@ -219,7 +222,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
         <div className="wb-toolbar-group">
           <span className="wb-doc-badge badge-pdf-tag">
             <BookOpen size={13} style={{ marginRight: '5px' }} />
-            PDF {pdfMeta?.pageCount ? `(${pdfMeta.pageCount} pgs)` : ''}
+            PDF {pageCount ? `(${pageCount} pgs)` : ''}
           </span>
 
           {/* View Mode Switcher */}
@@ -317,7 +320,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
 
       {/* Main Workspace Area (Split or Single) */}
       <div className={`wb-pdf-main-area mode-${viewMode}`}>
-        {/* Left Side: Visual Interactive PDF Viewer */}
+        {/* Left Side: Visual Interactive PDF Viewer (Instant Native Streaming) */}
         {(viewMode === 'split' || viewMode === 'visual') && (
           <div className="wb-pdf-visual-pane">
             <embed
@@ -337,10 +340,32 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
             <div className="wb-notes-mini-toolbar">
               <span className="wb-notes-title">
                 <FileText size={13} className="text-cyan" />
-                <span>Companion Notes & Extracted Text</span>
+                <span>Companion Notes</span>
+                {isExtracting && (
+                  <span className="wb-extract-status">
+                    <RotateCw size={10} className="spin" style={{ marginLeft: '4px' }} />
+                    <span style={{ fontSize: '10.5px', color: '#64748b' }}>loading preview...</span>
+                  </span>
+                )}
               </span>
 
               <div className="wb-mini-format-group">
+                {isTruncated && (
+                  <button
+                    className="wb-mini-extract-all-btn"
+                    onClick={handleExtractAllPages}
+                    disabled={isExtractingAll}
+                    title="Extract all pages of this document"
+                  >
+                    {isExtractingAll ? (
+                      <RotateCw size={11} className="spin" />
+                    ) : (
+                      <Zap size={11} className="text-amber" />
+                    )}
+                    <span>Extract All Pages</span>
+                  </button>
+                )}
+
                 <button
                   className="wb-mini-btn"
                   onClick={() => insertSnippet('**', '**')}
@@ -396,8 +421,9 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
                 onChange={(e) => {
                   setNotesContent(e.target.value)
                   setIsDirty(true)
+                  hasUserEdited.current = true
                 }}
-                placeholder="Write your notes, excerpts, takeaways, and annotations here..."
+                placeholder={isExtracting ? 'Loading document notes...' : 'Write your notes, excerpts, takeaways, and annotations here...'}
                 spellCheck={false}
               />
             </div>
@@ -407,7 +433,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
               <span className="wb-status-item">{wordCount} words</span>
               <span className="wb-status-item">{charCount} characters</span>
               <span className="wb-status-item text-muted">
-                Companion: {fileName}.notes.md
+                {isTruncated ? 'Preview (first 30 pgs)' : 'All text'}
               </span>
               <span className="wb-status-item">
                 {isDirty ? (

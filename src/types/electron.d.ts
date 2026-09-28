@@ -96,18 +96,18 @@ export interface ElectronAPI {
   saveDocx?: (params: { filePath: string; html?: string; text?: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
   readSpreadsheet?: (filePath: string) => Promise<{ success: boolean; sheetNames?: string[]; sheets?: Record<string, { data: (string | number | null)[][]; rowCount: number; colCount: number }>; fileName?: string; error?: string }>
   saveSpreadsheet?: (params: { filePath: string; sheets: Record<string, (string | number | null)[][]> }) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
-  readPdf?: (filePath: string) => Promise<{
+  readPdf?: (params: string | { filePath: string; maxPages?: number }) => Promise<{
     success: boolean
     error?: string
     filePath?: string
     fileName?: string
     fileUrl?: string
-    dataUrl?: string
     text?: string
     pageCount?: number
     pages?: { num: number; text: string }[]
     title?: string
     author?: string
+    truncated?: boolean
   }>
   copyFilesToClipboard?: (paths: string[], isCut?: boolean) => Promise<{ success: boolean; count?: number; error?: string }>
   startDragFile?: (filePath: string | string[]) => void
