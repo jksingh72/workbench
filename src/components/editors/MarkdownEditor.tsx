@@ -63,6 +63,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isUpdatingFromSource = useRef<boolean>(false)
 
+  // Synchronize on filePath or initialContent change (e.g. switching tabs or file reload)
+  useEffect(() => {
+    setContent(initialContent)
+    setIsDirty(false)
+    if (wysiwygRef.current && (viewMode === 'wysiwyg' || viewMode === 'split')) {
+      try {
+        const parsedHtml = marked.parse(initialContent || '') as string
+        wysiwygRef.current.innerHTML = parsedHtml || '<p><br></p>'
+      } catch (_) {}
+    }
+  }, [filePath, initialContent])
+
   // Compute word and character count
   useEffect(() => {
     const text = content.trim()

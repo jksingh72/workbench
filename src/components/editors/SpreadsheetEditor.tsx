@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Save,
   Plus,
+  Minus,
+  Trash2,
   RotateCw,
   ExternalLink,
   FolderOpen,
@@ -234,6 +236,19 @@ export const SpreadsheetEditor: React.FC<SpreadsheetEditorProps> = ({
     setIsDirty(true)
   }
 
+  const handleDeleteRow = () => {
+    if (currentData.length <= 1) return
+    const updated = currentData.filter((_, idx) => idx !== activeCell.r)
+    setSheets((prev) => ({
+      ...prev,
+      [activeSheet]: updated
+    }))
+    setIsDirty(true)
+    if (activeCell.r >= updated.length) {
+      setActiveCell((prev) => ({ ...prev, r: updated.length - 1 }))
+    }
+  }
+
   const handleAddColumn = () => {
     const updated = currentData.map((row) => [...row, ''])
     setSheets((prev) => ({
@@ -241,6 +256,72 @@ export const SpreadsheetEditor: React.FC<SpreadsheetEditorProps> = ({
       [activeSheet]: updated
     }))
     setIsDirty(true)
+  }
+
+  const handleDeleteColumn = () => {
+    if (colCount <= 1) return
+    const updated = currentData.map((row) => row.filter((_, idx) => idx !== activeCell.c))
+    setSheets((prev) => ({
+      ...prev,
+      [activeSheet]: updated
+    }))
+    setIsDirty(true)
+    if (activeCell.c >= (updated[0]?.length || 1)) {
+      setActiveCell((prev) => ({ ...prev, c: Math.max(0, (updated[0]?.length || 1) - 1) }))
+    }
+  }
+
+  const handleClearCell = () => {
+    updateCellValue(activeCell.r, activeCell.c, '')
+  }
+
+  const handleGridKeyDown = (e: React.KeyboardEvent) => {
+    if (editingCell) return
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveCell((prev) => ({ ...prev, r: Math.max(0, prev.r - 1) }))
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveCell((prev) => ({ ...prev, r: Math.min(rowCount - 1, prev.r + 1) }))
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setActiveCell((prev) => ({ ...prev, c: Math.max(0, prev.c - 1) }))
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setActiveCell((prev) => ({ ...prev, c: Math.min(colCount - 1, prev.c + 1) }))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (e.shiftKey) {
+        setActiveCell((prev) => ({ ...prev, r: Math.max(0, prev.r - 1) }))
+      } else {
+        setActiveCell((prev) => ({ ...prev, r: Math.min(rowCount - 1, prev.r + 1) }))
+      }
+    } else if (e.key === 'Tab') {
+      e.preventDefault()
+      if (e.shiftKey) {
+        setActiveCell((prev) => ({ ...prev, c: Math.max(0, prev.c - 1) }))
+      } else {
+        setActiveCell((prev) => ({ ...prev, c: Math.min(colCount - 1, prev.c + 1) }))
+      }
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      updateCellValue(activeCell.r, activeCell.c, '')
+    } else if (e.key === 'F2') {
+      e.preventDefault()
+      setEditingCell({ r: activeCell.r, c: activeCell.c })
+      setTimeout(() => cellInputRef.current?.focus(), 10)
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // Direct typing starts editing immediately
+      setEditingCell({ r: activeCell.r, c: activeCell.c })
+      updateCellValue(activeCell.r, activeCell.c, e.key)
+      setTimeout(() => {
+        if (cellInputRef.current) {
+          cellInputRef.current.focus()
+          cellInputRef.current.value = e.key
+        }
+      }, 10)
+    }
   }
 
   const handleAddSheet = () => {
@@ -279,7 +360,15 @@ export const SpreadsheetEditor: React.FC<SpreadsheetEditorProps> = ({
             title="Insert Row at Bottom"
           >
             <Plus size={13} />
-            <span>Row</span>
+            <span>+ Row</span>
+          </button>
+          <button
+            className="wb-tool-btn"
+            onClick={handleDeleteRow}
+            title="Delete Selected Row"
+          >
+            <Minus size={13} />
+            <span>- Row</span>
           </button>
           <button
             className="wb-tool-btn"
@@ -287,7 +376,23 @@ export const SpreadsheetEditor: React.FC<SpreadsheetEditorProps> = ({
             title="Insert Column at Right"
           >
             <Plus size={13} />
-            <span>Col</span>
+            <span>+ Col</span>
+          </button>
+          <button
+            className="wb-tool-btn"
+            onClick={handleDeleteColumn}
+            title="Delete Selected Column"
+          >
+            <Minus size={13} />
+            <span>- Col</span>
+          </button>
+          <button
+            className="wb-tool-btn"
+            onClick={handleClearCell}
+            title="Clear Selected Cell"
+          >
+            <Trash2 size={13} />
+            <span>Clear</span>
           </button>
         </div>
 
@@ -351,7 +456,11 @@ export const SpreadsheetEditor: React.FC<SpreadsheetEditorProps> = ({
       </div>
 
       {/* Grid Container */}
-      <div className="wb-sheet-grid-container">
+      <div
+        className="wb-sheet-grid-container"
+        tabIndex={0}
+        onKeyDown={handleGridKeyDown}
+      >
         <table className="wb-sheet-table">
           <thead>
             <tr>
@@ -410,6 +519,13 @@ export const SpreadsheetEditor: React.FC<SpreadsheetEditorProps> = ({
                               setEditingCell(null)
                               if (rIdx + 1 < rowCount) {
                                 setActiveCell({ r: rIdx + 1, c: cIdx })
+                              }
+                            } else if (e.key === 'Tab') {
+                              e.preventDefault()
+                              updateCellValue(rIdx, cIdx, e.currentTarget.value)
+                              setEditingCell(null)
+                              if (cIdx + 1 < colCount) {
+                                setActiveCell({ r: rIdx, c: cIdx + 1 })
                               }
                             } else if (e.key === 'Escape') {
                               setEditingCell(null)

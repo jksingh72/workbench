@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, protocol, net } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { exec } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BookViewHandler, CHROME_DESKTOP_UA } from './views/bookViewHandler'
 import { AIViewHandler } from './views/aiViewHandler'
 import { NoteViewHandler } from './views/noteViewHandler'
@@ -21,6 +21,21 @@ const BINARY_EXTENSIONS = new Set([
   'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a',
   'mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv',
   'ttf', 'otf', 'woff', 'woff2', 'eot'
+])
+
+// Register custom protocol scheme for local files (PDFs, images) before app is ready
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-file',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
 ])
 
 async function isBinaryFile(filePath: string): Promise<boolean> {
@@ -95,6 +110,7 @@ function createWindow() {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      plugins: true,
     },
   })
 
@@ -1079,6 +1095,66 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('workbench:read-pdf', async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+      const buffer = await fs.promises.readFile(filePath)
+      
+      let text = ''
+      let pageCount = 0
+      let pages: { num: number; text: string }[] = []
+      let title = ''
+      let author = ''
+
+      try {
+        const { createRequire } = await import('module')
+        const req = createRequire(import.meta.url)
+        const pdfModule = req('pdf-parse')
+        if (pdfModule.PDFParse) {
+          const parser = new pdfModule.PDFParse({ data: buffer })
+          const textResult = await parser.getText()
+          text = textResult.text || ''
+          pageCount = textResult.total || textResult.pages?.length || 0
+          pages = textResult.pages || []
+          try {
+            const infoResult = await parser.getInfo()
+            title = infoResult.info?.Title || ''
+            author = infoResult.info?.Author || ''
+          } catch (_) {}
+          await parser.destroy()
+        } else if (typeof pdfModule === 'function') {
+          const data = await pdfModule(buffer)
+          text = data.text || ''
+          pageCount = data.numpages || 0
+          title = data.info?.Title || ''
+          author = data.info?.Author || ''
+        }
+      } catch (parseErr: any) {
+        console.warn('[Main] PDF text extraction warning:', parseErr?.message)
+      }
+
+      const normalized = filePath.replace(/\\/g, '/')
+      const fileUrl = `local-file://${normalized}`
+      const dataUrl = `data:application/pdf;base64,${buffer.toString('base64')}`
+
+      return {
+        success: true,
+        filePath,
+        fileName: path.basename(filePath),
+        fileUrl,
+        dataUrl,
+        text,
+        pageCount,
+        pages,
+        title,
+        author,
+      }
+    } catch (err: any) {
+      console.error('[Main] read-pdf error:', err)
+      return { success: false, error: err?.message || 'Failed to read PDF document' }
+    }
+  })
+
   ipcMain.handle(
     'workbench:create-file',
     async (_, { parentPath, fileName, content }: { parentPath: string; fileName: string; content?: string }) => {
@@ -1277,7 +1353,14 @@ app.on('web-contents-created', (_event, contents) => {
   AuthCoordinator.getInstance().attachToWebContents(contents)
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  protocol.handle('local-file', (request) => {
+    let rawPath = request.url.replace(/^local-file:\/\//i, '')
+    const decodedPath = decodeURIComponent(rawPath)
+    return net.fetch(pathToFileURL(decodedPath).toString())
+  })
+  createWindow()
+})
 
 app.on('before-quit', async () => {
   const storeNotes = sessionManager?.getSettings().storeNoteCredentials ?? true

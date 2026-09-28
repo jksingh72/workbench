@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   Bold,
   Italic,
-  Underline,
+  Underline as UnderlineIcon,
   Strikethrough,
   Heading1,
   Heading2,
@@ -12,6 +12,10 @@ import {
   AlignRight,
   List,
   ListOrdered,
+  Quote,
+  Table as TableIcon,
+  Undo,
+  Redo,
   Save,
   ExternalLink,
   FolderOpen,
@@ -19,6 +23,15 @@ import {
   Check,
   FileText
 } from 'lucide-react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import { Underline } from '@tiptap/extension-underline'
+import { TextAlign } from '@tiptap/extension-text-align'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableHeader } from '@tiptap/extension-table-header'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { Image } from '@tiptap/extension-image'
 
 interface WordEditorProps {
   filePath: string
@@ -35,38 +48,62 @@ export const WordEditor: React.FC<WordEditorProps> = ({
   onOpenOutside,
   onShowInFolder
 }) => {
-  const [htmlContent, setHtmlContent] = useState<string>('')
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [isSaving, setIsSaving] = useState<boolean>(false)
   const [isDirty, setIsDirty] = useState<boolean>(false)
   const [wordCount, setWordCount] = useState<number>(0)
   const [charCount, setCharCount] = useState<number>(0)
 
-  const editorRef = useRef<HTMLDivElement>(null)
+  // TipTap Rich-Text Engine
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2, 3],
+        },
+      }),
+      Underline,
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+      }),
+      Table.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      Image.configure({
+        inline: true,
+        allowBase64: true,
+      }),
+    ],
+    content: '',
+    onUpdate: ({ editor: ed }) => {
+      setIsDirty(true)
+      const text = ed.getText()
+      const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0
+      setWordCount(words)
+      setCharCount(text.trim().length)
+    },
+  })
 
-  // Compute word and char counts from HTML/text
-  const updateCounts = (text: string) => {
-    const trimmed = text.trim()
-    const words = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0
-    setWordCount(words)
-    setCharCount(trimmed.length)
-  }
-
-  // Load DOCX document
+  // Load DOCX document into TipTap
   useEffect(() => {
     let isMounted = true
+    if (!editor) return
+
     const loadDocx = async () => {
       setIsLoading(true)
       try {
         if (window.electron?.readDocx) {
           const res = await window.electron.readDocx(filePath)
           if (res.success && isMounted) {
-            const docHtml = res.html || '<p><br></p>'
-            setHtmlContent(docHtml)
-            if (editorRef.current) {
-              editorRef.current.innerHTML = docHtml
-              updateCounts(editorRef.current.innerText || '')
-            }
+            const docHtml = res.html || '<p></p>'
+            editor.commands.setContent(docHtml)
+            const text = editor.getText()
+            const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0
+            setWordCount(words)
+            setCharCount(text.trim().length)
             setIsDirty(false)
           } else if (res.error) {
             onNotify(`⚠️ Could not read Word document: ${res.error}`)
@@ -83,38 +120,19 @@ export const WordEditor: React.FC<WordEditorProps> = ({
     return () => {
       isMounted = false
     }
-  }, [filePath])
+  }, [filePath, editor])
 
-  // Synchronize HTML into contentEditable whenever htmlContent changes or loading completes
-  useEffect(() => {
-    if (editorRef.current && !isLoading) {
-      if (editorRef.current.innerHTML !== htmlContent) {
-        editorRef.current.innerHTML = htmlContent || '<p><br></p>'
-      }
-      updateCounts(editorRef.current.innerText || '')
-    }
-  }, [htmlContent, isLoading])
-
-  // Handle edit input
-  const handleInput = () => {
-    if (!editorRef.current) return
-    const currentHtml = editorRef.current.innerHTML
-    setHtmlContent(currentHtml)
-    setIsDirty(true)
-    updateCounts(editorRef.current.innerText || '')
-  }
-
-  // Save document
+  // Save document back to DOCX
   const handleSave = useCallback(async () => {
-    if (!window.electron?.saveDocx || !editorRef.current) return
+    if (!window.electron?.saveDocx || !editor) return
     setIsSaving(true)
     try {
-      const currentHtml = editorRef.current.innerHTML
-      const currentText = editorRef.current.innerText
+      const currentHtml = editor.getHTML()
+      const currentText = editor.getText()
       const res = await window.electron.saveDocx({
         filePath,
         html: currentHtml,
-        text: currentText
+        text: currentText,
       })
       if (res.success) {
         setIsDirty(false)
@@ -127,34 +145,14 @@ export const WordEditor: React.FC<WordEditorProps> = ({
     } finally {
       setIsSaving(false)
     }
-  }, [filePath, fileName, onNotify])
+  }, [filePath, fileName, editor, onNotify])
 
-  // Format actions via standard document.execCommand
-  const executeFormat = (cmd: string, val: string = '') => {
-    if (!editorRef.current) return
-    editorRef.current.focus()
-    document.execCommand(cmd, false, val)
-    handleInput()
-  }
-
-  // Keyboard shortcut listener (Ctrl+S, Ctrl+B, Ctrl+I, Ctrl+U)
+  // Ctrl+S global keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        const key = e.key.toLowerCase()
-        if (key === 's') {
-          e.preventDefault()
-          handleSave()
-        } else if (key === 'b') {
-          e.preventDefault()
-          executeFormat('bold')
-        } else if (key === 'i') {
-          e.preventDefault()
-          executeFormat('italic')
-        } else if (key === 'u') {
-          e.preventDefault()
-          executeFormat('underline')
-        }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        handleSave()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -166,30 +164,51 @@ export const WordEditor: React.FC<WordEditorProps> = ({
       {/* Top Word Ribbon Toolbar */}
       <div className="wb-editor-toolbar wb-word-ribbon">
         <div className="wb-toolbar-group">
+          {/* Undo / Redo */}
           <button
             className="wb-tool-btn"
-            onClick={() => executeFormat('bold')}
+            onClick={() => editor?.chain().focus().undo().run()}
+            disabled={!editor?.can().undo()}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo size={14} />
+          </button>
+          <button
+            className="wb-tool-btn"
+            onClick={() => editor?.chain().focus().redo().run()}
+            disabled={!editor?.can().redo()}
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo size={14} />
+          </button>
+
+          <div className="wb-toolbar-sep" />
+
+          {/* Text Formatting */}
+          <button
+            className={`wb-tool-btn ${editor?.isActive('bold') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleBold().run()}
             title="Bold (Ctrl+B)"
           >
             <Bold size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('italic')}
+            className={`wb-tool-btn ${editor?.isActive('italic') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleItalic().run()}
             title="Italic (Ctrl+I)"
           >
             <Italic size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('underline')}
+            className={`wb-tool-btn ${editor?.isActive('underline') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleUnderline().run()}
             title="Underline (Ctrl+U)"
           >
-            <Underline size={14} />
+            <UnderlineIcon size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('strikeThrough')}
+            className={`wb-tool-btn ${editor?.isActive('strike') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleStrike().run()}
             title="Strikethrough"
           >
             <Strikethrough size={14} />
@@ -197,23 +216,24 @@ export const WordEditor: React.FC<WordEditorProps> = ({
 
           <div className="wb-toolbar-sep" />
 
+          {/* Headings */}
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('formatBlock', '<h1>')}
+            className={`wb-tool-btn ${editor?.isActive('heading', { level: 1 }) ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
             title="Heading 1"
           >
             <Heading1 size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('formatBlock', '<h2>')}
+            className={`wb-tool-btn ${editor?.isActive('heading', { level: 2 }) ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
             title="Heading 2"
           >
             <Heading2 size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('formatBlock', '<h3>')}
+            className={`wb-tool-btn ${editor?.isActive('heading', { level: 3 }) ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
             title="Heading 3"
           >
             <Heading3 size={14} />
@@ -221,23 +241,24 @@ export const WordEditor: React.FC<WordEditorProps> = ({
 
           <div className="wb-toolbar-sep" />
 
+          {/* Text Alignment */}
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('justifyLeft')}
+            className={`wb-tool-btn ${editor?.isActive({ textAlign: 'left' }) ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().setTextAlign('left').run()}
             title="Align Left"
           >
             <AlignLeft size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('justifyCenter')}
+            className={`wb-tool-btn ${editor?.isActive({ textAlign: 'center' }) ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().setTextAlign('center').run()}
             title="Align Center"
           >
             <AlignCenter size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('justifyRight')}
+            className={`wb-tool-btn ${editor?.isActive({ textAlign: 'right' }) ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().setTextAlign('right').run()}
             title="Align Right"
           >
             <AlignRight size={14} />
@@ -245,19 +266,45 @@ export const WordEditor: React.FC<WordEditorProps> = ({
 
           <div className="wb-toolbar-sep" />
 
+          {/* Lists and Quotes */}
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('insertUnorderedList')}
+            className={`wb-tool-btn ${editor?.isActive('bulletList') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
             title="Bullet List"
           >
             <List size={14} />
           </button>
           <button
-            className="wb-tool-btn"
-            onClick={() => executeFormat('insertOrderedList')}
+            className={`wb-tool-btn ${editor?.isActive('orderedList') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
             title="Numbered List"
           >
             <ListOrdered size={14} />
+          </button>
+          <button
+            className={`wb-tool-btn ${editor?.isActive('blockquote') ? 'active' : ''}`}
+            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+            title="Blockquote"
+          >
+            <Quote size={14} />
+          </button>
+
+          <div className="wb-toolbar-sep" />
+
+          {/* Table Insertion */}
+          <button
+            className={`wb-tool-btn ${editor?.isActive('table') ? 'active' : ''}`}
+            onClick={() => {
+              if (editor?.isActive('table')) {
+                editor.chain().focus().deleteTable().run()
+              } else {
+                editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+              }
+            }}
+            title={editor?.isActive('table') ? 'Delete Table' : 'Insert 3x3 Table'}
+          >
+            <TableIcon size={14} />
+            <span>Table</span>
           </button>
         </div>
 
@@ -305,14 +352,7 @@ export const WordEditor: React.FC<WordEditorProps> = ({
       </div>
 
       {/* Word Page Document Canvas */}
-      <div
-        className="wb-word-canvas-wrapper"
-        onClick={(e) => {
-          if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('wb-word-page')) {
-            editorRef.current?.focus()
-          }
-        }}
-      >
+      <div className="wb-word-canvas-wrapper">
         {isLoading && (
           <div className="wb-word-loading-overlay">
             <RotateCw size={24} className="spin text-cyan" />
@@ -320,15 +360,15 @@ export const WordEditor: React.FC<WordEditorProps> = ({
           </div>
         )}
 
-        <div className="wb-word-page">
-          <div
-            ref={editorRef}
-            className="wb-word-content"
-            contentEditable={!isLoading}
-            onInput={handleInput}
-            spellCheck={true}
-            data-placeholder="Start typing your Word document..."
-          />
+        <div
+          className="wb-word-page"
+          onClick={() => {
+            if (editor && !editor.isFocused) {
+              editor.commands.focus()
+            }
+          }}
+        >
+          <EditorContent editor={editor} className="wb-tiptap-wrapper" />
         </div>
       </div>
 

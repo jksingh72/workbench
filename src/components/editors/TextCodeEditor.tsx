@@ -36,9 +36,28 @@ export const TextCodeEditor: React.FC<TextCodeEditorProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lineNumbersRef = useRef<HTMLDivElement>(null)
 
+  const [wordCount, setWordCount] = useState<number>(0)
+
+  // Synchronize content on filePath or initialContent change
+  useEffect(() => {
+    if (initialContent) {
+      setContent(initialContent)
+      setIsDirty(false)
+    } else if (filePath && window.electron?.readFileContent) {
+      window.electron.readFileContent(filePath).then((res) => {
+        if (res.success && res.content !== undefined) {
+          setContent(res.content)
+          setIsDirty(false)
+        }
+      })
+    }
+  }, [filePath, initialContent])
+
   useEffect(() => {
     const lines = content.split('\n').length
     setLineCount(lines)
+    const words = content.trim() ? content.trim().split(/\s+/).filter(Boolean).length : 0
+    setWordCount(words)
   }, [content])
 
   // Sync scrolling between line numbers and textarea
@@ -184,7 +203,7 @@ export const TextCodeEditor: React.FC<TextCodeEditorProps> = ({
       {/* Code Status Footer */}
       <div className="wb-editor-footer">
         <span className="wb-footer-item">
-          <strong>{lineCount}</strong> lines · <strong>{content.length}</strong> chars
+          <strong>{lineCount}</strong> lines · <strong>{wordCount}</strong> words · <strong>{content.length}</strong> chars
         </span>
         <span className="wb-footer-item wb-footer-path" title={filePath}>
           {filePath}

@@ -44,13 +44,14 @@ import { MarkdownEditor } from './editors/MarkdownEditor'
 import { SpreadsheetEditor } from './editors/SpreadsheetEditor'
 import { WordEditor } from './editors/WordEditor'
 import { TextCodeEditor } from './editors/TextCodeEditor'
+import { PdfEditor } from './editors/PdfEditor'
 
 export interface OpenDocTab {
   id: string
   path: string
   name: string
   extension: string
-  type: 'markdown' | 'spreadsheet' | 'word' | 'code' | 'image'
+  type: 'markdown' | 'spreadsheet' | 'word' | 'code' | 'image' | 'pdf'
   content?: string
 }
 
@@ -96,6 +97,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       type = 'spreadsheet'
     } else if (['.docx'].includes(ext)) {
       type = 'word'
+    } else if (['.pdf'].includes(ext)) {
+      type = 'pdf'
     } else if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'].includes(ext)) {
       type = 'image'
     }
@@ -410,6 +413,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         '.md', '.markdown', '.txt',
         '.xlsx', '.xls', '.csv', '.tsv',
         '.docx',
+        '.pdf',
         '.json', '.js', '.ts', '.py', '.html', '.css', '.yaml', '.yml', '.log', '.env', '.ini', '.sh', '.bat', '.ps1',
         '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'
       ]
@@ -1112,6 +1116,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               {tab.type === 'word' && <FileText size={13} className="text-blue" />}
               {tab.type === 'code' && <FileCode size={13} className="text-purple" />}
               {tab.type === 'image' && <FileImage size={13} className="text-pink" />}
+              {tab.type === 'pdf' && <span className="office-badge badge-pdf" style={{ fontSize: '8px', padding: '1px 3px', lineHeight: '11px', height: '13px' }}>PDF</span>}
               <span className="wb-tab-title">{tab.name}</span>
               <button
                 className="wb-tab-ext"
@@ -1153,6 +1158,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           if (activeTab.type === 'markdown') {
             return (
               <MarkdownEditor
+                key={activeTab.id}
                 filePath={activeTab.path}
                 fileName={activeTab.name}
                 initialContent={activeTab.content}
@@ -1171,6 +1177,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           if (activeTab.type === 'spreadsheet') {
             return (
               <SpreadsheetEditor
+                key={activeTab.id}
                 filePath={activeTab.path}
                 fileName={activeTab.name}
                 onNotify={onNotify}
@@ -1186,6 +1193,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           if (activeTab.type === 'word') {
             return (
               <WordEditor
+                key={activeTab.id}
                 filePath={activeTab.path}
                 fileName={activeTab.name}
                 onNotify={onNotify}
@@ -1201,9 +1209,26 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           if (activeTab.type === 'code') {
             return (
               <TextCodeEditor
+                key={activeTab.id}
                 filePath={activeTab.path}
                 fileName={activeTab.name}
                 initialContent={activeTab.content}
+                onNotify={onNotify}
+                onOpenOutside={() => window.electron?.openPath(activeTab.path)}
+                onShowInFolder={() => {
+                  setActiveTabId('__explorer__')
+                  setSelectedPath(activeTab.path)
+                }}
+              />
+            )
+          }
+
+          if (activeTab.type === 'pdf') {
+            return (
+              <PdfEditor
+                key={activeTab.id}
+                filePath={activeTab.path}
+                fileName={activeTab.name}
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
