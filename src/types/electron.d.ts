@@ -90,7 +90,12 @@ export interface ElectronAPI {
   extractAITranscript?: () => Promise<{ success: boolean; transcript?: string; error?: string }>
   saveAIContent?: (params: { type?: 'response' | 'code' | 'transcript'; targetDir?: string; activeFilePath?: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; hasSelection?: boolean; count?: number; files?: string[]; message?: string; error?: string }>
   readFileContent: (filePath: string) => Promise<{ success: boolean; content?: string; fileName?: string; isBinary?: boolean; error?: string }>
+  writeFileContent?: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
   appendToFile: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
+  readDocx?: (filePath: string) => Promise<{ success: boolean; html?: string; fileName?: string; error?: string }>
+  saveDocx?: (params: { filePath: string; html?: string; text?: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
+  readSpreadsheet?: (filePath: string) => Promise<{ success: boolean; sheetNames?: string[]; sheets?: Record<string, { data: (string | number | null)[][]; rowCount: number; colCount: number }>; fileName?: string; error?: string }>
+  saveSpreadsheet?: (params: { filePath: string; sheets: Record<string, (string | number | null)[][]> }) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
   copyFilesToClipboard?: (paths: string[], isCut?: boolean) => Promise<{ success: boolean; count?: number; error?: string }>
   startDragFile?: (filePath: string | string[]) => void
   onDragEnded?: (callback: () => void) => () => void

@@ -900,6 +900,185 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('workbench:write-file-content', async (_, { filePath, content }: { filePath: string; content: string }) => {
+    try {
+      const dir = path.dirname(filePath)
+      if (!fs.existsSync(dir)) {
+        await fs.promises.mkdir(dir, { recursive: true })
+      }
+      await fs.promises.writeFile(filePath, content, 'utf-8')
+      return { success: true, filePath, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to write file' }
+    }
+  })
+
+  ipcMain.handle('workbench:read-docx', async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+      const mammoth = await import('mammoth')
+      const buffer = await fs.promises.readFile(filePath)
+      const options = {
+        convertImage: mammoth.images.imgElement((image: any) => {
+          return image.read('base64').then((imageBuffer: string) => {
+            return {
+              src: 'data:' + image.contentType + ';base64,' + imageBuffer,
+            }
+          })
+        }),
+      }
+      const result = await mammoth.convertToHtml({ buffer }, options)
+      return { success: true, html: result.value, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      console.error('[Main] read-docx error:', err)
+      return { success: false, error: err?.message || 'Failed to read Word document' }
+    }
+  })
+
+  ipcMain.handle('workbench:save-docx', async (_, { filePath, html, text }: { filePath: string; html?: string; text?: string }) => {
+    try {
+      const dir = path.dirname(filePath)
+      if (!fs.existsSync(dir)) {
+        await fs.promises.mkdir(dir, { recursive: true })
+      }
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx')
+      
+      const rawText = (html ? html
+        .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n')
+        .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n')
+        .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n')
+        .replace(/<li[^>]*>(.*?)<\/li>/gi, '• $1\n')
+        .replace(/<p[^>]*>/gi, '')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '') : text || '')
+
+      const lines = rawText.split('\n')
+      const children: any[] = []
+      
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd()
+        if (!line.trim()) {
+          children.push(new Paragraph({ children: [new TextRun('')] }))
+          continue
+        }
+        if (line.startsWith('# ')) {
+          children.push(new Paragraph({
+            text: line.replace('# ', '').trim(),
+            heading: HeadingLevel.HEADING_1,
+          }))
+        } else if (line.startsWith('## ')) {
+          children.push(new Paragraph({
+            text: line.replace('## ', '').trim(),
+            heading: HeadingLevel.HEADING_2,
+          }))
+        } else if (line.startsWith('### ')) {
+          children.push(new Paragraph({
+            text: line.replace('### ', '').trim(),
+            heading: HeadingLevel.HEADING_3,
+          }))
+        } else if (line.startsWith('• ') || line.startsWith('- ')) {
+          children.push(new Paragraph({
+            text: line.replace(/^[•\-]\s*/, '').trim(),
+            bullet: { level: 0 },
+          }))
+        } else {
+          children.push(new Paragraph({
+            children: [new TextRun(line)],
+          }))
+        }
+      }
+      
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: children.length > 0 ? children : [new Paragraph({ children: [new TextRun('')] })],
+        }],
+      })
+
+      const docBuffer = await Packer.toBuffer(doc)
+      await fs.promises.writeFile(filePath, docBuffer)
+      return { success: true, filePath, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      console.error('[Main] save-docx error:', err)
+      return { success: false, error: err?.message || 'Failed to save Word document' }
+    }
+  })
+
+  ipcMain.handle('workbench:read-spreadsheet', async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+      const XLSX = await import('xlsx')
+      const buffer = await fs.promises.readFile(filePath)
+      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+      
+      const sheets: Record<string, { data: (string | number | null)[][]; rowCount: number; colCount: number }> = {}
+      for (const sheetName of workbook.SheetNames) {
+        const worksheet = workbook.Sheets[sheetName]
+        const rawAoa = (XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as (string | number | null)[][]) || []
+        
+        let maxCols = 8
+        for (const row of rawAoa) {
+          if (row && row.length > maxCols) maxCols = row.length
+        }
+        const minRows = Math.max(rawAoa.length, 30)
+        const filledAoa: (string | number | null)[][] = []
+        for (let r = 0; r < minRows; r++) {
+          const row = (rawAoa[r] ? [...rawAoa[r]] : [])
+          while (row.length < maxCols) {
+            row.push('')
+          }
+          filledAoa.push(row)
+        }
+        
+        sheets[sheetName] = {
+          data: filledAoa,
+          rowCount: filledAoa.length,
+          colCount: maxCols,
+        }
+      }
+      
+      return {
+        success: true,
+        sheetNames: workbook.SheetNames.length > 0 ? workbook.SheetNames : ['Sheet1'],
+        sheets,
+        fileName: path.basename(filePath),
+      }
+    } catch (err: any) {
+      console.error('[Main] read-spreadsheet error:', err)
+      return { success: false, error: err?.message || 'Failed to read spreadsheet' }
+    }
+  })
+
+  ipcMain.handle('workbench:save-spreadsheet', async (_, { filePath, sheets }: { filePath: string; sheets: Record<string, (string | number | null)[][]> }) => {
+    try {
+      const dir = path.dirname(filePath)
+      if (!fs.existsSync(dir)) {
+        await fs.promises.mkdir(dir, { recursive: true })
+      }
+      const XLSX = await import('xlsx')
+      const workbook = XLSX.utils.book_new()
+      
+      for (const [sheetName, aoa] of Object.entries(sheets)) {
+        const trimmedAoa = (aoa || []).map((row) => [...row])
+        while (trimmedAoa.length > 0 && trimmedAoa[trimmedAoa.length - 1].every((cell) => cell === '' || cell === null)) {
+          trimmedAoa.pop()
+        }
+        const worksheet = XLSX.utils.aoa_to_sheet(trimmedAoa.length > 0 ? trimmedAoa : [['']])
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
+      }
+
+      const ext = path.extname(filePath).toLowerCase()
+      const bookType = ext === '.csv' ? 'csv' : (ext === '.tsv' ? 'tsv' : 'xlsx')
+      const buf = XLSX.write(workbook, { type: 'buffer', bookType: bookType as any })
+      await fs.promises.writeFile(filePath, buf)
+      return { success: true, filePath, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      console.error('[Main] save-spreadsheet error:', err)
+      return { success: false, error: err?.message || 'Failed to save spreadsheet' }
+    }
+  })
+
   ipcMain.handle(
     'workbench:create-file',
     async (_, { parentPath, fileName, content }: { parentPath: string; fileName: string; content?: string }) => {

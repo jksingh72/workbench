@@ -136,8 +136,18 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:save-ai-content', params),
   readFileContent: (filePath: string) =>
     ipcRenderer.invoke('workbench:read-file-content', filePath),
+  writeFileContent: (filePath: string, content: string) =>
+    ipcRenderer.invoke('workbench:write-file-content', { filePath, content }),
   appendToFile: (filePath: string, content: string) =>
     ipcRenderer.invoke('workbench:append-to-file', { filePath, content }),
+  readDocx: (filePath: string) =>
+    ipcRenderer.invoke('workbench:read-docx', filePath),
+  saveDocx: (params: { filePath: string; html?: string; text?: string }) =>
+    ipcRenderer.invoke('workbench:save-docx', params),
+  readSpreadsheet: (filePath: string) =>
+    ipcRenderer.invoke('workbench:read-spreadsheet', filePath),
+  saveSpreadsheet: (params: { filePath: string; sheets: Record<string, (string | number | null)[][]> }) =>
+    ipcRenderer.invoke('workbench:save-spreadsheet', params),
   copyFilesToClipboard: (paths: string[], isCut?: boolean) =>
     ipcRenderer.invoke('workbench:copy-files-to-clipboard', { paths, isCut }),
 

@@ -36,9 +36,23 @@ import {
   Monitor,
   Cloud,
   Bot,
-  ClipboardCopy
+  ClipboardCopy,
+  Table as TableIcon
 } from 'lucide-react'
 import { FileItem, SystemRootItem } from '../types/electron'
+import { MarkdownEditor } from './editors/MarkdownEditor'
+import { SpreadsheetEditor } from './editors/SpreadsheetEditor'
+import { WordEditor } from './editors/WordEditor'
+import { TextCodeEditor } from './editors/TextCodeEditor'
+
+export interface OpenDocTab {
+  id: string
+  path: string
+  name: string
+  extension: string
+  type: 'markdown' | 'spreadsheet' | 'word' | 'code' | 'image'
+  content?: string
+}
 
 interface LocalExplorerProps {
   rootPath: string
@@ -68,11 +82,78 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
 
+  // Tabbed Document Workspace State
+  const [openTabs, setOpenTabs] = useState<OpenDocTab[]>([])
+  const [activeTabId, setActiveTabId] = useState<string>('__explorer__')
+
+  const handleOpenDocInTab = async (item: FileItem) => {
+    const ext = item.extension.toLowerCase()
+    let type: OpenDocTab['type'] = 'code'
+
+    if (['.md', '.markdown', '.txt'].includes(ext)) {
+      type = 'markdown'
+    } else if (['.xlsx', '.xls', '.csv', '.tsv'].includes(ext)) {
+      type = 'spreadsheet'
+    } else if (['.docx'].includes(ext)) {
+      type = 'word'
+    } else if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'].includes(ext)) {
+      type = 'image'
+    }
+
+    const existing = openTabs.find((t) => t.path.toLowerCase() === item.path.toLowerCase())
+    if (existing) {
+      setActiveTabId(existing.id)
+      return
+    }
+
+    let initialContent = ''
+    if (type === 'markdown' || type === 'code') {
+      if (window.electron?.readFileContent) {
+        const res = await window.electron.readFileContent(item.path)
+        if (res.success && res.content !== undefined) {
+          initialContent = res.content
+        }
+      }
+    }
+
+    const newTab: OpenDocTab = {
+      id: item.path,
+      path: item.path,
+      name: item.name,
+      extension: ext,
+      type,
+      content: initialContent,
+    }
+
+    setOpenTabs((prev) => [...prev, newTab])
+    setActiveTabId(item.path)
+  }
+
+  const handleCloseTab = (tabId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    const nextTabs = openTabs.filter((t) => t.id !== tabId)
+    setOpenTabs(nextTabs)
+    if (activeTabId === tabId) {
+      if (nextTabs.length > 0) {
+        setActiveTabId(nextTabs[nextTabs.length - 1].id)
+      } else {
+        setActiveTabId('__explorer__')
+      }
+    }
+  }
+
   // Context Menu state
   const [activeContextMenu, setActiveContextMenu] = useState<{
     item?: FileItem
     targetFolder?: string
     isBackground?: boolean
+    x: number
+    y: number
+  } | null>(null)
+
+  // Tab Context Menu state
+  const [tabContextMenu, setTabContextMenu] = useState<{
+    tab: OpenDocTab
     x: number
     y: number
   } | null>(null)
@@ -194,6 +275,14 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     if (!clippedText) return
 
     const applyClip = async () => {
+      // If a Markdown document tab is actively open, let its editor handle incoming clippings
+      if (activeTabId !== '__explorer__') {
+        const activeTab = openTabs.find((t) => t.id === activeTabId)
+        if (activeTab && activeTab.type === 'markdown') {
+          return
+        }
+      }
+
       const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       const isAlreadyFormatted =
         clippedText.includes('> —') ||
@@ -316,10 +405,20 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     if (item.isDirectory) {
       navigateTo(item.path)
     } else {
-      if (window.electron?.openPath) {
+      const ext = item.extension.toLowerCase()
+      const supportedInPane = [
+        '.md', '.markdown', '.txt',
+        '.xlsx', '.xls', '.csv', '.tsv',
+        '.docx',
+        '.json', '.js', '.ts', '.py', '.html', '.css', '.yaml', '.yml', '.log', '.env', '.ini', '.sh', '.bat', '.ps1',
+        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'
+      ]
+      if (supportedInPane.includes(ext)) {
+        await handleOpenDocInTab(item)
+      } else if (window.electron?.openPath) {
         const res = await window.electron.openPath(item.path)
         if (res.success) {
-          onNotify(`🚀 Opened ${item.name}`)
+          onNotify(`🚀 Opened ${item.name} in external app`)
         } else {
           onNotify(`⚠️ Could not open file: ${res.error}`)
         }
@@ -969,7 +1068,10 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       ref={containerRef}
       tabIndex={0}
       className="local-explorer-container"
-      onClick={() => setActiveContextMenu(null)}
+      onClick={() => {
+        setActiveContextMenu(null)
+        setTabContextMenu(null)
+      }}
       onDragOver={(e) => {
         e.preventDefault()
         setIsDraggingOverSelf(true)
@@ -977,7 +1079,186 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       onDragLeave={() => setIsDraggingOverSelf(false)}
       onDrop={(e) => handleDropOnFolder(e, currentPath)}
     >
-      {/* Clipped Text Quick-Banner */}
+      {/* Workspace Tabs Bar */}
+      <div className="wb-workspace-tabs-bar">
+        <button
+          className={`wb-tab-btn ${activeTabId === '__explorer__' ? 'active' : ''}`}
+          onClick={() => setActiveTabId('__explorer__')}
+          title="File Explorer"
+        >
+          <Folder size={13} className="text-amber" />
+          <span>Explorer</span>
+        </button>
+
+        {openTabs.map((tab) => {
+          const isActive = activeTabId === tab.id
+          return (
+            <div
+              key={tab.id}
+              className={`wb-tab-btn ${isActive ? 'active' : ''}`}
+              onClick={() => setActiveTabId(tab.id)}
+              onAuxClick={(e) => {
+                if (e.button === 1) handleCloseTab(tab.id, e)
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setTabContextMenu({ tab, x: e.clientX, y: e.clientY })
+              }}
+              title={tab.path}
+            >
+              {tab.type === 'markdown' && <FileText size={13} className="text-cyan" />}
+              {tab.type === 'spreadsheet' && <TableIcon size={13} className="text-emerald" />}
+              {tab.type === 'word' && <FileText size={13} className="text-blue" />}
+              {tab.type === 'code' && <FileCode size={13} className="text-purple" />}
+              {tab.type === 'image' && <FileImage size={13} className="text-pink" />}
+              <span className="wb-tab-title">{tab.name}</span>
+              <button
+                className="wb-tab-ext"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  window.electron?.openPath(tab.path)
+                  onNotify(`🚀 Opening ${tab.name} outside...`)
+                }}
+                title="Open Outside in System App"
+              >
+                <ExternalLink size={11} />
+              </button>
+              <button
+                className="wb-tab-close"
+                onClick={(e) => handleCloseTab(tab.id, e)}
+                title="Close Tab"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      {activeTabId !== '__explorer__' ? (
+        (() => {
+          const activeTab = openTabs.find((t) => t.id === activeTabId)
+          if (!activeTab) {
+            return (
+              <div className="wb-doc-loading">
+                <span>Tab not found</span>
+                <button className="wb-tool-btn" onClick={() => setActiveTabId('__explorer__')}>
+                  Return to Explorer
+                </button>
+              </div>
+            )
+          }
+
+          if (activeTab.type === 'markdown') {
+            return (
+              <MarkdownEditor
+                filePath={activeTab.path}
+                fileName={activeTab.name}
+                initialContent={activeTab.content}
+                incomingClip={clippedText}
+                onClearIncomingClip={onClearClippedText}
+                onNotify={onNotify}
+                onOpenOutside={() => window.electron?.openPath(activeTab.path)}
+                onShowInFolder={() => {
+                  setActiveTabId('__explorer__')
+                  setSelectedPath(activeTab.path)
+                }}
+              />
+            )
+          }
+
+          if (activeTab.type === 'spreadsheet') {
+            return (
+              <SpreadsheetEditor
+                filePath={activeTab.path}
+                fileName={activeTab.name}
+                onNotify={onNotify}
+                onOpenOutside={() => window.electron?.openPath(activeTab.path)}
+                onShowInFolder={() => {
+                  setActiveTabId('__explorer__')
+                  setSelectedPath(activeTab.path)
+                }}
+              />
+            )
+          }
+
+          if (activeTab.type === 'word') {
+            return (
+              <WordEditor
+                filePath={activeTab.path}
+                fileName={activeTab.name}
+                onNotify={onNotify}
+                onOpenOutside={() => window.electron?.openPath(activeTab.path)}
+                onShowInFolder={() => {
+                  setActiveTabId('__explorer__')
+                  setSelectedPath(activeTab.path)
+                }}
+              />
+            )
+          }
+
+          if (activeTab.type === 'code') {
+            return (
+              <TextCodeEditor
+                filePath={activeTab.path}
+                fileName={activeTab.name}
+                initialContent={activeTab.content}
+                onNotify={onNotify}
+                onOpenOutside={() => window.electron?.openPath(activeTab.path)}
+                onShowInFolder={() => {
+                  setActiveTabId('__explorer__')
+                  setSelectedPath(activeTab.path)
+                }}
+              />
+            )
+          }
+
+          if (activeTab.type === 'image') {
+            return (
+              <div className="wb-doc-editor">
+                <div className="wb-editor-toolbar">
+                  <span className="wb-doc-badge">
+                    <FileImage size={13} style={{ marginRight: '4px' }} />
+                    {activeTab.name}
+                  </span>
+                  <div className="wb-toolbar-right">
+                    <button
+                      className="wb-tool-btn"
+                      onClick={() => window.electron?.openPath(activeTab.path)}
+                      title="Open in System Viewer"
+                    >
+                      <ExternalLink size={14} />
+                      <span>Open Outside</span>
+                    </button>
+                    <button
+                      className="wb-tool-btn"
+                      onClick={() => {
+                        setActiveTabId('__explorer__')
+                        setSelectedPath(activeTab.path)
+                      }}
+                      title="Show in Folder"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </div>
+                </div>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', overflow: 'auto', background: '#090d16' }}>
+                  <img
+                    src={`file://${activeTab.path.replace(/\\/g, '/')}`}
+                    alt={activeTab.name}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
+                  />
+                </div>
+              </div>
+            )
+          }
+
+          return null
+        })()
+      ) : (
+        <>
+          {/* Clipped Text Quick-Banner */}
       {clippedText && (
         <div className="explorer-clip-banner">
           <div className="clip-banner-left">
@@ -1564,6 +1845,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           )}
         </div>
       </div>
+        </>
+      )}
 
       {/* Context Menu */}
       {activeContextMenu && (
@@ -1596,21 +1879,41 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                     <ClipboardCopy size={13} />
                     <span>Copy File Content</span>
                   </button>
+                  <button
+                    className="menu-option menu-option-highlight text-cyan"
+                    onClick={() => {
+                      handleOpenDocInTab(activeContextMenu.item!)
+                      setActiveContextMenu(null)
+                    }}
+                  >
+                    <FileText size={13} className="text-cyan" />
+                    <span>Open in Tab (In-Pane Editor)</span>
+                  </button>
+                  <button
+                    className="menu-option"
+                    onClick={() => {
+                      window.electron?.openPath(activeContextMenu.item!.path)
+                      setActiveContextMenu(null)
+                    }}
+                  >
+                    <ExternalLink size={13} />
+                    <span>Open Outside (System App)</span>
+                  </button>
                   <div className="menu-divider" />
                 </>
               )}
-              <button
-                className="menu-option"
-                onClick={() => {
-                  handleItemDoubleClick(activeContextMenu.item!)
-                  setActiveContextMenu(null)
-                }}
-              >
-                <ExternalLink size={13} />
-                <span>
-                  {activeContextMenu.item.isDirectory ? 'Open Folder' : 'Open (Default App)'}
-                </span>
-              </button>
+              {activeContextMenu.item.isDirectory && (
+                <button
+                  className="menu-option"
+                  onClick={() => {
+                    handleItemDoubleClick(activeContextMenu.item!)
+                    setActiveContextMenu(null)
+                  }}
+                >
+                  <FolderOpen size={13} />
+                  <span>Open Folder</span>
+                </button>
+              )}
               <button
                 className="menu-option"
                 onClick={() => {
@@ -1794,6 +2097,83 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {/* Tab Context Menu */}
+      {tabContextMenu && (
+        <div
+          className="context-menu-wrapper"
+          style={{ top: `${tabContextMenu.y}px`, left: `${tabContextMenu.x}px` }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu">
+            <button
+              className="menu-option menu-option-highlight text-cyan"
+              onClick={() => {
+                window.electron?.openPath(tabContextMenu.tab.path)
+                onNotify(`🚀 Opening ${tabContextMenu.tab.name} outside...`)
+                setTabContextMenu(null)
+              }}
+            >
+              <ExternalLink size={13} className="text-cyan" />
+              <span>Open Outside (System App)</span>
+            </button>
+            <button
+              className="menu-option"
+              onClick={() => {
+                window.electron?.showItemInFolder(tabContextMenu.tab.path)
+                setTabContextMenu(null)
+              }}
+            >
+              <Folder size={13} />
+              <span>Reveal in Windows Explorer</span>
+            </button>
+            <button
+              className="menu-option"
+              onClick={() => {
+                navigator.clipboard.writeText(tabContextMenu.tab.path)
+                onNotify('📋 Copied full path to clipboard')
+                setTabContextMenu(null)
+              }}
+            >
+              <Copy size={13} />
+              <span>Copy File Path</span>
+            </button>
+            <div className="menu-divider" />
+            <button
+              className="menu-option"
+              onClick={() => {
+                handleCloseTab(tabContextMenu.tab.id)
+                setTabContextMenu(null)
+              }}
+            >
+              <X size={13} />
+              <span>Close Tab</span>
+            </button>
+            <button
+              className="menu-option"
+              onClick={() => {
+                setOpenTabs([tabContextMenu.tab])
+                setActiveTabId(tabContextMenu.tab.id)
+                setTabContextMenu(null)
+              }}
+            >
+              <X size={13} />
+              <span>Close Other Tabs</span>
+            </button>
+            <button
+              className="menu-option text-danger"
+              onClick={() => {
+                setOpenTabs([])
+                setActiveTabId('__explorer__')
+                setTabContextMenu(null)
+              }}
+            >
+              <X size={13} />
+              <span>Close All Tabs</span>
+            </button>
+          </div>
         </div>
       )}
 
