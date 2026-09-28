@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Header, PaneId } from './components/Header'
 import { Splitter } from './components/Splitter'
 import { HorizontalSplitter } from './components/HorizontalSplitter'
@@ -14,19 +14,50 @@ import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
+const LAYOUT_STORAGE_KEY = 'workbench_workspace_layout'
+
+interface PersistedLayout {
+  activePanes?: Record<PaneId, boolean>
+  splitRatio?: number
+  verticalSplitRatio?: number
+  isSwapped?: boolean
+}
+
+function loadPersistedLayout(): PersistedLayout {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch (_) {}
+  return {}
+}
+
+function savePersistedLayout(layout: Partial<PersistedLayout>) {
+  try {
+    const prev = loadPersistedLayout()
+    const next = { ...prev, ...layout }
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(next))
+  } catch (_) {}
+}
+
 export const App: React.FC = () => {
-  // Active panes (minimum 2 must be active): Default all 3 active
-  const [activePanes, setActivePanes] = useState<Record<PaneId, boolean>>({
-    book: true,
-    ai: true,
-    note: true,
+  const persistedLayout = useMemo(() => loadPersistedLayout(), [])
+
+  // Active panes (minimum 2 must be active): Default all 3 active, or restored from last session
+  const [activePanes, setActivePanes] = useState<Record<PaneId, boolean>>(() => {
+    return persistedLayout.activePanes || { book: true, ai: true, note: true }
   })
 
-  // Horizontal split ratio (Bookview width vs Right Column width): Default 60:40
-  const [splitRatio, setSplitRatio] = useState<number>(60)
-  // Vertical split ratio for Right Column (ChatGPT height vs OneNote height): Default 50:50
-  const [verticalSplitRatio, setVerticalSplitRatio] = useState<number>(50)
-  const [isSwapped, setIsSwapped] = useState<boolean>(false)
+  // Horizontal split ratio (Bookview width vs Right Column width): Default 60:40 or restored
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    return typeof persistedLayout.splitRatio === 'number' ? persistedLayout.splitRatio : 60
+  })
+  // Vertical split ratio for Right Column (ChatGPT height vs OneNote height): Default 50:50 or restored
+  const [verticalSplitRatio, setVerticalSplitRatio] = useState<number>(() => {
+    return typeof persistedLayout.verticalSplitRatio === 'number' ? persistedLayout.verticalSplitRatio : 50
+  })
+  const [isSwapped, setIsSwapped] = useState<boolean>(() => {
+    return typeof persistedLayout.isSwapped === 'boolean' ? persistedLayout.isSwapped : false
+  })
   const [dragTarget, setDragTarget] = useState<'none' | 'column' | 'row'>('none')
   const [isAskingAI, setIsAskingAI] = useState<boolean>(false)
   const [notification, setNotification] = useState<string | null>(null)
@@ -325,6 +356,23 @@ export const App: React.FC = () => {
     }
   }, [splitRatio, verticalSplitRatio, isSwapped, dragTarget, isAnyModalOpen, syncBounds])
 
+  // Save workspace layout whenever panes, ratios, or swap states change
+  useEffect(() => {
+    savePersistedLayout({
+      activePanes,
+      splitRatio,
+      verticalSplitRatio,
+      isSwapped,
+    })
+  }, [activePanes, splitRatio, verticalSplitRatio, isSwapped])
+
+  // Sync bounds whenever active source changes in any pane
+  useEffect(() => {
+    syncBounds()
+    const timer = setTimeout(syncBounds, 50)
+    return () => clearTimeout(timer)
+  }, [activeNoteSourceId, activeBookSourceId, activeAISourceId, syncBounds])
+
   // Window resize listener
   useEffect(() => {
     const handleResize = () => {
@@ -582,23 +630,27 @@ export const App: React.FC = () => {
 
   const handleSelectBookSource = async (sourceId: string) => {
     setActiveBookSourceId(sourceId)
+    setTimeout(syncBounds, 50)
     if (window.electron?.setActiveBookSource) {
       const res = await window.electron.setActiveBookSource(sourceId)
       if (res.success && res.activeSource) {
         showNotification(`📖 Switched Bookview to ${res.activeSource.name}`)
       }
+      setTimeout(syncBounds, 50)
     }
   }
 
   const handleSaveBookSources = async (sources: BookSource[], newActiveId?: string) => {
     setBookSources(sources)
     if (newActiveId) setActiveBookSourceId(newActiveId)
+    setTimeout(syncBounds, 50)
     if (window.electron?.saveBookSources) {
       const res = await window.electron.saveBookSources({ sources, activeSourceId: newActiveId })
       if (res.success && res.data) {
         setBookSources(res.data.sources)
         setActiveBookSourceId(res.data.activeSourceId)
       }
+      setTimeout(syncBounds, 50)
     }
   }
 
@@ -616,23 +668,27 @@ export const App: React.FC = () => {
 
   const handleSelectAISource = async (sourceId: string) => {
     setActiveAISourceId(sourceId)
+    setTimeout(syncBounds, 50)
     if (window.electron?.setActiveAISource) {
       const res = await window.electron.setActiveAISource(sourceId)
       if (res.success && res.activeSource) {
         showNotification(`🤖 Switched ChatView to ${res.activeSource.name}`)
       }
+      setTimeout(syncBounds, 50)
     }
   }
 
   const handleSaveAISources = async (sources: AISource[], newActiveId?: string) => {
     setAiSources(sources)
     if (newActiveId) setActiveAISourceId(newActiveId)
+    setTimeout(syncBounds, 50)
     if (window.electron?.saveAISources) {
       const res = await window.electron.saveAISources({ sources, activeSourceId: newActiveId })
       if (res.success && res.data) {
         setAiSources(res.data.sources)
         setActiveAISourceId(res.data.activeSourceId)
       }
+      setTimeout(syncBounds, 50)
     }
   }
 
@@ -650,11 +706,13 @@ export const App: React.FC = () => {
 
   const handleSelectNoteSource = async (sourceId: string) => {
     setActiveNoteSourceId(sourceId)
+    setTimeout(syncBounds, 50)
     if (window.electron?.setActiveNoteSource) {
       const res = await window.electron.setActiveNoteSource(sourceId)
       if (res.success && res.activeSource) {
         showNotification(`📝 Switched NoteView to ${res.activeSource.name}`)
       }
+      setTimeout(syncBounds, 50)
     }
   }
 

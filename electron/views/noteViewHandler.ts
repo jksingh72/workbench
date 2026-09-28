@@ -13,6 +13,7 @@ export class NoteViewHandler {
   private noteSourceManager: NoteSourceManager | null = null
   private currentSourceId: string = ''
   private currentUrl: string = ''
+  private sourceBaseUrls: Map<string, string> = new Map()
   private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private isVisible: boolean = true
   private notesPath: string
@@ -374,9 +375,11 @@ export class NoteViewHandler {
       const isExisting = this.views.has(source.id)
       this.view = this.getOrCreateView(source)
 
-      if (isExisting && this.currentUrl !== source.url) {
+      const prevBaseUrl = this.sourceBaseUrls.get(source.id)
+      if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {
         this.view.webContents.loadURL(source.url).catch(() => {})
       }
+      this.sourceBaseUrls.set(source.id, source.url)
       this.currentUrl = source.url
 
       this.attachView(this.view)

@@ -15,6 +15,7 @@ export class AIViewHandler {
   private aiSourceManager: AISourceManager
   private currentSourceId: string = ''
   private currentUrl: string = CHATGPT_START_URL
+  private sourceBaseUrls: Map<string, string> = new Map()
   private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private isVisible: boolean = true
 
@@ -338,9 +339,11 @@ export class AIViewHandler {
     const isExisting = this.views.has(source.id)
     this.view = this.getOrCreateView(source)
 
-    if (isExisting && this.currentUrl !== source.url) {
+    const prevBaseUrl = this.sourceBaseUrls.get(source.id)
+    if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {
       this.view.webContents.loadURL(source.url).catch(() => {})
     }
+    this.sourceBaseUrls.set(source.id, source.url)
     this.currentUrl = source.url
 
     if (this.isVisible) {

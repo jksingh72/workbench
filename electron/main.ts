@@ -714,7 +714,6 @@ function registerIpcHandlers() {
     const target = noteSourceManager.setActiveSource(sourceId)
     if (target) {
       noteHandler.loadNoteSource(target)
-      layoutManager?.applyBounds()
       mainWindow!.webContents.send('workbench:note-source-changed', {
         activeSourceId: target.id,
         activeSource: target,
@@ -731,7 +730,6 @@ function registerIpcHandlers() {
       const updated = noteSourceManager.saveSources(sources, activeSourceId)
       const active = noteSourceManager.getActiveSource()
       noteHandler.loadNoteSource(active)
-      layoutManager?.applyBounds()
       mainWindow!.webContents.send('workbench:note-source-changed', {
         activeSourceId: active.id,
         activeSource: active,
@@ -755,7 +753,6 @@ function registerIpcHandlers() {
         click: () => {
           noteSourceManager!.setActiveSource(s.id)
           noteHandler?.loadNoteSource(s)
-          layoutManager?.applyBounds()
           mainWindow!.webContents.send('workbench:note-source-changed', {
             activeSourceId: s.id,
             activeSource: s,

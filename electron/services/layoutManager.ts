@@ -22,6 +22,7 @@ export class LayoutManager {
   private modalHidden = { book: false, ai: false, note: false }
   private isModalOpen = false
   private isDraggingSplitter = false
+  private lastMeasuredBounds: { book?: DOMBounds; ai?: DOMBounds; note?: DOMBounds } | null = null
 
   constructor(
     mainWindow: BrowserWindow,
@@ -95,6 +96,7 @@ export class LayoutManager {
   }
 
   public updateMeasuredBounds(bounds: { book?: DOMBounds; ai?: DOMBounds; note?: DOMBounds }) {
+    this.lastMeasuredBounds = bounds
     if (this.isModalOpen || this.isDraggingSplitter) return
 
     const { book, ai, note } = bounds
@@ -142,6 +144,11 @@ export class LayoutManager {
   public applyBounds() {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
     if (this.isModalOpen || this.isDraggingSplitter) return
+
+    if (this.lastMeasuredBounds) {
+      this.updateMeasuredBounds(this.lastMeasuredBounds)
+      return
+    }
 
     const bounds = this.mainWindow.contentView.getBounds()
     const headerHeight = 44
