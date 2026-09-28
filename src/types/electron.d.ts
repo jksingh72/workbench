@@ -90,6 +90,7 @@ export interface ElectronAPI {
   extractAITranscript?: () => Promise<{ success: boolean; transcript?: string; error?: string }>
   saveAIContent?: (params: { type?: 'response' | 'code' | 'transcript'; targetDir?: string; activeFilePath?: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; hasSelection?: boolean; count?: number; files?: string[]; message?: string; error?: string }>
   readFileContent: (filePath: string) => Promise<{ success: boolean; content?: string; fileName?: string; isBinary?: boolean; error?: string }>
+  readFileBuffer?: (filePath: string) => Promise<{ success: boolean; buffer?: Uint8Array; fileName?: string; error?: string }>
   writeFileContent?: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
   appendToFile: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; fileName?: string; error?: string }>
   readDocx?: (filePath: string) => Promise<{ success: boolean; html?: string; fileName?: string; error?: string }>

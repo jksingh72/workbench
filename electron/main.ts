@@ -894,6 +894,19 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('workbench:read-file-buffer', async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
+      const stat = await fs.promises.stat(filePath)
+      if (stat.isDirectory()) return { success: false, error: 'Cannot read folder as binary file' }
+      const buffer = await fs.promises.readFile(filePath)
+      return { success: true, buffer, fileName: path.basename(filePath) }
+    } catch (err: any) {
+      console.error('[Main] read-file-buffer error:', err)
+      return { success: false, error: err?.message || 'Failed to read file buffer' }
+    }
+  })
+
   ipcMain.handle('workbench:append-to-file', async (_, { filePath, content }: { filePath: string; content: string }) => {
     try {
       const dir = path.dirname(filePath)

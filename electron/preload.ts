@@ -136,6 +136,8 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:save-ai-content', params),
   readFileContent: (filePath: string) =>
     ipcRenderer.invoke('workbench:read-file-content', filePath),
+  readFileBuffer: (filePath: string) =>
+    ipcRenderer.invoke('workbench:read-file-buffer', filePath),
   writeFileContent: (filePath: string, content: string) =>
     ipcRenderer.invoke('workbench:write-file-content', { filePath, content }),
   appendToFile: (filePath: string, content: string) =>

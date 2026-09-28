@@ -218,12 +218,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         }
       }
     } else if (type === 'word') {
-      if (window.electron?.readDocx) {
-        const res = await window.electron.readDocx(item.path)
-        if (res.success && res.html !== undefined) {
-          initialContent = res.html
-        }
-      }
+      // Word documents load asynchronously inside WordEditor via docx-preview
+      initialContent = ''
     }
 
     const newTab: OpenDocTab = {
@@ -241,14 +237,21 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
 
   const handleCloseTab = (tabId: string, e?: React.MouseEvent) => {
     e?.stopPropagation()
+    const closedTab = openTabs.find((t) => t.id === tabId)
     const nextTabs = openTabs.filter((t) => t.id !== tabId)
     setOpenTabs(nextTabs)
     if (activeTabId === tabId) {
-      if (nextTabs.length > 0) {
-        setActiveTabId(nextTabs[nextTabs.length - 1].id)
-      } else {
-        setActiveTabId('__explorer__')
+      setActiveTabId('__explorer__')
+      if (closedTab) {
+        setSelectedPath(closedTab.path)
+        const parentDir = closedTab.path.substring(0, closedTab.path.lastIndexOf('\\'))
+        if (parentDir && parentDir !== currentPath && !currentPath.startsWith(parentDir)) {
+          setCurrentPath(parentDir)
+        }
       }
+      setTimeout(() => {
+        containerRef.current?.focus()
+      }, 50)
     }
   }
 
@@ -883,6 +886,19 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedPath, clipboard, currentPath, items, sortedAndFilteredItems])
+
+  // Auto-scroll selected item into view when returning to explorer
+  useEffect(() => {
+    if (activeTabId === '__explorer__' && selectedPath) {
+      const timer = setTimeout(() => {
+        const el = containerRef.current?.querySelector('.details-row.selected, .grid-item.selected') as HTMLElement
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        }
+      }, 60)
+      return () => clearTimeout(timer)
+    }
+  }, [activeTabId, selectedPath])
 
   // --- Sidebar Resizing ---
   useEffect(() => {
