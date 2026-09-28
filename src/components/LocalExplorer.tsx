@@ -56,18 +56,21 @@ export interface OpenDocTab {
 }
 
 interface LocalExplorerProps {
-  rootPath: string
+  rootPath?: string
   clippedText?: string | null
   onClearClippedText?: () => void
   onNotify: (msg: string) => void
+  storageKey?: string
+  target?: 'note' | 'book'
 }
 
 type SortColumn = 'name' | 'date' | 'type' | 'size'
 type SortDirection = 'asc' | 'desc'
 
-const STORAGE_KEY = 'workbench_local_explorer_state'
+const DEFAULT_STORAGE_KEY = 'workbench_local_explorer_state'
 
 interface PersistentExplorerState {
+  rootPath?: string
   currentPath?: string
   history?: string[]
   historyIndex?: number
@@ -77,23 +80,26 @@ interface PersistentExplorerState {
   viewMode?: 'list' | 'grid'
   sortCol?: SortColumn
   sortDir?: SortDirection
+  userChangedSort?: boolean
 }
 
-function loadPersistedExplorerState(): PersistentExplorerState {
+function loadPersistedExplorerState(key: string): PersistentExplorerState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(key)
     if (raw) return JSON.parse(raw)
   } catch (_) {}
   return {}
 }
 
-function savePersistedExplorerState(state: Partial<PersistentExplorerState>) {
+function savePersistedExplorerState(key: string, state: Partial<PersistentExplorerState>) {
   try {
-    const prev = loadPersistedExplorerState()
+    const prev = loadPersistedExplorerState(key)
     const next = { ...prev, ...state }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    localStorage.setItem(key, JSON.stringify(next))
   } catch (_) {}
 }
+
+const isWebUrl = (p?: string) => !!p && (p.startsWith('http://') || p.startsWith('https://'))
 
 // In-memory directory cache for instant SWR loading without screen flash
 const dirCache: Record<string, FileItem[]> = {}
@@ -103,26 +109,37 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   clippedText,
   onClearClippedText,
   onNotify,
+  storageKey = DEFAULT_STORAGE_KEY,
+  target = 'note',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
-  const persisted = useMemo(() => loadPersistedExplorerState(), [])
+  const persisted = useMemo(() => loadPersistedExplorerState(storageKey), [storageKey])
+
+  const validRoot = rootPath && !isWebUrl(rootPath) ? rootPath : undefined
 
   // Navigation & Directory state
   const [currentPath, setCurrentPath] = useState<string>(() => {
-    return persisted.currentPath || rootPath || ''
+    if (persisted.currentPath && !isWebUrl(persisted.currentPath)) {
+      return persisted.currentPath
+    }
+    return validRoot || ''
   })
   const [history, setHistory] = useState<string[]>(() => {
-    return persisted.history && persisted.history.length > 0 ? persisted.history : (rootPath ? [rootPath] : [])
+    if (persisted.history && persisted.history.length > 0) {
+      const validHist = persisted.history.filter((h) => !isWebUrl(h))
+      if (validHist.length > 0) return validHist
+    }
+    return validRoot ? [validRoot] : []
   })
   const [historyIndex, setHistoryIndex] = useState<number>(() => {
-    return typeof persisted.historyIndex === 'number' ? persisted.historyIndex : (rootPath ? 0 : -1)
+    return typeof persisted.historyIndex === 'number' ? persisted.historyIndex : (validRoot ? 0 : -1)
   })
   const [items, setItems] = useState<FileItem[]>(() => {
-    const initPath = persisted.currentPath || rootPath || ''
+    const initPath = (persisted.currentPath && !isWebUrl(persisted.currentPath)) ? persisted.currentPath : (validRoot || '')
     return dirCache[initPath] || []
   })
   const [isLoading, setIsLoading] = useState<boolean>(() => {
-    const initPath = persisted.currentPath || rootPath || ''
+    const initPath = (persisted.currentPath && !isWebUrl(persisted.currentPath)) ? persisted.currentPath : (validRoot || '')
     return !dirCache[initPath]
   })
   const [searchQuery, setSearchQuery] = useState<string>('')
@@ -146,12 +163,18 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     return persisted.sortCol || 'name'
   })
   const [sortDir, setSortDir] = useState<SortDirection>(() => {
+    // If user has not explicitly clicked header to change sort, enforce Name Descending
+    if (!persisted.userChangedSort) {
+      return 'desc'
+    }
     return persisted.sortDir || 'desc'
   })
 
   // Save persistent state whenever key navigation or tab properties change
   useEffect(() => {
-    savePersistedExplorerState({
+    if (isWebUrl(currentPath)) return
+    savePersistedExplorerState(storageKey, {
+      rootPath: validRoot || persisted.rootPath,
       currentPath,
       history,
       historyIndex,
@@ -162,7 +185,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       sortCol,
       sortDir,
     })
-  }, [currentPath, history, historyIndex, openTabs, activeTabId, selectedPath, viewMode, sortCol, sortDir])
+  }, [storageKey, validRoot, currentPath, history, historyIndex, openTabs, activeTabId, selectedPath, viewMode, sortCol, sortDir])
 
   const handleOpenDocInTab = async (item: FileItem) => {
     const ext = item.extension.toLowerCase()
@@ -192,6 +215,13 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         const res = await window.electron.readFileContent(item.path)
         if (res.success && res.content !== undefined) {
           initialContent = res.content
+        }
+      }
+    } else if (type === 'word') {
+      if (window.electron?.readDocx) {
+        const res = await window.electron.readDocx(item.path)
+        if (res.success && res.html !== undefined) {
+          initialContent = res.html
         }
       }
     }
@@ -307,14 +337,33 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     }
   }, [])
 
-  // Initialize or update path only if currentPath is not yet set
+  // Initialize or update path when rootPath changes or if currentPath is not yet set
+  const prevRootPathRef = useRef<string | undefined>(persisted.rootPath || validRoot)
   useEffect(() => {
-    if (!currentPath && rootPath) {
-      setCurrentPath(rootPath)
-      setHistory([rootPath])
+    if (!validRoot) return
+
+    // 1. Initial hydration if currentPath was empty
+    if (!currentPath) {
+      prevRootPathRef.current = validRoot
+      setCurrentPath(validRoot)
+      setHistory([validRoot])
       setHistoryIndex(0)
+      savePersistedExplorerState(storageKey, { rootPath: validRoot })
+      return
     }
-  }, [rootPath, currentPath])
+
+    // 2. If user explicitly changed the configured root folder in settings to a different folder
+    if (prevRootPathRef.current && prevRootPathRef.current !== validRoot) {
+      prevRootPathRef.current = validRoot
+      setCurrentPath(validRoot)
+      setHistory([validRoot])
+      setHistoryIndex(0)
+      savePersistedExplorerState(storageKey, { rootPath: validRoot })
+    } else if (!prevRootPathRef.current) {
+      prevRootPathRef.current = validRoot
+      savePersistedExplorerState(storageKey, { rootPath: validRoot })
+    }
+  }, [validRoot, currentPath, storageKey])
 
   // Load directory items with SWR (stale-while-revalidate) pattern
   const loadDirectory = async (targetDir: string) => {
@@ -354,6 +403,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
 
   // Auto-append clipped text to active note file by default, or create Clippings.md
   useEffect(() => {
+    if (target === 'book') return
     if (!clippedText) return
 
     const applyClip = async () => {
@@ -550,7 +600,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       if (res.success && res.items) {
         setFolderChildren((prev) => ({
           ...prev,
-          [destDir]: res.items!.filter((i) => i.isDirectory),
+          [destDir]: res.items!
+            .filter((i) => i.isDirectory)
+            .sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' })),
         }))
       }
     }
@@ -921,8 +973,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortCol(col)
-      setSortDir(col === 'name' ? 'desc' : 'asc')
+      setSortDir('desc')
     }
+    savePersistedExplorerState(storageKey, { userChangedSort: true })
   }
 
   // --- Subfolder Expansion in Sidebar Tree ---
@@ -941,7 +994,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       try {
         const res = await window.electron.readDirectory(folderPath)
         if (res.success && res.items) {
-          const subdirs = res.items.filter((i) => i.isDirectory)
+          const subdirs = res.items
+            .filter((i) => i.isDirectory)
+            .sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' }))
           setFolderChildren((prev) => ({ ...prev, [folderPath]: subdirs }))
         }
       } catch (err) {
@@ -1275,11 +1330,17 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 key={activeTab.id}
                 filePath={activeTab.path}
                 fileName={activeTab.name}
+                initialHtml={activeTab.content}
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
                   setActiveTabId('__explorer__')
                   setSelectedPath(activeTab.path)
+                }}
+                onContentChange={(html) => {
+                  setOpenTabs((prev) =>
+                    prev.map((t) => (t.id === activeTab.id ? { ...t, content: html } : t))
+                  )
                 }}
               />
             )
@@ -1363,7 +1424,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       ) : (
         <>
           {/* Clipped Text Quick-Banner */}
-      {clippedText && (
+      {clippedText && target !== 'book' && (
         <div className="explorer-clip-banner">
           <div className="clip-banner-left">
             <Sparkles size={14} className="text-yellow" />
@@ -1713,7 +1774,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               <p className="empty-subtitle">
                 {searchQuery
                   ? 'Try a different search term'
-                  : 'Create a new note or folder using the toolbar buttons above, or drag files here'}
+                  : target === 'book'
+                    ? 'Add PDF books or documents to this folder, or use Open Folder above'
+                    : 'Create a new note or folder using the toolbar buttons above, or drag files here'}
               </p>
             </div>
           ) : (
@@ -1996,7 +2059,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                     }}
                   >
                     <FileText size={13} className="text-cyan" />
-                    <span>Open in Tab (In-Pane Editor)</span>
+                    <span>{target === 'book' ? 'Open in Tab (In-Pane Reader)' : 'Open in Tab (In-Pane Editor)'}</span>
                   </button>
                   <button
                     className="menu-option"

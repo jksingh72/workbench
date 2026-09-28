@@ -93,11 +93,22 @@ export class BookViewHandler {
     return newView
   }
 
+  private isWebSource(source?: BookSource): boolean {
+    if (!source) return false
+    if (source.isLocal || source.id === 'local-books' || source.id === 'local') return false
+    return source.url.startsWith('http://') || source.url.startsWith('https://')
+  }
+
   private initView() {
     const activeSource = this.bookSourceManager.getActiveSource()
     this.currentSourceId = activeSource.id
     this.currentUrl = activeSource.url
-    this.view = this.getOrCreateView(activeSource)
+    if (this.isWebSource(activeSource)) {
+      this.view = this.getOrCreateView(activeSource)
+    } else {
+      this.view = null
+      this.sendLocalNavState()
+    }
   }
 
   private sendNavState(wc: Electron.WebContents) {
@@ -109,6 +120,19 @@ export class BookViewHandler {
         url: wc.getURL(),
         title: wc.getTitle(),
         zoomFactor: wc.getZoomFactor(),
+      })
+    }
+  }
+
+  private sendLocalNavState() {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('workbench:nav-state', 'book', {
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: false,
+        url: 'workbench://local-books',
+        title: 'Workbench Local Books',
+        zoomFactor: 1.0,
       })
     }
   }
@@ -288,9 +312,11 @@ export class BookViewHandler {
         try {
           wc.stop()
           const homeUrl = this.currentUrl || this.bookSourceManager.getActiveSource().url
-          wc.loadURL(homeUrl).catch((err) => {
-            console.error('[BookView] Home load error:', err)
-          })
+          if (homeUrl && homeUrl.startsWith('http')) {
+            wc.loadURL(homeUrl).catch((err) => {
+              console.error('[BookView] Home load error:', err)
+            })
+          }
         } catch (err) {
           console.error('[BookView] Home error:', err)
         }
@@ -308,43 +334,43 @@ export class BookViewHandler {
   }
 
   public loadBookSource(source: BookSource) {
-    if (this.currentSourceId === source.id && this.view) {
-      if (this.currentUrl !== source.url) {
-        this.currentUrl = source.url
-        this.view.webContents.loadURL(source.url).catch(() => {})
+    // Hide any existing views cleanly
+    for (const v of this.views.values()) {
+      if (!v.webContents.isDestroyed()) {
+        v.setVisible(false)
+        try {
+          v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
+        } catch (_) {}
+        this.detachView(v)
       }
-      return
-    }
-
-    // Hide previous view
-    if (this.view && !this.view.webContents.isDestroyed()) {
-      this.view.setVisible(false)
-      try {
-        this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-      } catch (_) {}
-      this.detachView(this.view)
     }
 
     this.currentSourceId = source.id
-    const isExisting = this.views.has(source.id)
-    this.view = this.getOrCreateView(source)
 
-    const prevBaseUrl = this.sourceBaseUrls.get(source.id)
-    if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {
-      this.view.webContents.loadURL(source.url).catch(() => {})
-    }
-    this.sourceBaseUrls.set(source.id, source.url)
-    this.currentUrl = source.url
+    if (this.isWebSource(source)) {
+      this.isVisible = true
+      const isExisting = this.views.has(source.id)
+      this.view = this.getOrCreateView(source)
 
-    if (this.isVisible) {
+      const prevBaseUrl = this.sourceBaseUrls.get(source.id)
+      if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {
+        this.view.webContents.loadURL(source.url).catch(() => {})
+      }
+      this.sourceBaseUrls.set(source.id, source.url)
+      this.currentUrl = source.url
+
       this.attachView(this.view)
       if (this.currentBounds.width > 0 && this.currentBounds.height > 0) {
         this.view.setBounds(this.currentBounds)
       }
       this.view.setVisible(true)
+      this.sendNavState(this.view.webContents)
+    } else {
+      this.currentUrl = source.url
+      this.isVisible = false
+      this.view = null
+      this.sendLocalNavState()
     }
-
-    this.sendNavState(this.view.webContents)
   }
 
   public async extractSelection(): Promise<string> {

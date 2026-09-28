@@ -55,7 +55,6 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   useEffect(() => {
     let isMounted = true
     hasUserEdited.current = false
-    setIsExtracting(true)
 
     const loadNotesAndText = async () => {
       try {
@@ -72,12 +71,22 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
           if (isMounted) {
             setNotesContent(loadedNotes)
             setIsDirty(false)
+            setIsExtracting(false)
           }
+          return
         }
 
-        // 2. Fetch fast initial preview of PDF (first 30 pages max to prevent freezes)
+        // When in Visual Viewer mode, do NOT run CPU-intensive text extraction!
+        // The visual viewer streams the PDF directly via Chromium in milliseconds.
+        if (viewMode === 'visual') {
+          if (isMounted) setIsExtracting(false)
+          return
+        }
+
+        // 2. Fetch fast initial preview of PDF only when user switches to notes or split mode
         if (window.electron?.readPdf) {
-          const res = await window.electron.readPdf({ filePath, maxPages: 30 })
+          setIsExtracting(true)
+          const res = await window.electron.readPdf({ filePath, maxPages: 5 })
           if (!isMounted) return
 
           if (res.success) {
@@ -106,7 +115,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
     return () => {
       isMounted = false
     }
-  }, [filePath, fileName, companionPath])
+  }, [filePath, fileName, companionPath, viewMode])
 
   // Extract all pages on demand for massive documents
   const handleExtractAllPages = async () => {

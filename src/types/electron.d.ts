@@ -140,6 +140,7 @@ export interface BookSource {
   name: string
   url: string
   isPreset?: boolean
+  isLocal?: boolean
 }
 
 export interface BookSourceSettings {

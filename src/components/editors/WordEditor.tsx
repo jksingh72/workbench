@@ -36,19 +36,23 @@ import { Image } from '@tiptap/extension-image'
 interface WordEditorProps {
   filePath: string
   fileName: string
+  initialHtml?: string
   onNotify: (msg: string) => void
   onOpenOutside?: () => void
   onShowInFolder?: () => void
+  onContentChange?: (html: string) => void
 }
 
 export const WordEditor: React.FC<WordEditorProps> = ({
   filePath,
   fileName,
+  initialHtml,
   onNotify,
   onOpenOutside,
-  onShowInFolder
+  onShowInFolder,
+  onContentChange,
 }) => {
-  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isLoading, setIsLoading] = useState<boolean>(!initialHtml)
   const [isSaving, setIsSaving] = useState<boolean>(false)
   const [isDirty, setIsDirty] = useState<boolean>(false)
   const [wordCount, setWordCount] = useState<number>(0)
@@ -77,20 +81,31 @@ export const WordEditor: React.FC<WordEditorProps> = ({
         allowBase64: true,
       }),
     ],
-    content: '',
+    content: initialHtml || '',
     onUpdate: ({ editor: ed }) => {
       setIsDirty(true)
       const text = ed.getText()
       const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0
       setWordCount(words)
       setCharCount(text.trim().length)
+      onContentChange?.(ed.getHTML())
     },
   })
 
-  // Load DOCX document into TipTap
+  // Load DOCX document into TipTap if not already provided via initialHtml
   useEffect(() => {
     let isMounted = true
     if (!editor) return
+
+    // If initial content was already populated into editor, initialize word counts
+    if (initialHtml) {
+      setIsLoading(false)
+      const text = editor.getText()
+      const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0
+      setWordCount(words)
+      setCharCount(text.trim().length)
+      return
+    }
 
     const loadDocx = async () => {
       setIsLoading(true)
@@ -105,6 +120,7 @@ export const WordEditor: React.FC<WordEditorProps> = ({
             setWordCount(words)
             setCharCount(text.trim().length)
             setIsDirty(false)
+            onContentChange?.(docHtml)
           } else if (res.error) {
             onNotify(`⚠️ Could not read Word document: ${res.error}`)
           }
@@ -120,7 +136,7 @@ export const WordEditor: React.FC<WordEditorProps> = ({
     return () => {
       isMounted = false
     }
-  }, [filePath, editor])
+  }, [filePath, editor, initialHtml])
 
   // Save document back to DOCX
   const handleSave = useCallback(async () => {

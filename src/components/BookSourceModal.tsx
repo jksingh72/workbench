@@ -9,7 +9,9 @@ import {
   BookMarked,
   Pencil,
   Check,
-  RotateCcw
+  RotateCcw,
+  Folder,
+  FolderOpen
 } from 'lucide-react'
 import { BookSource } from '../types/electron'
 
@@ -23,9 +25,10 @@ interface BookSourceModalProps {
   onNotify: (msg: string) => void
 }
 
-const DEFAULT_PRESET_URLS: Record<string, { name: string; url: string }> = {
-  oreilly: { name: "O'Reilly Learning", url: 'https://www.oreilly.com/member/login/' },
+const DEFAULT_PRESET_BOOK_URLS: Record<string, { name: string; url: string }> = {
+  oreilly: { name: "O'Reilly Learning", url: 'https://learning.oreilly.com/home/' },
   kindle: { name: 'Amazon Kindle', url: 'https://read.amazon.com/' },
+  'local-books': { name: 'Local Books', url: '' },
 }
 
 export const BookSourceModal: React.FC<BookSourceModalProps> = ({
@@ -37,6 +40,33 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   onSaveSources,
   onNotify,
 }) => {
+  // Ensure presets, especially Local Books, are always present, properly named and non-deletable
+  const displaySources = React.useMemo(() => {
+    const list = [...sources]
+    const hasLocal = list.some((s) => s.id === 'local-books')
+    if (!hasLocal) {
+      list.push({
+        id: 'local-books',
+        name: 'Local Books',
+        url: '',
+        isPreset: true,
+        isLocal: true,
+      })
+    }
+    return list.map((s) => {
+      if (s.id === 'local-books') {
+        return {
+          ...s,
+          name: 'Local Books',
+          isPreset: true,
+          isLocal: true,
+        }
+      }
+      return s
+    })
+  }, [sources])
+
+  const [newSourceType, setNewSourceType] = useState<'web' | 'local'>('web')
   const [newName, setNewName] = useState('')
   const [newUrl, setNewUrl] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -46,6 +76,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editUrl, setEditUrl] = useState('')
+  const [editIsLocal, setEditIsLocal] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
 
@@ -67,6 +98,11 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
     setEditingId(source.id)
     setEditName(source.name)
     setEditUrl(source.url)
+    setEditIsLocal(
+      !!source.isLocal ||
+      source.id === 'local-books' ||
+      (!source.url.startsWith('http://') && !source.url.startsWith('https://'))
+    )
     setEditError(null)
   }
 
@@ -74,14 +110,38 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
     setEditingId(null)
     setEditName('')
     setEditUrl('')
+    setEditIsLocal(false)
     setEditError(null)
   }
 
+  const handleBrowseEditFolder = async () => {
+    if (window.electron?.selectFolder) {
+      const selected = await window.electron.selectFolder(editUrl || undefined)
+      if (selected) {
+        setEditUrl(selected)
+      }
+    }
+  }
+
+  const handleBrowseNewFolder = async () => {
+    if (window.electron?.selectFolder) {
+      const selected = await window.electron.selectFolder(newUrl || undefined)
+      if (selected) {
+        setNewUrl(selected)
+        if (!newName.trim()) {
+          const parts = selected.split(/[\/\\]/).filter(Boolean)
+          setNewName(parts[parts.length - 1] || 'Local Books')
+        }
+      }
+    }
+  }
+
   const handleResetToDefault = (sourceId: string) => {
-    const preset = DEFAULT_PRESET_URLS[sourceId]
+    const preset = DEFAULT_PRESET_BOOK_URLS[sourceId]
     if (preset) {
       setEditName(preset.name)
       setEditUrl(preset.url)
+      setEditIsLocal(sourceId === 'local-books')
       setEditError(null)
     }
   }
@@ -90,41 +150,52 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
     setEditError(null)
     const cleanName = editName.trim()
     let cleanUrl = editUrl.trim()
+    const isLocal = editIsLocal || sourceId === 'local-books'
 
     if (!cleanName) {
-      setEditError('Site name cannot be empty.')
+      setEditError('Name cannot be empty.')
       return
     }
 
     if (!cleanUrl) {
-      setEditError('Website URL cannot be empty.')
+      setEditError(isLocal ? 'Folder path cannot be empty.' : 'Website URL cannot be empty.')
       return
     }
 
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl
-    }
+    if (!isLocal) {
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        cleanUrl = 'https://' + cleanUrl
+      }
 
-    try {
-      new URL(cleanUrl)
-    } catch {
-      setEditError('Invalid URL format. Please include a valid web address.')
-      return
+      try {
+        new URL(cleanUrl)
+      } catch {
+        setEditError('Invalid URL format. Please include a valid web address.')
+        return
+      }
     }
 
     // Check duplicate name with other sources
-    if (sources.some((s) => s.id !== sourceId && s.name.toLowerCase() === cleanName.toLowerCase())) {
+    if (displaySources.some((s) => s.id !== sourceId && s.name.toLowerCase() === cleanName.toLowerCase())) {
       setEditError('Another book site with this name already exists.')
       return
     }
 
     setIsSavingEdit(true)
     try {
-      const updatedSources = sources.map((s) =>
-        s.id === sourceId ? { ...s, name: cleanName, url: cleanUrl } : s
+      const updatedSources = displaySources.map((s) =>
+        s.id === sourceId
+          ? {
+              ...s,
+              name: s.id === 'local-books' ? 'Local Books' : cleanName,
+              url: cleanUrl,
+              isLocal,
+              isPreset: s.id === 'local-books' ? true : s.isPreset,
+            }
+          : s
       )
       await onSaveSources(updatedSources, activeSourceId)
-      onNotify(`✏️ Updated "${cleanName}" configuration.`)
+      onNotify(`✏️ Updated "${sourceId === 'local-books' ? 'Local Books' : cleanName}" configuration.`)
       setEditingId(null)
     } catch (err: any) {
       setEditError(err.message || 'Failed to save changes.')
@@ -139,31 +210,34 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
 
     const cleanName = newName.trim()
     let cleanUrl = newUrl.trim()
+    const isLocal = newSourceType === 'local'
 
     if (!cleanName) {
-      setErrorMsg('Please enter a website name.')
+      setErrorMsg('Please enter a name.')
       return
     }
 
     if (!cleanUrl) {
-      setErrorMsg('Please enter a valid website URL.')
+      setErrorMsg(isLocal ? 'Please select a folder on your computer.' : 'Please enter a valid website URL.')
       return
     }
 
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl
+    if (!isLocal) {
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        cleanUrl = 'https://' + cleanUrl
+      }
+
+      try {
+        new URL(cleanUrl)
+      } catch {
+        setErrorMsg('Invalid URL format. Please include a valid web address.')
+        return
+      }
     }
 
-    try {
-      new URL(cleanUrl)
-    } catch {
-      setErrorMsg('Invalid URL format. Please include a valid web address.')
-      return
-    }
-
-    // Check duplicate name or URL
-    if (sources.some((s) => s.name.toLowerCase() === cleanName.toLowerCase())) {
-      setErrorMsg('A book site with this name already exists.')
+    // Check duplicate name
+    if (displaySources.some((s) => s.name.toLowerCase() === cleanName.toLowerCase())) {
+      setErrorMsg('A book source with this name already exists.')
       return
     }
 
@@ -174,22 +248,27 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
         name: cleanName,
         url: cleanUrl,
         isPreset: false,
+        isLocal,
       }
 
-      const updatedSources = [...sources, newSource]
+      const updatedSources = [...displaySources, newSource]
       await onSaveSources(updatedSources, newSource.id)
       onNotify(`📚 Added "${cleanName}" and loaded it into Bookview!`)
       setNewName('')
       setNewUrl('')
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to add book site.')
+      setErrorMsg(err.message || 'Failed to add book source.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
   const handleDeleteSource = async (id: string, name: string) => {
-    const updatedSources = sources.filter((s) => s.id !== id)
+    if (id === 'oreilly' || id === 'kindle' || id === 'local-books') {
+      onNotify('⚠️ Preset reading sources cannot be deleted.')
+      return
+    }
+    const updatedSources = displaySources.filter((s) => s.id !== id)
     const newActiveId = id === activeSourceId ? updatedSources[0]?.id || 'oreilly' : activeSourceId
     await onSaveSources(updatedSources, newActiveId)
     onNotify(`🗑️ Removed "${name}" from configured book sites.`)
@@ -205,9 +284,9 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
               <BookOpen size={18} />
             </div>
             <div>
-              <h3 className="modal-title">Configure Book Sites</h3>
+              <h3 className="modal-title">Configure Book Sites & Local Libraries</h3>
               <p className="modal-subtitle">
-                Switch between reading platforms or add your favorite book sites
+                Switch between reading platforms or explore local book folders and PDFs
               </p>
             </div>
           </div>
@@ -226,13 +305,12 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                 <span className="status-title">Active Reading Platform</span>
               </div>
               <span className="status-pill-badge pill-active">
-                {sources.find((s) => s.id === activeSourceId)?.name || "O'Reilly Learning"}
+                {displaySources.find((s) => s.id === activeSourceId)?.name || "O'Reilly Learning"}
               </span>
             </div>
             <p className="status-explanation">
-              Selecting a book site switches the Bookview pane immediately. Text selection,{' '}
-              <strong>Ask AI</strong>, and <strong>Clip to OneNote</strong> will work automatically
-              on whichever reader is open.
+              Selecting a book site switches the Bookview pane immediately. Local books and PDFs open
+              inside the tabbed document workspace with zero unmount and persistent state.
             </p>
           </div>
 
@@ -240,13 +318,17 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
           <div className="book-sources-list-section">
             <h4 className="section-heading">
               <BookMarked size={14} className="heading-icon text-blue" />
-              <span>Configured Book Sites ({sources.length})</span>
+              <span>Configured Reading Sources ({displaySources.length})</span>
             </h4>
 
             <div className="sources-card-grid">
-              {sources.map((source) => {
+              {displaySources.map((source) => {
                 const isActive = source.id === activeSourceId
                 const isEditing = editingId === source.id
+                const isItemLocal =
+                  source.isLocal ||
+                  source.id === 'local-books' ||
+                  (!source.url.startsWith('http://') && !source.url.startsWith('https://'))
 
                 if (isEditing) {
                   return (
@@ -256,34 +338,51 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                     >
                       <div className="source-edit-form">
                         <div className="edit-form-header">
-                          <span className="edit-title">Edit Book Site: {source.name}</span>
+                          <span className="edit-title">Edit: {source.name}</span>
                           {source.isPreset && (
                             <span className="source-preset-pill">Preset</span>
+                          )}
+                          {isItemLocal && (
+                            <span className="source-local-pill">Local</span>
                           )}
                         </div>
 
                         <div className="edit-fields-row">
                           <div className="edit-field field-name">
-                            <label>Site Name</label>
+                            <label>Name</label>
                             <input
                               type="text"
                               value={editName}
                               onChange={(e) => setEditName(e.target.value)}
-                              placeholder="e.g. Amazon Kindle"
+                              placeholder={editIsLocal ? 'e.g. My PDF Books' : 'e.g. Amazon Kindle'}
                               disabled={isSavingEdit}
                               autoFocus
                             />
                           </div>
 
                           <div className="edit-field field-url">
-                            <label>Website URL</label>
-                            <input
-                              type="text"
-                              value={editUrl}
-                              onChange={(e) => setEditUrl(e.target.value)}
-                              placeholder="e.g. https://read.amazon.com/"
-                              disabled={isSavingEdit}
-                            />
+                            <label>{editIsLocal ? 'Folder Path' : 'Website URL'}</label>
+                            <div className="input-with-action-btn">
+                              <input
+                                type="text"
+                                value={editUrl}
+                                onChange={(e) => setEditUrl(e.target.value)}
+                                placeholder={editIsLocal ? 'C:\\Books\\...' : 'e.g. https://read.amazon.com/'}
+                                disabled={isSavingEdit}
+                              />
+                              {editIsLocal && (
+                                <button
+                                  type="button"
+                                  className="btn-browse-folder"
+                                  onClick={handleBrowseEditFolder}
+                                  title="Browse Folder..."
+                                  disabled={isSavingEdit}
+                                >
+                                  <FolderOpen size={13} />
+                                  <span>Browse...</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -294,7 +393,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                         )}
 
                         <div className="edit-actions-row">
-                          {source.id in DEFAULT_PRESET_URLS ? (
+                          {source.id in DEFAULT_PRESET_BOOK_URLS ? (
                             <button
                               type="button"
                               className="btn-reset-preset"
@@ -342,9 +441,17 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                   >
                     <div className="source-info">
                       <div className="source-header-line">
+                        {isItemLocal ? (
+                          <Folder size={14} className="source-type-icon text-cyan" />
+                        ) : (
+                          <Globe size={14} className="source-type-icon text-muted" />
+                        )}
                         <span className="source-name">{source.name}</span>
                         {source.isPreset && (
                           <span className="source-preset-pill">Preset</span>
+                        )}
+                        {isItemLocal && (
+                          <span className="source-local-pill">Local</span>
                         )}
                         {isActive && (
                           <span className="source-active-pill">
@@ -354,7 +461,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                         )}
                       </div>
                       <span className="source-url" title={source.url}>
-                        {source.url}
+                        {source.url || (isItemLocal ? '(Local Folder)' : '')}
                       </span>
                     </div>
 
@@ -374,7 +481,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                       <button
                         className="btn-edit-source"
                         onClick={() => handleStartEdit(source)}
-                        title={`Edit ${source.name} name or URL`}
+                        title={`Edit ${source.name} name or URL/folder`}
                       >
                         <Pencil size={13} />
                       </button>
@@ -395,24 +502,52 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
             </div>
           </div>
 
-          {/* Add New Book Site Form */}
+          {/* Add New Reading Source Form */}
           <div className="add-source-section">
             <h4 className="section-heading">
               <Plus size={14} className="heading-icon text-amber" />
-              <span>Add Custom Book Site</span>
+              <span>Add Book Site or Local Folder</span>
             </h4>
             <p className="section-description">
-              Configure any web reader or digital library (e.g. Manning LiveBook, Project Gutenberg, Leanpub).
+              Configure a web-based digital library (e.g. Manning LiveBook, Project Gutenberg) or choose a local folder containing your PDF books and documents.
             </p>
+
+            {/* Type selector toggle */}
+            <div className="source-type-toggle">
+              <button
+                type="button"
+                className={`type-tab-btn ${newSourceType === 'web' ? 'active' : ''}`}
+                onClick={() => {
+                  setNewSourceType('web')
+                  setErrorMsg(null)
+                }}
+              >
+                <Globe size={13} />
+                <span>Web Reading Platform</span>
+              </button>
+              <button
+                type="button"
+                className={`type-tab-btn ${newSourceType === 'local' ? 'active' : ''}`}
+                onClick={() => {
+                  setNewSourceType('local')
+                  setErrorMsg(null)
+                }}
+              >
+                <Folder size={13} />
+                <span>Local Books Folder</span>
+              </button>
+            </div>
 
             <form onSubmit={handleAddSource} className="add-source-form">
               <div className="form-row">
                 <div className="form-field field-name">
-                  <label htmlFor="book-source-name">Site Name</label>
+                  <label htmlFor="book-source-name">
+                    {newSourceType === 'local' ? 'Library Name' : 'Site Name'}
+                  </label>
                   <input
                     id="book-source-name"
                     type="text"
-                    placeholder="e.g. Project Gutenberg"
+                    placeholder={newSourceType === 'local' ? 'e.g. Programming Books' : 'e.g. Project Gutenberg'}
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     disabled={isSubmitting}
@@ -420,17 +555,44 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                 </div>
 
                 <div className="form-field field-url">
-                  <label htmlFor="book-source-url">Website URL</label>
-                  <div className="input-with-icon">
-                    <Globe size={14} className="field-icon" />
-                    <input
-                      id="book-source-url"
-                      type="text"
-                      placeholder="e.g. https://www.gutenberg.org/"
-                      value={newUrl}
-                      onChange={(e) => setNewUrl(e.target.value)}
-                      disabled={isSubmitting}
-                    />
+                  <label htmlFor="book-source-url">
+                    {newSourceType === 'local' ? 'Folder on Computer' : 'Website URL'}
+                  </label>
+                  <div className="input-with-action-btn">
+                    {newSourceType === 'local' ? (
+                      <>
+                        <input
+                          id="book-source-url"
+                          type="text"
+                          placeholder="Select a folder containing PDFs..."
+                          value={newUrl}
+                          onChange={(e) => setNewUrl(e.target.value)}
+                          disabled={isSubmitting}
+                        />
+                        <button
+                          type="button"
+                          className="btn-browse-folder"
+                          onClick={handleBrowseNewFolder}
+                          title="Browse Folder..."
+                          disabled={isSubmitting}
+                        >
+                          <FolderOpen size={13} />
+                          <span>Browse...</span>
+                        </button>
+                      </>
+                    ) : (
+                      <div className="input-with-icon" style={{ width: '100%' }}>
+                        <Globe size={14} className="field-icon" />
+                        <input
+                          id="book-source-url"
+                          type="text"
+                          placeholder="e.g. https://www.gutenberg.org/"
+                          value={newUrl}
+                          onChange={(e) => setNewUrl(e.target.value)}
+                          disabled={isSubmitting}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -448,7 +610,13 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
                   disabled={isSubmitting || !newName.trim() || !newUrl.trim()}
                 >
                   <Plus size={13} />
-                  <span>{isSubmitting ? 'Adding...' : 'Add & Open Site'}</span>
+                  <span>
+                    {isSubmitting
+                      ? 'Adding...'
+                      : newSourceType === 'local'
+                        ? 'Add & Open Library'
+                        : 'Add & Open Site'}
+                  </span>
                 </button>
               </div>
             </form>

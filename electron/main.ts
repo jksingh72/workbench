@@ -838,11 +838,11 @@ function registerIpcHandlers() {
         return true
       })
 
-      // Sort directories first, then alphabetical by name
+      // Sort directories first, then descending by name
       items.sort((a, b) => {
         if (a.isDirectory && !b.isDirectory) return -1
         if (!a.isDirectory && b.isDirectory) return 1
-        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+        return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' })
       })
 
       return { success: true, items, currentPath: targetPath }
@@ -926,21 +926,41 @@ function registerIpcHandlers() {
     }
   })
 
+  let cachedMammoth: any = null
+
   ipcMain.handle('workbench:read-docx', async (_, filePath: string) => {
     try {
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
-      const mammoth = await import('mammoth')
+      if (!cachedMammoth) {
+        cachedMammoth = await import('mammoth')
+      }
       const buffer = await fs.promises.readFile(filePath)
+
+      const cacheDir = path.join(app.getPath('temp'), 'workbench-docx-cache')
+      if (!fs.existsSync(cacheDir)) {
+        try {
+          await fs.promises.mkdir(cacheDir, { recursive: true })
+        } catch (_) {}
+      }
+
       const options = {
-        convertImage: mammoth.images.imgElement((image: any) => {
-          return image.read('base64').then((imageBuffer: string) => {
+        convertImage: cachedMammoth.images.imgElement(async (image: any) => {
+          try {
+            const ext = (image.contentType?.split('/')[1] || 'png').replace('jpeg', 'jpg')
+            const id = Math.random().toString(36).slice(2, 9)
+            const imgPath = path.join(cacheDir, `img_${Date.now()}_${id}.${ext}`)
+            const imgBuffer = await image.read()
+            await fs.promises.writeFile(imgPath, imgBuffer)
             return {
-              src: 'data:' + image.contentType + ';base64,' + imageBuffer,
+              src: `local-file://${encodeURIComponent(imgPath.replace(/\\/g, '/'))}`,
             }
-          })
+          } catch {
+            return { src: '' }
+          }
         }),
       }
-      const result = await mammoth.convertToHtml({ buffer }, options)
+
+      const result = await cachedMammoth.convertToHtml({ buffer }, options)
       return { success: true, html: result.value, fileName: path.basename(filePath) }
     } catch (err: any) {
       console.error('[Main] read-docx error:', err)
@@ -1095,52 +1115,53 @@ function registerIpcHandlers() {
   ipcMain.handle('workbench:read-pdf', async (_, params: string | { filePath: string; maxPages?: number }) => {
     try {
       const filePath = typeof params === 'string' ? params : params.filePath
-      const maxPages = typeof params === 'object' && params.maxPages !== undefined ? params.maxPages : 30
+      const maxPages = typeof params === 'object' && params.maxPages !== undefined ? params.maxPages : 10
 
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' }
-      const buffer = await fs.promises.readFile(filePath)
-      
-      let text = ''
-      let pageCount = 0
-      let pages: { num: number; text: string }[] = []
-      let title = ''
-      let author = ''
-
-      try {
-        const { createRequire } = await import('module')
-        const req = createRequire(import.meta.url)
-        const pdfModule = req('pdf-parse')
-        
-        const parseOptions: any = {}
-        if (maxPages && maxPages > 0) {
-          parseOptions.first = maxPages
-        }
-
-        if (pdfModule.PDFParse) {
-          const parser = new pdfModule.PDFParse({ data: buffer })
-          const textResult = await parser.getText(parseOptions)
-          text = textResult.text || ''
-          pageCount = textResult.total || textResult.pages?.length || 0
-          pages = textResult.pages || []
-          try {
-            const infoResult = await parser.getInfo()
-            title = infoResult.info?.Title || ''
-            author = infoResult.info?.Author || ''
-          } catch (_) {}
-          await parser.destroy()
-        } else if (typeof pdfModule === 'function') {
-          const data = await pdfModule(buffer)
-          text = data.text || ''
-          pageCount = data.numpages || 0
-          title = data.info?.Title || ''
-          author = data.info?.Author || ''
-        }
-      } catch (parseErr: any) {
-        console.warn('[Main] PDF text extraction warning:', parseErr?.message)
-      }
 
       const cleanPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '')
       const fileUrl = `local-file:///${cleanPath}`
+
+      let text = ''
+      let pageCount = 0
+      let truncated = false
+
+      // Run extraction with timeout so large PDFs never block the main Electron event loop
+      try {
+        const extractPromise = (async () => {
+          const buffer = await fs.promises.readFile(filePath)
+          const { createRequire } = await import('module')
+          const req = createRequire(import.meta.url)
+          const pdfModule = req('pdf-parse')
+
+          const effectiveLimit = maxPages > 0 ? maxPages : 0
+
+          if (pdfModule.PDFParse) {
+            const parser = new pdfModule.PDFParse({ data: buffer })
+            const textResult = await parser.getText(effectiveLimit > 0 ? { first: effectiveLimit } : undefined)
+            const extractedText = textResult.text || ''
+            const total = textResult.total || textResult.pages?.length || 0
+            await parser.destroy()
+            return { text: extractedText, pageCount: total, truncated: effectiveLimit > 0 && total > effectiveLimit }
+          } else if (typeof pdfModule === 'function') {
+            const data = await pdfModule(buffer, { max: effectiveLimit })
+            const total = data.numpages || 0
+            return { text: data.text || '', pageCount: total, truncated: effectiveLimit > 0 && total > effectiveLimit }
+          }
+          return { text: '', pageCount: 0, truncated: false }
+        })()
+
+        const timeoutPromise = new Promise<{ text: string; pageCount: number; truncated: boolean }>((_, reject) =>
+          setTimeout(() => reject(new Error('PDF extraction timed out')), 3000)
+        )
+
+        const result = await Promise.race([extractPromise, timeoutPromise])
+        text = result.text
+        pageCount = result.pageCount
+        truncated = result.truncated
+      } catch (parseErr: any) {
+        console.warn('[Main] PDF text extraction warning:', parseErr?.message)
+      }
 
       return {
         success: true,
@@ -1149,14 +1170,11 @@ function registerIpcHandlers() {
         fileUrl,
         text,
         pageCount,
-        pages,
-        title,
-        author,
-        truncated: pageCount > (maxPages || 30),
+        truncated,
       }
     } catch (err: any) {
       console.error('[Main] read-pdf error:', err)
-      return { success: false, error: err?.message || 'Failed to read PDF document' }
+      return { success: false, error: err?.message || 'Failed to read PDF' }
     }
   })
 
@@ -1359,7 +1377,7 @@ app.on('web-contents-created', (_event, contents) => {
 })
 
 app.whenReady().then(() => {
-  protocol.handle('local-file', (request) => {
+  protocol.handle('local-file', async (request) => {
     try {
       let rawPath = request.url.replace(/^local-file:\/\//i, '')
       let p = decodeURIComponent(rawPath).replace(/^\/+/, '')
@@ -1374,7 +1392,23 @@ app.whenReady().then(() => {
         console.error('[Protocol] local-file not found on disk:', normalizedPath, 'from request:', request.url)
         return new Response('File not found', { status: 404 })
       }
-      return net.fetch(pathToFileURL(normalizedPath).toString())
+
+      const fileUrl = pathToFileURL(normalizedPath).toString()
+      const ext = path.extname(normalizedPath).toLowerCase()
+      const response = await net.fetch(fileUrl)
+
+      if (ext === '.pdf') {
+        const headers = new Headers(response.headers)
+        headers.set('Content-Type', 'application/pdf')
+        headers.set('Accept-Ranges', 'bytes')
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        })
+      }
+
+      return response
     } catch (err: any) {
       console.error('[Protocol] local-file error:', err)
       return new Response('File not found', { status: 404 })

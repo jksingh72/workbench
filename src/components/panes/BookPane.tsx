@@ -1,6 +1,7 @@
 import React from 'react'
 import { BookOpen } from 'lucide-react'
 import { PaneToolbar } from '../PaneToolbar'
+import { LocalExplorer } from '../LocalExplorer'
 import { NavState, BookSource } from '../../types/electron'
 
 export interface BookPaneProps {
@@ -17,8 +18,8 @@ export interface BookPaneProps {
   onOpenBookSourceModal: () => void
   isAskingAI: boolean
   onOpenDeleteLogin: () => void
+  onNotify?: (msg: string) => void
 }
-
 
 export const BookPane: React.FC<BookPaneProps> = ({
   style,
@@ -34,8 +35,22 @@ export const BookPane: React.FC<BookPaneProps> = ({
   onOpenBookSourceModal,
   isAskingAI,
   onOpenDeleteLogin,
+  onNotify,
 }) => {
-  const currentSource = bookSources.find((s) => s.id === activeBookSourceId) || { name: "O'Reilly Learning" }
+  const currentSource = bookSources.find((s) => s.id === activeBookSourceId) || {
+    id: 'oreilly',
+    name: "O'Reilly Learning",
+    url: '',
+  }
+  const isLocalFolder =
+    currentSource.isLocal ||
+    currentSource.id === 'local-books' ||
+    (!!currentSource.url && !currentSource.url.startsWith('http://') && !currentSource.url.startsWith('https://'))
+
+  const localBookSource = bookSources.find((s) => s.id === 'local-books' || s.isLocal)
+  const localRootPath = isLocalFolder
+    ? (currentSource.url && !currentSource.url.startsWith('http') ? currentSource.url : undefined)
+    : (localBookSource?.url && !localBookSource.url.startsWith('http') ? localBookSource.url : undefined)
 
   return (
     <div className="pane-wrapper book-pane" style={style}>
@@ -53,7 +68,34 @@ export const BookPane: React.FC<BookPaneProps> = ({
         onOpenBookSourceModal={onOpenBookSourceModal}
         isAskingAI={isAskingAI}
       />
-      <div className="native-view-anchor" ref={anchorRef}>
+
+      {/* 1. Local Explorer for Books/PDFs - kept mounted so folder, tabs, reader & scroll are 100% preserved */}
+      <div
+        className="local-explorer-wrapper"
+        style={{
+          display: isLocalFolder ? 'flex' : 'none',
+          flex: 1,
+          flexDirection: 'column',
+          height: '100%',
+          overflow: 'hidden',
+        }}
+      >
+        <LocalExplorer
+          target="book"
+          storageKey="workbench_book_explorer_state"
+          rootPath={localRootPath}
+          onNotify={onNotify || (() => {})}
+        />
+      </div>
+
+      {/* 2. Web Book View Anchor (O'Reilly, Kindle, etc.) */}
+      <div
+        className="native-view-anchor"
+        ref={anchorRef}
+        style={{
+          display: isLocalFolder ? 'none' : 'block',
+        }}
+      >
         <div className="pane-ghost-placeholder">
           <BookOpen size={36} className="ghost-icon text-red" />
           <span className="ghost-title">Bookview</span>
@@ -63,4 +105,3 @@ export const BookPane: React.FC<BookPaneProps> = ({
     </div>
   )
 }
-

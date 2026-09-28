@@ -7,6 +7,7 @@ export interface BookSource {
   name: string
   url: string
   isPreset?: boolean
+  isLocal?: boolean
 }
 
 export interface BookSourceSettings {
@@ -26,6 +27,13 @@ export const DEFAULT_BOOK_SOURCES: BookSource[] = [
     name: 'Amazon Kindle',
     url: 'https://read.amazon.com/',
     isPreset: true,
+  },
+  {
+    id: 'local-books',
+    name: 'Local Books',
+    url: '',
+    isPreset: true,
+    isLocal: true,
   },
 ]
 
@@ -47,36 +55,73 @@ export class BookSourceManager {
           // Ensure presets exist
           const existingIds = new Set(parsed.sources.map((s: BookSource) => s.id))
           const mergedSources = [...parsed.sources]
+          let needsSave = false
+
           for (const preset of DEFAULT_BOOK_SOURCES) {
             if (!existingIds.has(preset.id)) {
-              mergedSources.push(preset)
+              mergedSources.push({
+                ...preset,
+                url: preset.id === 'local-books' ? app.getPath('documents') : preset.url,
+              })
+              needsSave = true
             }
           }
 
-          // Auto-migrate legacy O'Reilly URLs
+          // Auto-migrate legacy O'Reilly URLs and ensure local-books is preset & named 'Local Books'
           for (const s of mergedSources) {
             if (s.id === 'oreilly' && (s.url.includes('oreilly.com/member/login') || s.url.startsWith('http://'))) {
               s.url = 'https://learning.oreilly.com/home/'
+              needsSave = true
+            }
+            if (s.id === 'local-books') {
+              if (s.name !== 'Local Books') {
+                s.name = 'Local Books'
+                needsSave = true
+              }
+              if (!s.isPreset) {
+                s.isPreset = true
+                needsSave = true
+              }
+              if (!s.isLocal) {
+                s.isLocal = true
+                needsSave = true
+              }
+              if (!s.url || !fs.existsSync(s.url)) {
+                s.url = app.getPath('documents')
+                needsSave = true
+              }
             }
           }
 
           const activeSourceId =
             mergedSources.find((s) => s.id === parsed.activeSourceId)?.id || mergedSources[0].id
 
-          return {
+          const result: BookSourceSettings = {
             sources: mergedSources,
             activeSourceId,
           }
+
+          this.data = result
+          if (needsSave) {
+            this.saveConfig()
+          }
+
+          return result
         }
       }
     } catch (err) {
       console.error('[BookSourceManager] Failed to read config, falling back to defaults:', err)
     }
 
-    return {
-      sources: [...DEFAULT_BOOK_SOURCES],
+    const defaultSettings: BookSourceSettings = {
+      sources: DEFAULT_BOOK_SOURCES.map((p) =>
+        p.id === 'local-books' ? { ...p, url: app.getPath('documents') } : { ...p }
+      ),
       activeSourceId: DEFAULT_BOOK_SOURCES[0].id,
     }
+    this.data = defaultSettings
+    this.saveConfig()
+    return defaultSettings
   }
 
   private saveConfig() {
@@ -123,13 +168,16 @@ export class BookSourceManager {
         const preset = presetMap.get(s.id)!
         validated.push({
           ...preset,
-          name: s.name?.trim() || preset.name,
-          url: s.url?.trim() || preset.url,
+          name: preset.id === 'local-books' ? 'Local Books' : (s.name?.trim() || preset.name),
+          url: s.url?.trim() || preset.url || (preset.id === 'local-books' ? app.getPath('documents') : ''),
+          isLocal: preset.isLocal || s.isLocal,
+          isPreset: true,
         })
       } else {
         const cleanName = s.name?.trim() || 'Custom Book Site'
         let cleanUrl = s.url?.trim() || ''
-        if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        const isLocal = !!s.isLocal || (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://'))
+        if (!isLocal && !cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
           cleanUrl = 'https://' + cleanUrl
         }
         validated.push({
@@ -137,6 +185,7 @@ export class BookSourceManager {
           name: cleanName,
           url: cleanUrl,
           isPreset: false,
+          isLocal,
         })
       }
     }
@@ -144,7 +193,10 @@ export class BookSourceManager {
     // Ensure all presets are present
     for (const preset of DEFAULT_BOOK_SOURCES) {
       if (!seenIds.has(preset.id)) {
-        validated.push(preset)
+        validated.push({
+          ...preset,
+          url: preset.id === 'local-books' ? app.getPath('documents') : preset.url,
+        })
       }
     }
 

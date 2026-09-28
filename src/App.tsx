@@ -69,6 +69,7 @@ export const App: React.FC = () => {
   const [bookSources, setBookSources] = useState<BookSource[]>([
     { id: 'oreilly', name: "O'Reilly Learning", url: 'https://learning.oreilly.com/home/', isPreset: true },
     { id: 'kindle', name: 'Amazon Kindle', url: 'https://read.amazon.com/', isPreset: true },
+    { id: 'local-books', name: 'Local Books', url: '', isPreset: true, isLocal: true },
   ])
   const [activeBookSourceId, setActiveBookSourceId] = useState<string>('oreilly')
   const [isBookSourceModalOpen, setIsBookSourceModalOpen] = useState<boolean>(false)
@@ -250,8 +251,22 @@ export const App: React.FC = () => {
         .getBookSources()
         .then((data) => {
           if (data?.sources && data.sources.length > 0) {
-            setBookSources(data.sources)
-            setActiveBookSourceId(data.activeSourceId || data.sources[0].id)
+            const sources = [...data.sources]
+            const hasLocal = sources.some((s) => s.id === 'local-books')
+            if (!hasLocal) {
+              sources.push({
+                id: 'local-books',
+                name: 'Local Books',
+                url: '',
+                isPreset: true,
+                isLocal: true,
+              })
+            }
+            const normalized = sources.map((s) =>
+              s.id === 'local-books' ? { ...s, name: 'Local Books', isPreset: true, isLocal: true } : s
+            )
+            setBookSources(normalized)
+            setActiveBookSourceId(data.activeSourceId || normalized[0].id)
           }
         })
         .catch((err) => console.error('Failed to load book sources:', err))
@@ -1013,6 +1028,7 @@ export const App: React.FC = () => {
       onOpenBookSourceModal={handleOpenBookSourceModal}
       isAskingAI={isAskingAI}
       onOpenDeleteLogin={handleOpenBookDeleteLogin}
+      onNotify={showNotification}
     />
   )
 

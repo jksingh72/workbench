@@ -2197,7 +2197,8 @@ input:checked + .slider-round:before {
   max-width: 520px;
 }
 
-.note-status-badge {
+.note-status-badge,
+.book-status-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2209,7 +2210,8 @@ input:checked + .slider-round:before {
   color: var(--text-muted);
 }
 
-.note-active-indicator {
+.note-active-indicator,
+.book-active-indicator {
   width: 6px;
   height: 6px;
   border-radius: 50%;

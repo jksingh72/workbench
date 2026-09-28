@@ -141,6 +141,15 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
   const isLocalNote = isLocalFolder
 
+  const isLocalBook =
+    isBook &&
+    (!!activeSource.isLocal ||
+      activeSource.id === 'local-books' ||
+      activeSource.id === 'local' ||
+      (!!activeSource.url && !activeSource.url.startsWith('http://') && !activeSource.url.startsWith('https://')))
+
+  const isLocalActive = isLocalNote || isLocalBook
+
   const toolbarClass = isBook
     ? 'book-toolbar'
     : isAI
@@ -162,9 +171,9 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                   onOpenBookSourceModal?.()
                 }
               }}
-              title="Click to switch reading platform (O'Reilly, Kindle, etc.)"
+              title="Click to switch reading platform (O'Reilly, Kindle, Local Books, etc.)"
             >
-              <BookOpen size={13} />
+              {isLocalBook ? <Folder size={13} className="text-cyan" /> : <BookOpen size={13} />}
               <span className="tag-label">{activeSource.name}</span>
               <ChevronDown size={11} className="selector-chevron" />
             </button>
@@ -241,7 +250,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         <div className="nav-buttons">
           <button
             className="nav-btn"
-            disabled={isLocalNote || !navState.canGoBack}
+            disabled={isLocalActive || !navState.canGoBack}
             onClick={() => onNavAction('back')}
             title="Go Back"
           >
@@ -249,23 +258,23 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           </button>
           <button
             className="nav-btn"
-            disabled={isLocalNote || !navState.canGoForward}
+            disabled={isLocalActive || !navState.canGoForward}
             onClick={() => onNavAction('forward')}
             title="Go Forward"
           >
             <ArrowRight size={13} />
           </button>
           <button
-            className={`nav-btn ${navState.isLoading && !isLocalNote ? 'loading' : ''}`}
-            disabled={isLocalNote}
+            className={`nav-btn ${navState.isLoading && !isLocalActive ? 'loading' : ''}`}
+            disabled={isLocalActive}
             onClick={() => onNavAction('reload')}
             title="Reload Page"
           >
-            <RotateCw size={13} className={navState.isLoading && !isLocalNote ? 'spin' : ''} />
+            <RotateCw size={13} className={navState.isLoading && !isLocalActive ? 'spin' : ''} />
           </button>
           <button
             className="nav-btn"
-            disabled={isLocalNote}
+            disabled={isLocalActive}
             onClick={() => onNavAction('home')}
             title={
               isBook
@@ -510,6 +519,24 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           <KeyRound size={12} className="key-icon" />
           <span className="session-manage-label">Delete Login</span>
         </button>
+
+        {isBook && (
+          <div
+            className="book-status-badge"
+            title={
+              isLocalBook
+                ? 'Workbench Local Books'
+                : `Connected to ${activeSource.name}`
+            }
+          >
+            <span
+              className={`book-active-indicator ${
+                isLocalBook ? 'indicator-local' : 'indicator-cloud'
+              }`}
+            />
+            <span>{isLocalBook ? 'Local Books' : 'Connected'}</span>
+          </div>
+        )}
 
         {isAI && (
           <div className="ai-status-badge" title={`Connected to ${activeAISource.name} web view`}>
