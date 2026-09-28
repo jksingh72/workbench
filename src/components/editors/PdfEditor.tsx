@@ -38,7 +38,7 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
   const [isExtracting, setIsExtracting] = useState<boolean>(true)
   const [isExtractingAll, setIsExtractingAll] = useState<boolean>(false)
   const [isTruncated, setIsTruncated] = useState<boolean>(false)
-  const [viewMode, setViewMode] = useState<'split' | 'visual' | 'notes'>('split')
+  const [viewMode, setViewMode] = useState<'visual' | 'notes' | 'split'>('visual')
   
   // Editable text & annotations
   const [notesContent, setNotesContent] = useState<string>('')
@@ -201,6 +201,9 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
 
   // Add annotation template
   const handleAddAnnotation = () => {
+    if (viewMode === 'visual') {
+      setViewMode('split')
+    }
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const template = `\n\n### 📌 Annotation (${timestamp})\n> **Key takeaway:** \n\n- Action Item: \n`
     setNotesContent((prev) => prev + template)
@@ -225,20 +228,12 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
             PDF {pageCount ? `(${pageCount} pgs)` : ''}
           </span>
 
-          {/* View Mode Switcher */}
+          {/* View Mode Switcher: Default Viewer mode, with Notes and Split available */}
           <div className="wb-view-mode-group">
-            <button
-              className={`wb-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
-              onClick={() => setViewMode('split')}
-              title="Split View: Visual PDF on left, editable notes on right"
-            >
-              <Columns size={13} />
-              <span>Split</span>
-            </button>
             <button
               className={`wb-mode-btn ${viewMode === 'visual' ? 'active' : ''}`}
               onClick={() => setViewMode('visual')}
-              title="Visual PDF: Interactive viewer, forms, and pages"
+              title="Viewer: Clean, full visual PDF viewer"
             >
               <Eye size={13} />
               <span>Viewer</span>
@@ -246,10 +241,18 @@ export const PdfEditor: React.FC<PdfEditorProps> = ({
             <button
               className={`wb-mode-btn ${viewMode === 'notes' ? 'active' : ''}`}
               onClick={() => setViewMode('notes')}
-              title="Extracted Text & Notes: Full editing workspace"
+              title="Notes: Companion notes & extracted text"
             >
               <Edit3 size={13} />
               <span>Notes</span>
+            </button>
+            <button
+              className={`wb-mode-btn ${viewMode === 'split' ? 'active' : ''}`}
+              onClick={() => setViewMode('split')}
+              title="Split View: Visual PDF on left, editable notes on right"
+            >
+              <Columns size={13} />
+              <span>Split</span>
             </button>
           </div>
         </div>
