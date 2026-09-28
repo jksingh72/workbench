@@ -12,6 +12,7 @@ export interface AISource {
 export interface AISourceSettings {
   sources: AISource[]
   activeSourceId: string
+  zoomLevels?: Record<string, number>
 }
 
 export const DEFAULT_AI_SOURCES: AISource[] = [
@@ -71,6 +72,7 @@ export class AISourceManager {
           return {
             sources: mergedSources,
             activeSourceId,
+            zoomLevels: parsed.zoomLevels && typeof parsed.zoomLevels === 'object' ? parsed.zoomLevels : {},
           }
         }
       }
@@ -81,6 +83,7 @@ export class AISourceManager {
     return {
       sources: [...DEFAULT_AI_SOURCES],
       activeSourceId: DEFAULT_AI_SOURCES[0].id,
+      zoomLevels: {},
     }
   }
 
@@ -96,7 +99,20 @@ export class AISourceManager {
     return {
       sources: [...this.data.sources],
       activeSourceId: this.data.activeSourceId,
+      zoomLevels: this.data.zoomLevels ? { ...this.data.zoomLevels } : {},
     }
+  }
+
+  public getZoom(sourceId: string): number {
+    return this.data.zoomLevels?.[sourceId] ?? 1.0
+  }
+
+  public setZoom(sourceId: string, zoom: number): void {
+    if (!this.data.zoomLevels) {
+      this.data.zoomLevels = {}
+    }
+    this.data.zoomLevels[sourceId] = Number(zoom.toFixed(2))
+    this.saveConfig()
   }
 
   public getActiveSource(): AISource {
@@ -162,6 +178,7 @@ export class AISourceManager {
     this.data = {
       sources: validated,
       activeSourceId: newActiveId,
+      zoomLevels: this.data.zoomLevels,
     }
 
     this.saveConfig()

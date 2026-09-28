@@ -174,7 +174,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Click to switch reading platform (O'Reilly, Kindle, Local Books, etc.)"
             >
               {isLocalBook ? <Folder size={13} className="text-cyan" /> : <BookOpen size={13} />}
-              <span className="tag-label">{activeSource.name}</span>
+              <span className="tag-label" title={activeSource.name}>{activeSource.name}</span>
               <ChevronDown size={11} className="selector-chevron" />
             </button>
 
@@ -203,7 +203,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Click to switch AI assistant (ChatGPT, Claude, Gemini, etc.)"
             >
               <Bot size={13} />
-              <span className="tag-label">{activeAISource.name}</span>
+              <span className="tag-label" title={activeAISource.name}>{activeAISource.name}</span>
               <ChevronDown size={11} className="selector-chevron" />
             </button>
 
@@ -232,7 +232,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Click to switch note platform (OneNote, Evernote, Local Notes, etc.)"
             >
               {isLocalFolder ? <Folder size={13} className="text-cyan" /> : <BookMarked size={13} />}
-              <span className="tag-label">{activeNoteSource.name}</span>
+              <span className="tag-label" title={activeNoteSource.name}>{activeNoteSource.name}</span>
               <ChevronDown size={11} className="selector-chevron" />
             </button>
 
@@ -287,6 +287,31 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
             <Home size={13} />
           </button>
         </div>
+
+        {/* Stationary Zoom Controls right next to Home */}
+        <div className="zoom-controls">
+          <button
+            className="zoom-btn"
+            onClick={() => onNavAction('zoom-out')}
+            title="Zoom Out (Ctrl+-)"
+          >
+            <ZoomOut size={12} />
+          </button>
+          <button
+            className="zoom-reset-btn"
+            onClick={() => onNavAction('zoom-reset')}
+            title="Reset Zoom to 100%"
+          >
+            {zoomPercent}%
+          </button>
+          <button
+            className="zoom-btn"
+            onClick={() => onNavAction('zoom-in')}
+            title="Zoom In (Ctrl++)"
+          >
+            <ZoomIn size={12} />
+          </button>
+        </div>
       </div>
 
       {/* Center section: Page info */}
@@ -311,33 +336,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         </span>
       </div>
 
-      {/* Right section: Actions & Zoom */}
+      {/* Right section: Actions */}
       <div className="toolbar-section-right">
-        {/* Zoom Controls (Enabled for all panes: Book, AI Chat, Notes) */}
-        <div className="zoom-controls">
-          <button
-            className="zoom-btn"
-            onClick={() => onNavAction('zoom-out')}
-            title="Zoom Out (Ctrl+-)"
-          >
-            <ZoomOut size={12} />
-          </button>
-          <button
-            className="zoom-reset-btn"
-            onClick={() => onNavAction('zoom-reset')}
-            title="Reset Zoom to 100%"
-          >
-            {zoomPercent}%
-          </button>
-          <button
-            className="zoom-btn"
-            onClick={() => onNavAction('zoom-in')}
-            title="Zoom In (Ctrl++)"
-          >
-            <ZoomIn size={12} />
-          </button>
-        </div>
-
         {isBook && (
           <>
 

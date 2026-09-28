@@ -137,6 +137,12 @@ export class NoteViewHandler {
       return { action: 'deny' as const }
     })
 
+    // Restore saved zoom level for this source
+    const initialZoom = this.noteSourceManager?.getZoom(source.id) ?? 1.0
+    if (initialZoom > 0) {
+      wc.setZoomFactor(initialZoom)
+    }
+
     this.wireNavEventsForView(newView, source.id)
 
     wc.loadURL(source.url).catch((err: any) => {
@@ -169,13 +175,14 @@ export class NoteViewHandler {
 
   private sendLocalNavState() {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      const zoom = this.noteSourceManager?.getZoom(this.currentSourceId) ?? 1.0
       this.mainWindow.webContents.send('workbench:nav-state', 'note', {
         canGoBack: false,
         canGoForward: false,
         isLoading: false,
         url: 'workbench://local-notes',
         title: 'Workbench Local Notes',
-        zoomFactor: 1.0,
+        zoomFactor: zoom,
       })
     }
   }
@@ -185,6 +192,10 @@ export class NoteViewHandler {
 
     const onStateChange = () => {
       if (this.currentSourceId === sourceId) {
+        const savedZoom = this.noteSourceManager?.getZoom(sourceId) ?? 1.0
+        if (savedZoom > 0 && Math.abs(wc.getZoomFactor() - savedZoom) > 0.01) {
+          wc.setZoomFactor(savedZoom)
+        }
         this.sendNavState(wc)
       }
     }
@@ -313,7 +324,17 @@ export class NoteViewHandler {
   }
 
   public handleNavAction(command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset') {
-    if (!this.view || this.view.webContents.isDestroyed()) return
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      if (command === 'zoom-in' || command === 'zoom-out' || command === 'zoom-reset') {
+        let currentZoom = this.noteSourceManager?.getZoom(this.currentSourceId) ?? 1.0
+        if (command === 'zoom-in') currentZoom = Math.min(Number((currentZoom + 0.1).toFixed(2)), 2.5)
+        else if (command === 'zoom-out') currentZoom = Math.max(Number((currentZoom - 0.1).toFixed(2)), 0.5)
+        else if (command === 'zoom-reset') currentZoom = 1.0
+        this.noteSourceManager?.setZoom(this.currentSourceId, currentZoom)
+        this.sendLocalNavState()
+      }
+      return
+    }
     const wc = this.view.webContents
 
     switch (command) {
@@ -344,15 +365,26 @@ export class NoteViewHandler {
           console.error('[NoteView] Home error:', err)
         }
         break
-      case 'zoom-in':
-        wc.setZoomFactor(Math.min(wc.getZoomFactor() + 0.1, 2.5))
+      case 'zoom-in': {
+        const nextZoom = Math.min(Number((wc.getZoomFactor() + 0.1).toFixed(2)), 2.5)
+        wc.setZoomFactor(nextZoom)
+        this.noteSourceManager?.setZoom(this.currentSourceId, nextZoom)
+        this.sendNavState(wc)
         break
-      case 'zoom-out':
-        wc.setZoomFactor(Math.max(wc.getZoomFactor() - 0.1, 0.5))
+      }
+      case 'zoom-out': {
+        const nextZoom = Math.max(Number((wc.getZoomFactor() - 0.1).toFixed(2)), 0.5)
+        wc.setZoomFactor(nextZoom)
+        this.noteSourceManager?.setZoom(this.currentSourceId, nextZoom)
+        this.sendNavState(wc)
         break
-      case 'zoom-reset':
+      }
+      case 'zoom-reset': {
         wc.setZoomFactor(1.0)
+        this.noteSourceManager?.setZoom(this.currentSourceId, 1.0)
+        this.sendNavState(wc)
         break
+      }
     }
   }
 
@@ -374,6 +406,12 @@ export class NoteViewHandler {
       this.isVisible = true
       const isExisting = this.views.has(source.id)
       this.view = this.getOrCreateView(source)
+
+      // Restore saved zoom level for this source
+      const savedZoom = this.noteSourceManager?.getZoom(source.id) ?? 1.0
+      if (savedZoom > 0) {
+        this.view.webContents.setZoomFactor(savedZoom)
+      }
 
       const prevBaseUrl = this.sourceBaseUrls.get(source.id)
       if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {

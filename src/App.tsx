@@ -93,31 +93,87 @@ export const App: React.FC = () => {
   const [activeNoteSourceId, setActiveNoteSourceId] = useState<string>('onenote')
   const [isNoteSourceModalOpen, setIsNoteSourceModalOpen] = useState<boolean>(false)
 
-  const [bookNavState, setBookNavState] = useState<NavState>({
-    canGoBack: false,
-    canGoForward: false,
-    isLoading: true,
-    url: 'https://learning.oreilly.com/home/',
-    title: "O'Reilly Learning",
-    zoomFactor: 1.0,
+  // Per-source zoom memory persistence
+  const [sourceZooms, setSourceZooms] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('workbench_source_zooms')
+      if (raw) return JSON.parse(raw)
+    } catch (_) {}
+    return {}
   })
 
-  const [aiNavState, setAiNavState] = useState<NavState>({
-    canGoBack: false,
-    canGoForward: false,
-    isLoading: true,
-    url: 'https://chatgpt.com/',
-    title: 'ChatGPT',
-    zoomFactor: 1.0,
+  const updateSourceZoom = useCallback((sourceId: string, zoom: number) => {
+    if (!sourceId) return
+    const rounded = Number(zoom.toFixed(2))
+    setSourceZooms((prev) => {
+      if (prev[sourceId] === rounded) return prev
+      const next = { ...prev, [sourceId]: rounded }
+      try {
+        localStorage.setItem('workbench_source_zooms', JSON.stringify(next))
+      } catch (_) {}
+      return next
+    })
+  }, [])
+
+  const activeBookSourceIdRef = useRef(activeBookSourceId)
+  activeBookSourceIdRef.current = activeBookSourceId
+  const activeAISourceIdRef = useRef(activeAISourceId)
+  activeAISourceIdRef.current = activeAISourceId
+  const activeNoteSourceIdRef = useRef(activeNoteSourceId)
+  activeNoteSourceIdRef.current = activeNoteSourceId
+
+  const [bookNavState, setBookNavState] = useState<NavState>(() => {
+    const rawZooms = (() => {
+      try {
+        const raw = localStorage.getItem('workbench_source_zooms')
+        if (raw) return JSON.parse(raw)
+      } catch (_) {}
+      return {}
+    })()
+    return {
+      canGoBack: false,
+      canGoForward: false,
+      isLoading: true,
+      url: 'https://learning.oreilly.com/home/',
+      title: "O'Reilly Learning",
+      zoomFactor: rawZooms['oreilly'] ?? 1.0,
+    }
   })
 
-  const [noteNavState, setNoteNavState] = useState<NavState>({
-    canGoBack: false,
-    canGoForward: false,
-    isLoading: true,
-    url: 'https://www.onenote.com/notebooks',
-    title: 'Microsoft OneNote',
-    zoomFactor: 1.0,
+  const [aiNavState, setAiNavState] = useState<NavState>(() => {
+    const rawZooms = (() => {
+      try {
+        const raw = localStorage.getItem('workbench_source_zooms')
+        if (raw) return JSON.parse(raw)
+      } catch (_) {}
+      return {}
+    })()
+    return {
+      canGoBack: false,
+      canGoForward: false,
+      isLoading: true,
+      url: 'https://chatgpt.com/',
+      title: 'ChatGPT',
+      zoomFactor: rawZooms['chatgpt'] ?? 1.0,
+    }
+  })
+
+  const [noteNavState, setNoteNavState] = useState<NavState>(() => {
+    const rawZooms = (() => {
+      try {
+        const raw = localStorage.getItem('workbench_source_zooms')
+        if (raw) return JSON.parse(raw)
+      } catch (_) {}
+      return {}
+    })()
+    return {
+      canGoBack: false,
+      canGoForward: false,
+      isLoading: true,
+      url: 'https://www.onenote.com/notebooks',
+      title: 'Microsoft OneNote',
+      zoomFactor: rawZooms['onenote'] ?? 1.0,
+    }
   })
 
   const workspaceRef = useRef<HTMLDivElement>(null)
@@ -230,10 +286,19 @@ export const App: React.FC = () => {
     const unsubscribeNav = window.electron.onNavStateChange((target, state) => {
       if (target === 'book') {
         setBookNavState((prev) => ({ ...prev, ...state }))
+        if (state.zoomFactor) {
+          updateSourceZoom(activeBookSourceIdRef.current, state.zoomFactor)
+        }
       } else if (target === 'ai') {
         setAiNavState((prev) => ({ ...prev, ...state }))
+        if (state.zoomFactor) {
+          updateSourceZoom(activeAISourceIdRef.current, state.zoomFactor)
+        }
       } else if (target === 'note') {
         setNoteNavState((prev) => ({ ...prev, ...state }))
+        if (state.zoomFactor) {
+          updateSourceZoom(activeNoteSourceIdRef.current, state.zoomFactor)
+        }
       }
     })
 
@@ -599,24 +664,24 @@ export const App: React.FC = () => {
     const isNoteLocal = target === 'note' && (currentNote?.isLocal || currentNote?.id === 'local-explorer' || (!!currentNote?.url && !currentNote.url.startsWith('http')))
 
     if (isBookLocal && (command === 'zoom-in' || command === 'zoom-out' || command === 'zoom-reset')) {
-      setBookNavState((prev) => {
-        let current = prev.zoomFactor || 1.0
-        if (command === 'zoom-in') current = Math.min(+(current + 0.1).toFixed(1), 2.5)
-        else if (command === 'zoom-out') current = Math.max(+(current - 0.1).toFixed(1), 0.5)
-        else if (command === 'zoom-reset') current = 1.0
-        return { ...prev, zoomFactor: current }
-      })
+      let current = bookNavState.zoomFactor || 1.0
+      if (command === 'zoom-in') current = Math.min(+(current + 0.1).toFixed(1), 2.5)
+      else if (command === 'zoom-out') current = Math.max(+(current - 0.1).toFixed(1), 0.5)
+      else if (command === 'zoom-reset') current = 1.0
+      setBookNavState((prev) => ({ ...prev, zoomFactor: current }))
+      updateSourceZoom(activeBookSourceId, current)
+      window.electron?.navAction({ target, command })
       return
     }
 
     if (isNoteLocal && (command === 'zoom-in' || command === 'zoom-out' || command === 'zoom-reset')) {
-      setNoteNavState((prev) => {
-        let current = prev.zoomFactor || 1.0
-        if (command === 'zoom-in') current = Math.min(+(current + 0.1).toFixed(1), 2.5)
-        else if (command === 'zoom-out') current = Math.max(+(current - 0.1).toFixed(1), 0.5)
-        else if (command === 'zoom-reset') current = 1.0
-        return { ...prev, zoomFactor: current }
-      })
+      let current = noteNavState.zoomFactor || 1.0
+      if (command === 'zoom-in') current = Math.min(+(current + 0.1).toFixed(1), 2.5)
+      else if (command === 'zoom-out') current = Math.max(+(current - 0.1).toFixed(1), 0.5)
+      else if (command === 'zoom-reset') current = 1.0
+      setNoteNavState((prev) => ({ ...prev, zoomFactor: current }))
+      updateSourceZoom(activeNoteSourceId, current)
+      window.electron?.navAction({ target, command })
       return
     }
 
@@ -673,6 +738,8 @@ export const App: React.FC = () => {
 
   const handleSelectBookSource = async (sourceId: string) => {
     setActiveBookSourceId(sourceId)
+    const savedZoom = sourceZooms[sourceId] ?? 1.0
+    setBookNavState((prev) => ({ ...prev, zoomFactor: savedZoom }))
     setTimeout(syncBounds, 50)
     if (window.electron?.setActiveBookSource) {
       const res = await window.electron.setActiveBookSource(sourceId)
@@ -711,6 +778,8 @@ export const App: React.FC = () => {
 
   const handleSelectAISource = async (sourceId: string) => {
     setActiveAISourceId(sourceId)
+    const savedZoom = sourceZooms[sourceId] ?? 1.0
+    setAiNavState((prev) => ({ ...prev, zoomFactor: savedZoom }))
     setTimeout(syncBounds, 50)
     if (window.electron?.setActiveAISource) {
       const res = await window.electron.setActiveAISource(sourceId)
@@ -749,6 +818,8 @@ export const App: React.FC = () => {
 
   const handleSelectNoteSource = async (sourceId: string) => {
     setActiveNoteSourceId(sourceId)
+    const savedZoom = sourceZooms[sourceId] ?? 1.0
+    setNoteNavState((prev) => ({ ...prev, zoomFactor: savedZoom }))
     setTimeout(syncBounds, 50)
     if (window.electron?.setActiveNoteSource) {
       const res = await window.electron.setActiveNoteSource(sourceId)

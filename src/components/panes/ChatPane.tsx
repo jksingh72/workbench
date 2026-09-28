@@ -155,18 +155,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         activeAISourceId={activeAISourceId}
         onOpenAISourceModal={onOpenAISourceModal}
       />
-      <div
-        className={`chat-drop-bar ${isDragOver ? 'active' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'copy'
-        }}
-        onDrop={handleDrop}
-        title={`Drop a file or text here to send directly to ${currentSource.name}`}
-      >
-        <UploadCloud size={13} className="text-emerald" />
-        <span>Drop file or text snippet here to send to {currentSource.name}</span>
-      </div>
       <div className="native-view-anchor" ref={anchorRef}>
         {isDragOver && (
           <div className="chat-drop-overlay">

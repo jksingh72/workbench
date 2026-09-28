@@ -76,6 +76,12 @@ export class BookViewHandler {
       authCoordinator.handleWindowOpen(details, newView, this.mainWindow)
     )
 
+    // Restore saved zoom level for this source
+    const initialZoom = this.bookSourceManager.getZoom(source.id)
+    if (initialZoom > 0) {
+      wc.setZoomFactor(initialZoom)
+    }
+
     this.wireNavEventsForView(newView, source.id)
 
     wc.loadURL(source.url).catch((err: any) => {
@@ -126,13 +132,14 @@ export class BookViewHandler {
 
   private sendLocalNavState() {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      const zoom = this.bookSourceManager.getZoom(this.currentSourceId)
       this.mainWindow.webContents.send('workbench:nav-state', 'book', {
         canGoBack: false,
         canGoForward: false,
         isLoading: false,
         url: 'workbench://local-books',
         title: 'Workbench Local Books',
-        zoomFactor: 1.0,
+        zoomFactor: zoom,
       })
     }
   }
@@ -142,6 +149,10 @@ export class BookViewHandler {
 
     const onStateChange = () => {
       if (this.currentSourceId === sourceId) {
+        const savedZoom = this.bookSourceManager.getZoom(sourceId)
+        if (savedZoom > 0 && Math.abs(wc.getZoomFactor() - savedZoom) > 0.01) {
+          wc.setZoomFactor(savedZoom)
+        }
         this.sendNavState(wc)
       }
     }
@@ -290,7 +301,17 @@ export class BookViewHandler {
   }
 
   public handleNavAction(command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset') {
-    if (!this.view || this.view.webContents.isDestroyed()) return
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      if (command === 'zoom-in' || command === 'zoom-out' || command === 'zoom-reset') {
+        let currentZoom = this.bookSourceManager.getZoom(this.currentSourceId)
+        if (command === 'zoom-in') currentZoom = Math.min(Number((currentZoom + 0.1).toFixed(2)), 2.5)
+        else if (command === 'zoom-out') currentZoom = Math.max(Number((currentZoom - 0.1).toFixed(2)), 0.5)
+        else if (command === 'zoom-reset') currentZoom = 1.0
+        this.bookSourceManager.setZoom(this.currentSourceId, currentZoom)
+        this.sendLocalNavState()
+      }
+      return
+    }
     const wc = this.view.webContents
 
     switch (command) {
@@ -321,15 +342,26 @@ export class BookViewHandler {
           console.error('[BookView] Home error:', err)
         }
         break
-      case 'zoom-in':
-        wc.setZoomFactor(Math.min(wc.getZoomFactor() + 0.1, 2.5))
+      case 'zoom-in': {
+        const nextZoom = Math.min(Number((wc.getZoomFactor() + 0.1).toFixed(2)), 2.5)
+        wc.setZoomFactor(nextZoom)
+        this.bookSourceManager.setZoom(this.currentSourceId, nextZoom)
+        this.sendNavState(wc)
         break
-      case 'zoom-out':
-        wc.setZoomFactor(Math.max(wc.getZoomFactor() - 0.1, 0.5))
+      }
+      case 'zoom-out': {
+        const nextZoom = Math.max(Number((wc.getZoomFactor() - 0.1).toFixed(2)), 0.5)
+        wc.setZoomFactor(nextZoom)
+        this.bookSourceManager.setZoom(this.currentSourceId, nextZoom)
+        this.sendNavState(wc)
         break
-      case 'zoom-reset':
+      }
+      case 'zoom-reset': {
         wc.setZoomFactor(1.0)
+        this.bookSourceManager.setZoom(this.currentSourceId, 1.0)
+        this.sendNavState(wc)
         break
+      }
     }
   }
 
@@ -351,6 +383,12 @@ export class BookViewHandler {
       this.isVisible = true
       const isExisting = this.views.has(source.id)
       this.view = this.getOrCreateView(source)
+
+      // Restore saved zoom level for this source
+      const savedZoom = this.bookSourceManager.getZoom(source.id)
+      if (savedZoom > 0) {
+        this.view.webContents.setZoomFactor(savedZoom)
+      }
 
       const prevBaseUrl = this.sourceBaseUrls.get(source.id)
       if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {

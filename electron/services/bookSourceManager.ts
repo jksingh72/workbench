@@ -13,6 +13,7 @@ export interface BookSource {
 export interface BookSourceSettings {
   sources: BookSource[]
   activeSourceId: string
+  zoomLevels?: Record<string, number>
 }
 
 export const DEFAULT_BOOK_SOURCES: BookSource[] = [
@@ -99,6 +100,7 @@ export class BookSourceManager {
           const result: BookSourceSettings = {
             sources: mergedSources,
             activeSourceId,
+            zoomLevels: parsed.zoomLevels && typeof parsed.zoomLevels === 'object' ? parsed.zoomLevels : {},
           }
 
           this.data = result
@@ -118,6 +120,7 @@ export class BookSourceManager {
         p.id === 'local-books' ? { ...p, url: app.getPath('documents') } : { ...p }
       ),
       activeSourceId: DEFAULT_BOOK_SOURCES[0].id,
+      zoomLevels: {},
     }
     this.data = defaultSettings
     this.saveConfig()
@@ -136,7 +139,20 @@ export class BookSourceManager {
     return {
       sources: [...this.data.sources],
       activeSourceId: this.data.activeSourceId,
+      zoomLevels: this.data.zoomLevels ? { ...this.data.zoomLevels } : {},
     }
+  }
+
+  public getZoom(sourceId: string): number {
+    return this.data.zoomLevels?.[sourceId] ?? 1.0
+  }
+
+  public setZoom(sourceId: string, zoom: number): void {
+    if (!this.data.zoomLevels) {
+      this.data.zoomLevels = {}
+    }
+    this.data.zoomLevels[sourceId] = Number(zoom.toFixed(2))
+    this.saveConfig()
   }
 
   public getActiveSource(): BookSource {
@@ -210,6 +226,7 @@ export class BookSourceManager {
     this.data = {
       sources: validated,
       activeSourceId: newActiveId,
+      zoomLevels: this.data.zoomLevels,
     }
 
     this.saveConfig()

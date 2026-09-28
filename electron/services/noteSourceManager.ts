@@ -13,6 +13,7 @@ export interface NoteSource {
 export interface NoteSourceSettings {
   sources: NoteSource[]
   activeSourceId: string
+  zoomLevels?: Record<string, number>
 }
 
 export const DEFAULT_NOTE_SOURCES: NoteSource[] = [
@@ -98,6 +99,7 @@ export class NoteSourceManager {
           const result: NoteSourceSettings = {
             sources: mergedSources,
             activeSourceId,
+            zoomLevels: parsed.zoomLevels && typeof parsed.zoomLevels === 'object' ? parsed.zoomLevels : {},
           }
           this.saveToFile(result)
           return result
@@ -112,6 +114,7 @@ export class NoteSourceManager {
         p.id === 'local-explorer' ? { ...p, url: app.getPath('documents') } : { ...p }
       ),
       activeSourceId: DEFAULT_NOTE_SOURCES[0].id,
+      zoomLevels: {},
     }
     this.saveToFile(initialSettings)
     return initialSettings
@@ -137,7 +140,20 @@ export class NoteSourceManager {
     return {
       sources: [...this.data.sources],
       activeSourceId: this.data.activeSourceId,
+      zoomLevels: this.data.zoomLevels ? { ...this.data.zoomLevels } : {},
     }
+  }
+
+  public getZoom(sourceId: string): number {
+    return this.data.zoomLevels?.[sourceId] ?? 1.0
+  }
+
+  public setZoom(sourceId: string, zoom: number): void {
+    if (!this.data.zoomLevels) {
+      this.data.zoomLevels = {}
+    }
+    this.data.zoomLevels[sourceId] = Number(zoom.toFixed(2))
+    this.saveConfig()
   }
 
   public getActiveSource(): NoteSource {
@@ -210,6 +226,7 @@ export class NoteSourceManager {
     this.data = {
       sources: validated,
       activeSourceId: newActiveId,
+      zoomLevels: this.data.zoomLevels,
     }
 
     this.saveConfig()

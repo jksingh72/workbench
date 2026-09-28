@@ -74,6 +74,12 @@ export class AIViewHandler {
       authCoordinator.handleWindowOpen(details, newView, this.mainWindow)
     )
 
+    // Restore saved zoom level for this source
+    const initialZoom = this.aiSourceManager.getZoom(source.id)
+    if (initialZoom > 0) {
+      wc.setZoomFactor(initialZoom)
+    }
+
     this.wireNavEventsForView(newView, source.id)
 
     wc.loadURL(source.url).catch((err: any) => {
@@ -116,6 +122,10 @@ export class AIViewHandler {
 
     const onStateChange = () => {
       if (this.currentSourceId === sourceId) {
+        const savedZoom = this.aiSourceManager.getZoom(sourceId)
+        if (savedZoom > 0 && Math.abs(wc.getZoomFactor() - savedZoom) > 0.01) {
+          wc.setZoomFactor(savedZoom)
+        }
         this.sendNavState(wc)
       }
     }
@@ -305,15 +315,26 @@ export class AIViewHandler {
           console.error('[AIView] Home error:', err)
         }
         break
-      case 'zoom-in':
-        wc.setZoomFactor(Math.min(wc.getZoomFactor() + 0.1, 2.5))
+      case 'zoom-in': {
+        const nextZoom = Math.min(Number((wc.getZoomFactor() + 0.1).toFixed(2)), 2.5)
+        wc.setZoomFactor(nextZoom)
+        this.aiSourceManager.setZoom(this.currentSourceId, nextZoom)
+        this.sendNavState(wc)
         break
-      case 'zoom-out':
-        wc.setZoomFactor(Math.max(wc.getZoomFactor() - 0.1, 0.5))
+      }
+      case 'zoom-out': {
+        const nextZoom = Math.max(Number((wc.getZoomFactor() - 0.1).toFixed(2)), 0.5)
+        wc.setZoomFactor(nextZoom)
+        this.aiSourceManager.setZoom(this.currentSourceId, nextZoom)
+        this.sendNavState(wc)
         break
-      case 'zoom-reset':
+      }
+      case 'zoom-reset': {
         wc.setZoomFactor(1.0)
+        this.aiSourceManager.setZoom(this.currentSourceId, 1.0)
+        this.sendNavState(wc)
         break
+      }
     }
   }
 
@@ -338,6 +359,12 @@ export class AIViewHandler {
     this.currentSourceId = source.id
     const isExisting = this.views.has(source.id)
     this.view = this.getOrCreateView(source)
+
+    // Restore saved zoom level for this source
+    const savedZoom = this.aiSourceManager.getZoom(source.id)
+    if (savedZoom > 0) {
+      this.view.webContents.setZoomFactor(savedZoom)
+    }
 
     const prevBaseUrl = this.sourceBaseUrls.get(source.id)
     if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {

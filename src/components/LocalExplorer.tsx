@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   Folder,
   FolderOpen,
@@ -159,6 +159,10 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   const [activeTabId, setActiveTabId] = useState<string>(() => {
     return persisted.activeTabId || '__explorer__'
   })
+  // Helper to switch active tab
+  const selectTab = useCallback((tabId: string) => {
+    setActiveTabId(tabId)
+  }, [])
 
   // Sorting State - default to Name Descending as requested!
   const [sortCol, setSortCol] = useState<SortColumn>(() => {
@@ -207,7 +211,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
 
     const existing = openTabs.find((t) => t.path.toLowerCase() === item.path.toLowerCase())
     if (existing) {
-      setActiveTabId(existing.id)
+      selectTab(existing.id)
       return
     }
 
@@ -234,7 +238,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     }
 
     setOpenTabs((prev) => [...prev, newTab])
-    setActiveTabId(item.path)
+    selectTab(item.path)
   }
 
   const handleCloseTab = (tabId: string, e?: React.MouseEvent) => {
@@ -243,7 +247,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     const nextTabs = openTabs.filter((t) => t.id !== tabId)
     setOpenTabs(nextTabs)
     if (activeTabId === tabId) {
-      setActiveTabId('__explorer__')
+      selectTab('__explorer__')
       if (closedTab) {
         setSelectedPath(closedTab.path)
         const parentDir = closedTab.path.substring(0, closedTab.path.lastIndexOf('\\'))
@@ -1219,12 +1223,14 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     return segments
   }, [currentPath])
 
+  const currentEffectiveZoom = zoomFactor || 1.0
+
   return (
     <div
       ref={containerRef}
       tabIndex={0}
       className="local-explorer-container"
-      style={zoomFactor && zoomFactor !== 1 ? { zoom: `${Math.round(zoomFactor * 100)}%` } : undefined}
+      style={currentEffectiveZoom && currentEffectiveZoom !== 1 ? { zoom: `${Math.round(currentEffectiveZoom * 100)}%` } : undefined}
       onClick={() => {
         setActiveContextMenu(null)
         setTabContextMenu(null)
@@ -1240,7 +1246,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       <div className="wb-workspace-tabs-bar">
         <button
           className={`wb-tab-btn ${activeTabId === '__explorer__' ? 'active' : ''}`}
-          onClick={() => setActiveTabId('__explorer__')}
+          onClick={() => selectTab('__explorer__')}
           title="File Explorer"
         >
           <Folder size={13} className="text-amber" />
@@ -1253,7 +1259,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
             <div
               key={tab.id}
               className={`wb-tab-btn ${isActive ? 'active' : ''}`}
-              onClick={() => setActiveTabId(tab.id)}
+              onClick={() => selectTab(tab.id)}
               onAuxClick={(e) => {
                 if (e.button === 1) handleCloseTab(tab.id, e)
               }}
@@ -1301,7 +1307,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
             return (
               <div className="wb-doc-loading">
                 <span>Tab not found</span>
-                <button className="wb-tool-btn" onClick={() => setActiveTabId('__explorer__')}>
+                <button className="wb-tool-btn" onClick={() => selectTab('__explorer__')}>
                   Return to Explorer
                 </button>
               </div>
@@ -1320,7 +1326,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
-                  setActiveTabId('__explorer__')
+                  selectTab('__explorer__')
                   setSelectedPath(activeTab.path)
                 }}
               />
@@ -1336,7 +1342,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
-                  setActiveTabId('__explorer__')
+                  selectTab('__explorer__')
                   setSelectedPath(activeTab.path)
                 }}
               />
@@ -1353,7 +1359,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
-                  setActiveTabId('__explorer__')
+                  selectTab('__explorer__')
                   setSelectedPath(activeTab.path)
                 }}
                 onContentChange={(html) => {
@@ -1375,7 +1381,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
-                  setActiveTabId('__explorer__')
+                  selectTab('__explorer__')
                   setSelectedPath(activeTab.path)
                 }}
               />
@@ -1391,7 +1397,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {
-                  setActiveTabId('__explorer__')
+                  selectTab('__explorer__')
                   setSelectedPath(activeTab.path)
                 }}
               />
@@ -1418,7 +1424,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                     <button
                       className="wb-tool-btn"
                       onClick={() => {
-                        setActiveTabId('__explorer__')
+                        selectTab('__explorer__')
                         setSelectedPath(activeTab.path)
                       }}
                       title="Show in Folder"
@@ -2346,7 +2352,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               className="menu-option"
               onClick={() => {
                 setOpenTabs([tabContextMenu.tab])
-                setActiveTabId(tabContextMenu.tab.id)
+                selectTab(tabContextMenu.tab.id)
                 setTabContextMenu(null)
               }}
             >
@@ -2357,7 +2363,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               className="menu-option text-danger"
               onClick={() => {
                 setOpenTabs([])
-                setActiveTabId('__explorer__')
+                selectTab('__explorer__')
                 setTabContextMenu(null)
               }}
             >
