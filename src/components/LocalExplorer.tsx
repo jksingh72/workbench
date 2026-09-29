@@ -410,6 +410,56 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     }
   }, [currentPath])
 
+  // Report active directory to Workbench ActionDispatcher
+  useEffect(() => {
+    if (currentPath && !isWebUrl(currentPath) && window.electron?.reportActiveDirectory) {
+      window.electron.reportActiveDirectory({
+        target,
+        currentPath,
+        rootPath: validRoot,
+      })
+    }
+  }, [currentPath, validRoot, target])
+
+  // Listen for Action Model events (live refresh & auto-open tab)
+  useEffect(() => {
+    const cleanups: (() => void)[] = []
+
+    if (window.electron?.onExplorerRefreshNeeded) {
+      const unsub = window.electron.onExplorerRefreshNeeded((data) => {
+        if (!data.target || data.target === target) {
+          if (currentPath) {
+            delete dirCache[currentPath]
+            loadDirectory(currentPath)
+          }
+        }
+      })
+      cleanups.push(unsub)
+    }
+
+    if (window.electron?.onActionOpenTab) {
+      const unsub = window.electron.onActionOpenTab((data) => {
+        if (data.filePath && target === 'book') {
+          const fileName = data.filePath.substring(data.filePath.lastIndexOf('\\') + 1).replace(/.*\//, '')
+          const ext = fileName.includes('.') ? fileName.substring(fileName.lastIndexOf('.')).toLowerCase() : ''
+          handleOpenDocInTab({
+            name: fileName,
+            path: data.filePath,
+            isDirectory: false,
+            extension: ext,
+            size: 0,
+            mtime: new Date().toISOString(),
+          })
+        }
+      })
+      cleanups.push(unsub)
+    }
+
+    return () => {
+      cleanups.forEach((c) => c())
+    }
+  }, [currentPath, target, openTabs])
+
   // Auto-append clipped text to active note file by default, or create Clippings.md
   useEffect(() => {
     if (target === 'book') return

@@ -201,4 +201,41 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.removeListener('workbench:notify', listener)
     }
   },
+  showNotification: (params: any) => {
+    const msg = typeof params === 'string' ? params : (params?.body || params?.title || '')
+    if (msg) {
+      window.dispatchEvent(new CustomEvent('workbench:notification', { detail: msg }))
+    }
+  },
+
+  // Workbench Action Model APIs
+  reportActiveDirectory: (params: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) =>
+    ipcRenderer.send('workbench:report-active-directory', params),
+  executeAction: (payload: any) =>
+    ipcRenderer.invoke('workbench:execute-action', payload),
+  setActionMode: (params: { enabled: boolean; customInstructions?: string }) =>
+    ipcRenderer.invoke('workbench:set-action-mode', params),
+  getActionPrompt: (params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') =>
+    ipcRenderer.invoke('workbench:get-action-prompt', params),
+  onExplorerRefreshNeeded: (callback: (data: { target?: 'book' | 'note'; path?: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:explorer-refresh-needed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:explorer-refresh-needed', listener)
+    }
+  },
+  onActionOpenTab: (callback: (data: { filePath: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:action-open-tab', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:action-open-tab', listener)
+    }
+  },
+  onActiveDirectoryChanged: (callback: (data: { target: 'book' | 'note'; currentPath: string; rootPath?: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:active-directory-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:active-directory-changed', listener)
+    }
+  },
 })

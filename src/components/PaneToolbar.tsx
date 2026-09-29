@@ -19,9 +19,11 @@ import {
   KeyRound,
   BookMarked,
   Settings2,
-  Folder
+  Folder,
+  Zap
 } from 'lucide-react'
 import { NavState, BookSource, AISource, NoteSource } from '../types/electron'
+import { ActionModeModal } from './ActionModeModal'
 
 interface PaneToolbarProps {
   target: 'book' | 'ai' | 'note'
@@ -111,6 +113,103 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   const isBook = target === 'book'
   const isAI = target === 'ai'
   const isNote = target === 'note'
+  const [actionMode, setActionMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('workbench:action-mode') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [isActivatingAction, setIsActivatingAction] = useState(false)
+  const [showPromptSettings, setShowPromptSettings] = useState(false)
+  const [customInstructions, setCustomInstructions] = useState<string>(() => {
+    try {
+      return localStorage.getItem('workbench:action-custom-instructions') || ''
+    } catch {
+      return ''
+    }
+  })
+  const [activeDirectory, setActiveDirectory] = useState<string>('')
+
+  // Sync active directory and Action Mode state on mount + live folder navigation
+  useEffect(() => {
+    if (!isAI) return
+    window.electron
+      ?.getActionPrompt?.('book')
+      .then((p) => {
+        const match = p?.match(/Active Directory:\s*`([^`]+)`/)
+        if (match && match[1]) {
+          setActiveDirectory(match[1])
+        }
+      })
+      .catch(() => {})
+
+    const unsubDir = window.electron?.onActiveDirectoryChanged?.((data) => {
+      if (data?.currentPath && (!data.target || data.target === 'book')) {
+        setActiveDirectory(data.currentPath)
+      }
+    })
+
+    // Ensure backend is aware of restored Action Mode state
+    try {
+      const savedMode = localStorage.getItem('workbench:action-mode') === 'true'
+      const savedInst = localStorage.getItem('workbench:action-custom-instructions') || ''
+      if (savedMode) {
+        window.electron?.setActionMode?.({ enabled: true, customInstructions: savedInst })
+      }
+    } catch (_) {}
+
+    return () => {
+      unsubDir?.()
+    }
+  }, [isAI])
+
+  const handleToggleActionMode = async () => {
+    const nextState = !actionMode
+    setIsActivatingAction(true)
+    try {
+      const res = await window.electron?.setActionMode?.({
+        enabled: nextState,
+        customInstructions: nextState ? customInstructions.trim() : undefined,
+      })
+      if (res?.success) {
+        setActionMode(nextState)
+        try {
+          localStorage.setItem('workbench:action-mode', String(nextState))
+        } catch (_) {}
+        if (nextState) {
+          window.electron?.showNotification?.({
+            title: '⚡ Action Mode: ON',
+            body: 'AI primed in background (prompt hidden). Commands will execute locally.',
+            type: 'success',
+          })
+        } else {
+          window.electron?.showNotification?.({
+            title: '⚡ Action Mode: OFF',
+            body: 'Automated local filesystem execution paused.',
+            type: 'info',
+          })
+        }
+      } else {
+        window.electron?.showNotification?.({
+          title: '⚠️ Action Mode Error',
+          body: res?.error || 'Failed to toggle Action Mode',
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      console.error('Toggle Action Mode error:', err)
+    } finally {
+      setIsActivatingAction(false)
+    }
+  }
+
+  const handleSaveCustomInstructions = (newInstructions: string) => {
+    setCustomInstructions(newInstructions)
+    try {
+      localStorage.setItem('workbench:action-custom-instructions', newInstructions)
+    } catch (_) {}
+  }
 
   const zoomPercent = Math.round((navState.zoomFactor || 1) * 100)
 
@@ -491,6 +590,57 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                 <span className="action-btn-label">Export Chat</span>
               </button>
             )}
+            <div className="action-mode-group">
+              <button
+                className={`clip-note-btn action-mode-btn ${actionMode ? 'active' : 'inactive'}`}
+                onClick={handleToggleActionMode}
+                disabled={isActivatingAction}
+                title={
+                  actionMode
+                    ? '⚡ Action Mode is ON: AI commands execute on your computer. Click to turn OFF.'
+                    : '⚡ Action Mode is OFF. Click to turn ON (auto-primes AI in background & enables local execution).'
+                }
+              >
+                <Zap
+                  size={12}
+                  className={
+                    isActivatingAction
+                      ? 'animate-spin text-amber'
+                      : actionMode
+                        ? 'text-emerald fill-emerald animate-pulse'
+                        : 'text-gray-400'
+                  }
+                />
+                <span className="action-btn-label">
+                  {isActivatingAction
+                    ? 'Priming AI...'
+                    : actionMode
+                      ? 'Action Mode: ON'
+                      : 'Action Mode: OFF'}
+                </span>
+              </button>
+
+              <button
+                className="action-mode-config-btn"
+                onClick={() => setShowPromptSettings(true)}
+                title="Configure Action Mode prompt, custom instructions & rules"
+              >
+                <Settings2 size={11} className={customInstructions ? 'text-amber' : 'text-gray-400'} />
+              </button>
+            </div>
+
+            {activeDirectory && (
+              <div
+                className="active-workspace-badge"
+                title={`Active Working Directory: ${activeDirectory}\n(AI file commands will execute here)`}
+                onClick={() => setShowPromptSettings(true)}
+              >
+                <Folder size={11} className="text-cyan" />
+                <span className="workspace-name">
+                  {activeDirectory.split(/[/\\]/).filter(Boolean).pop() || activeDirectory}
+                </span>
+              </div>
+            )}
           </>
         )}
 
@@ -564,6 +714,27 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           </div>
         )}
       </div>
+
+      {isAI && (
+        <ActionModeModal
+          isOpen={showPromptSettings}
+          onClose={() => setShowPromptSettings(false)}
+          actionMode={actionMode}
+          onToggleActionMode={handleToggleActionMode}
+          customInstructions={customInstructions}
+          onSaveCustomInstructions={handleSaveCustomInstructions}
+          activeDirectory={activeDirectory}
+          onNotify={(msg) => {
+            try {
+              window.electron?.showNotification?.({
+                title: '⚡ Action Mode',
+                body: msg,
+                type: msg.includes('❌') || msg.includes('⚠️') ? 'error' : 'info',
+              })
+            } catch (_) {}
+          }}
+        />
+      )}
     </div>
   )
 }

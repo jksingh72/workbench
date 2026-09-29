@@ -12,6 +12,7 @@ import { AuthCoordinator } from './auth/authCoordinator'
 import { BookSourceManager, BookSource } from './services/bookSourceManager'
 import { AISourceManager, AISource } from './services/aiSourceManager'
 import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
+import { ActionDispatcher } from './services/actionDispatcher'
 
 const BINARY_EXTENSIONS = new Set([
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
@@ -123,6 +124,7 @@ function createWindow() {
   noteHandler = new NoteViewHandler(mainWindow, noteSourceManager)
   sessionManager = new SessionManager(bookHandler, aiHandler, noteHandler)
   layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler, noteHandler)
+  ActionDispatcher.getInstance().setMainWindow(mainWindow)
 
   // Set initial bounds (handlers manage attaching their own views)
   layoutManager.applyBounds()
@@ -433,6 +435,52 @@ function registerIpcHandlers() {
   ipcMain.handle('workbench:send-file-to-ai', async (_, { filePath, instruction }: { filePath: string; instruction?: string }) => {
     if (!aiHandler) return { success: false, error: 'AI handler not ready' }
     return await aiHandler.sendFileToAI(filePath, instruction)
+  })
+
+  // Workbench Action Model Handlers
+  ipcMain.on('workbench:action-triggered', async (_, payload) => {
+    try {
+      await ActionDispatcher.getInstance().dispatch(payload)
+    } catch (err: any) {
+      console.error('[Main] action-triggered error:', err)
+    }
+  })
+
+  ipcMain.handle('workbench:execute-action', async (_, payload) => {
+    return await ActionDispatcher.getInstance().dispatch(payload)
+  })
+
+  ipcMain.handle('workbench:set-action-mode', async (_, params: { enabled: boolean; customInstructions?: string }) => {
+    const enabled = Boolean(params?.enabled)
+    ActionDispatcher.getInstance().setActionMode(enabled)
+    if (aiHandler) {
+      aiHandler.setActionMode(enabled)
+      if (enabled) {
+        const prompt = ActionDispatcher.getInstance().getPromptGuide('book', params?.customInstructions)
+        const primeResult = await aiHandler.enableActionMode(prompt)
+        return { enabled: true, ...primeResult }
+      }
+    }
+    return { success: true, enabled: false }
+  })
+
+  ipcMain.handle('workbench:get-action-prompt', async (_, params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') => {
+    const targetPane = typeof params === 'string' ? params : (params?.targetPane || 'book')
+    const customInstructions = typeof params === 'object' ? params?.customInstructions : undefined
+    return ActionDispatcher.getInstance().getPromptGuide(targetPane, customInstructions)
+  })
+
+  ipcMain.on('workbench:report-active-directory', (_, data: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) => {
+    if (data?.currentPath) {
+      ActionDispatcher.getInstance().setActiveDirectory(data.target || 'book', data.currentPath, data.rootPath)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('workbench:active-directory-changed', {
+          target: data.target || 'book',
+          currentPath: data.currentPath,
+          rootPath: data.rootPath,
+        })
+      }
+    }
   })
 
   // Cross-Pane: Native File Drag & Drop (OS-level drag to external apps, AI view, or folders)

@@ -1436,6 +1436,103 @@ input:checked + .slider-round:before {
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
 }
 
+/* ⚡ Action Mode Toggle Button Group */
+.action-mode-group {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: all 0.2s ease;
+}
+
+.action-mode-group:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.action-mode-btn {
+  border: none !important;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm) !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: all 0.15s ease !important;
+}
+
+.action-mode-btn.active {
+  color: #34d399 !important;
+  background: rgba(16, 185, 129, 0.18) !important;
+}
+
+.action-mode-btn.active:hover {
+  background: rgba(16, 185, 129, 0.28) !important;
+  color: #6ee7b7 !important;
+}
+
+.action-mode-btn.inactive {
+  color: #94a3b8 !important;
+  opacity: 0.85;
+}
+
+.action-mode-btn.inactive:hover {
+  color: #e2e8f0 !important;
+  opacity: 1;
+}
+
+.action-mode-config-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: all 0.15s ease;
+}
+
+.action-mode-config-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+}
+
+.active-workspace-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: #67e8f9;
+  cursor: pointer;
+  user-select: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.active-workspace-badge:hover {
+  background: rgba(6, 182, 212, 0.2);
+  border-color: rgba(6, 182, 212, 0.5);
+  color: #a5f3fc;
+}
+
+.active-workspace-badge .workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-family: monospace;
+}
+
 /* Horizontal Splitter (ChatGPT vs OneNote) */
 .pane-horizontal-splitter {
   height: 9px;

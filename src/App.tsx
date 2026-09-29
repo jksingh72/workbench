@@ -396,6 +396,11 @@ export const App: React.FC = () => {
       handleOpenNoteSourceModal()
     })
 
+    const handleCustomNotify = (e: any) => {
+      if (e.detail) showNotification(String(e.detail))
+    }
+    window.addEventListener('workbench:notification', handleCustomNotify)
+
     return () => {
       unsubscribeNav()
       unsubscribeAskAI?.()
@@ -405,6 +410,7 @@ export const App: React.FC = () => {
       unsubscribeOpenAIModal?.()
       unsubscribeNoteSourceChanged?.()
       unsubscribeOpenNoteModal?.()
+      window.removeEventListener('workbench:notification', handleCustomNotify)
     }
   }, [])
 

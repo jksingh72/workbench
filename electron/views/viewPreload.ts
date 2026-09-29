@@ -292,6 +292,238 @@ try {
 } catch (_) {}
 
 // =========================================================================
+// Modular Section: Workbench Action Observer
+// Watches the chat DOM in real-time for ```workbench:action code blocks,
+// extracts the JSON payload, and routes it to Workbench ActionDispatcher.
+// =========================================================================
+try {
+  (function initWorkbenchActionObserver() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+    let actionModeEnabled = false
+    try {
+      ipcRenderer.on('workbench:action-mode-changed', (_e, enabled: boolean) => {
+        actionModeEnabled = Boolean(enabled)
+      })
+    } catch (_) {}
+
+    function isChatSite(): boolean {
+      const host = (window.location?.hostname || '').toLowerCase()
+      if (!host) return true // In early load stages allow observer to initialize
+      return (
+        host.includes('chatgpt') ||
+        host.includes('claude') ||
+        host.includes('gemini') ||
+        host.includes('perplexity') ||
+        host.includes('deepseek') ||
+        host.includes('grok') ||
+        host.includes('copilot') ||
+        host.includes('localhost')
+      )
+    }
+
+    const executedCodeHashes = new Set<string>()
+
+    function simpleHash(str: string): string {
+      let hash = 0
+      for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i)
+        hash |= 0
+      }
+      return String(hash)
+    }
+
+    function extractActionsFromText(fullText: string): Array<{ payload: any; raw: string }> {
+      const actions: Array<{ payload: any; raw: string }> = []
+      if (!fullText || fullText.length < 10) return actions
+
+      let depth = 0
+      let startIdx = -1
+      let inString = false
+      let escape = false
+
+      for (let i = 0; i < fullText.length; i++) {
+        const ch = fullText[i]
+        if (inString) {
+          if (escape) {
+            escape = false
+          } else if (ch === '\\') {
+            escape = true
+          } else if (ch === '"') {
+            inString = false
+          }
+        } else {
+          if (ch === '"') {
+            inString = true
+          } else if (ch === '{') {
+            if (depth === 0) startIdx = i
+            depth++
+          } else if (ch === '}') {
+            depth--
+            if (depth === 0 && startIdx !== -1) {
+              const candidate = fullText.substring(startIdx, i + 1).trim()
+              try {
+                const parsed = JSON.parse(candidate)
+                if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
+                  actions.push({ payload: parsed, raw: candidate })
+                }
+              } catch (_) {}
+              startIdx = -1
+            }
+          }
+        }
+      }
+      return actions
+    }
+
+    function isSafeAssistantBlock(el: HTMLElement): boolean {
+      if (!el) return false
+      // A. Skip hidden elements or hidden action prompt bubbles
+      if (el.classList.contains('wb-hidden-action-prompt') || el.closest('.wb-hidden-action-prompt')) {
+        return false
+      }
+      if (el.offsetParent === null && el.tagName !== 'BODY') {
+        return false
+      }
+      try {
+        if (window.getComputedStyle(el).display === 'none') return false
+      } catch (_) {}
+
+      // B. Skip input forms, textareas, and contenteditables
+      if (el.closest('#prompt-textarea') || el.closest('form') || el.closest('[contenteditable="true"]')) {
+        return false
+      }
+
+      // C. Skip user messages (check ancestors, self, AND descendants)
+      if (
+        el.closest('[data-message-author-role="user"]') ||
+        el.querySelector('[data-message-author-role="user"]') ||
+        el.closest('[data-user-message="true"]') ||
+        el.querySelector('[data-user-message="true"]') ||
+        el.closest('.font-user-message') ||
+        el.querySelector('.font-user-message') ||
+        el.closest('[data-testid="user-message"]') ||
+        el.querySelector('[data-testid="user-message"]') ||
+        el.closest('user-query')
+      ) {
+        return false
+      }
+
+      // D. Quarantine system prompt guide text
+      const text = el.innerText || el.textContent || ''
+      if (
+        text.includes('You are integrated with Workbench Desktop') ||
+        text.includes('Available Workbench Actions') ||
+        text.includes('Available actions:') ||
+        text.includes('Available Actions:') ||
+        text.includes('### Available Workbench Actions') ||
+        text.includes('workbench:action code block') ||
+        text.includes('Custom User Instructions') ||
+        text.includes('<folder_name>') ||
+        text.includes('<file_path>')
+      ) {
+        return false
+      }
+
+      // E. Must be inside an assistant container or turn
+      const isAssistant = Boolean(
+        el.closest('[data-message-author-role="assistant"]') ||
+        el.closest('.agent-turn') ||
+        el.closest('[data-testid="assistant-message"]') ||
+        el.closest('.font-claude-message') ||
+        el.closest('model-response') ||
+        el.closest('.assistant-turn') ||
+        el.querySelector('[data-message-author-role="assistant"]') ||
+        el.querySelector('.agent-turn')
+      )
+      if (!isAssistant) {
+        return false
+      }
+
+      return true
+    }
+
+    function checkAndExecuteAction(containerEl: HTMLElement) {
+      if (!actionModeEnabled) return
+      if (!isChatSite()) return
+      if (containerEl.getAttribute('data-workbench-executed') === 'true') {
+        return
+      }
+
+      if (!isSafeAssistantBlock(containerEl)) {
+        return
+      }
+
+      const rawText = (containerEl.innerText || containerEl.textContent || '').trim()
+      if (!rawText || rawText.length < 10) return
+
+      if (
+        !rawText.includes('workbench:action') &&
+        !rawText.includes('create_folder') &&
+        !rawText.includes('write_file') &&
+        !rawText.includes('"action"')
+      ) {
+        return
+      }
+
+      const extracted = extractActionsFromText(rawText)
+      for (const item of extracted) {
+        const hash = simpleHash(item.raw)
+        if (executedCodeHashes.has(hash)) continue
+        executedCodeHashes.add(hash)
+        containerEl.setAttribute('data-workbench-executed', 'true')
+
+        // Send to main process
+        ipcRenderer.send('workbench:action-triggered', item.payload)
+
+        // Inject visual confirmation badge
+        try {
+          const badge = document.createElement('div')
+          badge.className = 'workbench-action-badge'
+          badge.style.cssText =
+            'display:flex;align-items:center;gap:6px;padding:4px 8px;margin:6px 0;background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.4);border-radius:4px;font-size:11px;font-family:sans-serif;color:#34d399;font-weight:600;user-select:none;'
+          badge.innerHTML = `<span>⚡ Executed in Workbench: ${item.payload.action || item.payload.type}</span>`
+
+          if (containerEl.parentNode) {
+            containerEl.parentNode.insertBefore(badge, containerEl)
+          }
+        } catch (_) {}
+      }
+    }
+
+    let scanTimeout: any = null
+    function scanForActions() {
+      if (!actionModeEnabled) return
+      if (scanTimeout) clearTimeout(scanTimeout)
+      scanTimeout = setTimeout(() => {
+        const blocks = document.querySelectorAll(
+          'pre, code, div[data-message-author-role="assistant"], article, div.markdown'
+        )
+        blocks.forEach((el) => {
+          checkAndExecuteAction(el as HTMLElement)
+        })
+      }, 350)
+    }
+
+    // Set up MutationObserver on document
+    const observer = new MutationObserver(() => {
+      scanForActions()
+    })
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+    } else {
+      document.addEventListener('DOMContentLoaded', () => {
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      })
+    }
+
+    // Periodic sweep for safety
+    setInterval(scanForActions, 1500)
+  })()
+} catch (_) {}
+
+// =========================================================================
 // Floating Selection Action Bubble (In-Book Instant Tooltip)
 // =========================================================================
 try {

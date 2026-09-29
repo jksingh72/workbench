@@ -119,6 +119,17 @@ export interface ElectronAPI {
   onExtractCodeTrigger?: (callback: () => void) => () => void
   onExportTranscriptTrigger?: (callback: () => void) => () => void
   onNotification?: (callback: (msg: string) => void) => () => void
+  showNotification?: (params: { title?: string; body: string; type?: 'info' | 'success' | 'warning' | 'error' } | string) => void
+
+  // Workbench Action Model APIs
+  reportActiveDirectory?: (params: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) => void
+  executeAction?: (payload: any) => Promise<{ success: boolean; action?: string; message: string; createdPath?: string; error?: string; details?: any }>
+  setActionMode?: (params: { enabled: boolean; customInstructions?: string }) => Promise<{ success: boolean; enabled: boolean; error?: string }>
+  getActionPrompt?: (params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') => Promise<string>
+  scanAiActions?: () => Promise<{ success: boolean; executedCount: number; message: string; results?: any[] }>
+  onExplorerRefreshNeeded?: (callback: (data: { target?: 'book' | 'note'; path?: string }) => void) => () => void
+  onActionOpenTab?: (callback: (data: { filePath: string }) => void) => () => void
+  onActiveDirectoryChanged?: (callback: (data: { target: 'book' | 'note'; currentPath: string; rootPath?: string }) => void) => () => void
 }
 
 export interface SystemRootItem {

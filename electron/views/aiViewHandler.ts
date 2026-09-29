@@ -4,6 +4,7 @@ import path from 'node:path'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { AISourceManager, AISource } from '../services/aiSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
+import { ActionDispatcher } from '../services/actionDispatcher'
 
 export const CHATGPT_START_URL = 'https://chatgpt.com/'
 
@@ -18,11 +19,19 @@ export class AIViewHandler {
   private sourceBaseUrls: Map<string, string> = new Map()
   private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private isVisible: boolean = true
+  private actionModeEnabled: boolean = false
 
   constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
     this.aiSourceManager = aiSourceManager
     this.initView()
+
+    // Periodically scan the active chat view for unexecuted action code blocks (only if Action Mode is enabled)
+    setInterval(() => {
+      if (this.actionModeEnabled && this.isVisible && this.view && !this.view.webContents.isDestroyed()) {
+        this.scanAndExecutePendingActions().catch(() => {})
+      }
+    }, 2000)
   }
 
   private attachView(v: WebContentsView) {
@@ -1077,6 +1086,393 @@ export class AIViewHandler {
       .catch(() => {
         // Silently ignore navigation/unload race conditions
       })
+  }
+
+  /**
+   * Scans the active AI Chat webview directly for unexecuted workbench:action blocks
+   * and dispatches them locally on the user's computer via ActionDispatcher.
+   */
+  public async scanAndExecutePendingActions(): Promise<{
+    success: boolean
+    executedCount: number
+    message: string
+    results?: any[]
+  }> {
+    if (!this.actionModeEnabled) {
+      return { success: false, executedCount: 0, message: 'Action Mode is disabled' }
+    }
+
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { success: false, executedCount: 0, message: 'AI view is not ready' }
+    }
+
+    try {
+      const candidates: any[] = await this.view.webContents.executeJavaScript(`
+        (function() {
+          try {
+            if (!window.__wb_executed_hashes) {
+              window.__wb_executed_hashes = new Set();
+            }
+
+            function simpleHash(str) {
+              var hash = 0;
+              for (var i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash |= 0;
+              }
+              return String(hash);
+            }
+
+            // Extract valid JSON objects with 'action' or 'type' from any text string
+            function extractActionsFromText(fullText) {
+              var actions = [];
+              if (!fullText || fullText.length < 10) return actions;
+              
+              var depth = 0;
+              var startIdx = -1;
+              var inString = false;
+              var escape = false;
+
+              for (var i = 0; i < fullText.length; i++) {
+                var ch = fullText[i];
+                if (inString) {
+                  if (escape) {
+                    escape = false;
+                  } else if (ch === '\\\\') {
+                    escape = true;
+                  } else if (ch === '"') {
+                    inString = false;
+                  }
+                } else {
+                  if (ch === '"') {
+                    inString = true;
+                  } else if (ch === '{') {
+                    if (depth === 0) startIdx = i;
+                    depth++;
+                  } else if (ch === '}') {
+                    depth--;
+                    if (depth === 0 && startIdx !== -1) {
+                      var candidate = fullText.substring(startIdx, i + 1).trim();
+                      var hash = simpleHash(candidate);
+                      if (!window.__wb_executed_hashes.has(hash)) {
+                        try {
+                          var parsed = JSON.parse(candidate);
+                          if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
+                            window.__wb_executed_hashes.add(hash);
+                            actions.push({ payload: parsed, raw: candidate });
+                          }
+                        } catch (_) {}
+                      }
+                      startIdx = -1;
+                    }
+                  }
+                }
+              }
+              return actions;
+            }
+
+            var results = [];
+
+            function isSafeAssistantBlock(el) {
+              if (!el) return false;
+              // A. Skip hidden elements or hidden action prompt bubbles
+              if (el.classList.contains('wb-hidden-action-prompt') || (el.closest && el.closest('.wb-hidden-action-prompt'))) {
+                return false;
+              }
+              if (el.offsetParent === null && el.tagName !== 'BODY') {
+                return false;
+              }
+              try {
+                if (window.getComputedStyle(el).display === 'none') return false;
+              } catch (_) {}
+
+              // B. Skip input forms, textareas, and contenteditables
+              if (el.closest && (el.closest('#prompt-textarea') || el.closest('form') || el.closest('[contenteditable="true"]'))) {
+                return false;
+              }
+
+              // C. Skip user messages (check ancestors, self, AND descendants)
+              if (
+                (el.closest && (el.closest('[data-message-author-role="user"]') || el.closest('[data-user-message="true"]') || el.closest('.font-user-message') || el.closest('[data-testid="user-message"]') || el.closest('user-query'))) ||
+                (el.querySelector && (el.querySelector('[data-message-author-role="user"]') || el.querySelector('[data-user-message="true"]') || el.querySelector('.font-user-message') || el.querySelector('[data-testid="user-message"]') || el.querySelector('user-query')))
+              ) {
+                return false;
+              }
+
+              // D. Quarantine system prompt guide text
+              var text = (el.innerText || el.textContent || '');
+              if (
+                text.includes('You are integrated with Workbench Desktop') ||
+                text.includes('Available Workbench Actions') ||
+                text.includes('Available actions:') ||
+                text.includes('Available Actions:') ||
+                text.includes('### Available Workbench Actions') ||
+                text.includes('workbench:action code block') ||
+                text.includes('Custom User Instructions') ||
+                text.includes('<folder_name>') ||
+                text.includes('<file_path>')
+              ) {
+                return false;
+              }
+
+              // E. Must be inside an assistant container or turn
+              var isAssistant = Boolean(
+                (el.closest && (el.closest('[data-message-author-role="assistant"]') || el.closest('.agent-turn') || el.closest('[data-testid="assistant-message"]') || el.closest('.font-claude-message') || el.closest('model-response') || el.closest('.assistant-turn'))) ||
+                (el.querySelector && (el.querySelector('[data-message-author-role="assistant"]') || el.querySelector('.agent-turn') || el.querySelector('[data-testid="assistant-message"]')))
+              );
+              if (!isAssistant) {
+                return false;
+              }
+
+              return true;
+            }
+
+            // 1. Scan code and pre containers
+            var codeBlocks = document.querySelectorAll('pre, code, div[data-message-author-role="assistant"], article, div.markdown');
+            for (var c = 0; c < codeBlocks.length; c++) {
+              var el = codeBlocks[c];
+
+              if (!isSafeAssistantBlock(el)) {
+                continue;
+              }
+
+              var text = (el.innerText || el.textContent || '').trim();
+              if (text.includes('create_folder') || text.includes('write_file') || text.includes('workbench:action') || text.includes('"action"')) {
+                var extracted = extractActionsFromText(text);
+                for (var e = 0; e < extracted.length; e++) {
+                  results.push(extracted[e].payload);
+                  
+                  // Inject confirmation badge into the DOM
+                  try {
+                    var badge = document.createElement('div');
+                    badge.className = 'workbench-action-badge';
+                    badge.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;margin:6px 0;background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.4);border-radius:4px;font-size:11px;font-family:sans-serif;color:#34d399;font-weight:600;user-select:none;';
+                    badge.innerHTML = '<span>⚡ Executed in Workbench: ' + (extracted[e].payload.action || extracted[e].payload.type) + '</span>';
+                    if (el.parentNode) {
+                      el.parentNode.insertBefore(badge, el);
+                    }
+                  } catch (_) {}
+                }
+              }
+            }
+
+            return results;
+          } catch (err) {
+            return [];
+          }
+        })()
+      `)
+
+      if (!candidates || candidates.length === 0) {
+        return {
+          success: true,
+          executedCount: 0,
+          message: 'No pending actions found in chat view',
+        }
+      }
+
+      console.log(`[AIView] Found ${candidates.length} unexecuted action(s) in chat view! Executing...`)
+      const dispatcher = ActionDispatcher.getInstance()
+      const executionResults = []
+
+      for (const payload of candidates) {
+        const res = await dispatcher.dispatch(payload, 'book')
+        executionResults.push(res)
+
+        // If the action produced a report/message or is a query (count/list), send feedback to ChatGPT
+        const actionName = (payload.action || payload.type || '').toLowerCase()
+        const isQuery = actionName.includes('count') || actionName.includes('list') || actionName.includes('read')
+        const feedbackMsg = res.success
+          ? `[Workbench Result]: ${res.message}`
+          : `[Workbench Error]: Action "${actionName}" failed: ${res.error || res.message}`
+
+        if (isQuery || res.details?.folderCount !== undefined) {
+          // Send back to AI chat to close the two-way loop
+          await this.sendActionFeedbackToAI(feedbackMsg)
+        }
+      }
+
+      return {
+        success: true,
+        executedCount: candidates.length,
+        message: `Successfully executed ${candidates.length} action(s)`,
+        results: executionResults,
+      }
+    } catch (err: any) {
+      console.error('[AIView] scanAndExecutePendingActions error:', err)
+      return {
+        success: false,
+        executedCount: 0,
+        message: err.message || 'Failed to scan and execute actions',
+      }
+    }
+  }
+
+  /**
+   * Injects an action execution result back into the AI chat input and submits it,
+   * completing the two-way loop so the AI can answer user queries.
+   */
+  public async sendActionFeedbackToAI(feedbackText: string) {
+    if (!this.view || this.view.webContents.isDestroyed()) return
+    try {
+      await this.view.webContents.executeJavaScript(`
+        (function(textToInsert) {
+          try {
+            const input = document.querySelector('#prompt-textarea') || 
+                          document.querySelector('div[contenteditable="true"]') || 
+                          document.querySelector('textarea');
+            if (!input) return false;
+
+            input.focus();
+            if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+              input.value = textToInsert;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+              const selection = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(input);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.execCommand('insertText', false, textToInsert);
+              input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
+            }
+
+            setTimeout(function() {
+              const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
+                              document.querySelector('button[aria-label="Send prompt"]') ||
+                              document.querySelector('button[aria-label="Send message"]');
+              if (sendBtn && !sendBtn.disabled) {
+                sendBtn.click();
+              } else {
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+              }
+            }, 350);
+
+            return true;
+          } catch (e) {
+            return false;
+          }
+        })(${JSON.stringify(feedbackText)})
+      `)
+    } catch (_) {}
+  }
+
+  public setActionMode(enabled: boolean) {
+    this.actionModeEnabled = enabled
+    for (const v of this.views.values()) {
+      if (!v.webContents.isDestroyed()) {
+        v.webContents.send('workbench:action-mode-changed', enabled)
+      }
+    }
+  }
+
+  public isActionModeEnabled(): boolean {
+    return this.actionModeEnabled
+  }
+
+  /**
+   * Automatically primes the active AI Chat with the Workbench Action System Prompt,
+   * submits it in the background, and hides the prompt bubble from the DOM so the screen remains clean.
+   */
+  public async enableActionMode(promptText: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { success: false, error: 'AI view is not ready' }
+    }
+
+    try {
+      const injected = await this.view.webContents.executeJavaScript(`
+        (async function(textToInsert) {
+          try {
+            // 1. Ensure CSS rule is installed to hide the action prompt bubble
+            if (!document.getElementById('wb-action-mode-styles')) {
+              const style = document.createElement('style');
+              style.id = 'wb-action-mode-styles';
+              style.textContent = \`
+                .wb-hidden-action-prompt {
+                  display: none !important;
+                }
+              \`;
+              document.head.appendChild(style);
+            }
+
+            // Function to tag and hide the prompt bubble
+            function hidePromptElement() {
+              const keywords = [
+                'You are integrated with Workbench Desktop',
+                'Available Workbench Actions',
+                'workbench:action'
+              ];
+              const selectors = [
+                'article',
+                '[data-message-author-role="user"]',
+                'div[data-testid="user-message"]',
+                'div.font-user-message',
+                'user-query',
+                '[class*="user-message"]'
+              ];
+              const elements = document.querySelectorAll(selectors.join(', '));
+              elements.forEach(function(el) {
+                const text = el.innerText || '';
+                if (keywords.some(function(k) { return text.includes(k); })) {
+                  el.classList.add('wb-hidden-action-prompt');
+                }
+              });
+            }
+
+            // Install persistent MutationObserver to keep the prompt hidden across re-renders
+            if (!window.__wb_hide_observer) {
+              window.__wb_hide_observer = new MutationObserver(hidePromptElement);
+              window.__wb_hide_observer.observe(document.body, { childList: true, subtree: true });
+            }
+
+            // 2. Find the chat input
+            const input = document.querySelector('#prompt-textarea') || 
+                          document.querySelector('div[contenteditable="true"]') || 
+                          document.querySelector('textarea');
+            if (!input) return { success: false, error: 'Chat input field not found' };
+
+            input.focus();
+            if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+              input.value = textToInsert;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+              const selection = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(input);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.execCommand('insertText', false, textToInsert);
+              input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
+            }
+
+            // 3. Auto-submit after short delay
+            setTimeout(function() {
+              const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
+                              document.querySelector('button[aria-label="Send prompt"]') ||
+                              document.querySelector('button[aria-label="Send message"]');
+              if (sendBtn && !sendBtn.disabled) {
+                sendBtn.click();
+              } else {
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+              }
+              // Immediate hide passes
+              setTimeout(hidePromptElement, 150);
+              setTimeout(hidePromptElement, 500);
+              setTimeout(hidePromptElement, 1200);
+            }, 300);
+
+            return { success: true };
+          } catch (e) {
+            return { success: false, error: String(e) };
+          }
+        })(${JSON.stringify(promptText)})
+      `)
+
+      return injected || { success: true }
+    } catch (err: any) {
+      console.error('[AIView] enableActionMode error:', err)
+      return { success: false, error: err.message || 'Failed to enable Action Mode' }
+    }
   }
 }
 
