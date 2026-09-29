@@ -311,9 +311,34 @@
   justify-content: space-between;
   padding: 0 10px;
   background-color: #0d121c;
-  border-bottom: 1px solid var(--border-subtle);
   user-select: none;
   z-index: 50;
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  margin: 4px 4px 0 4px;
+  border-radius: 8px 8px 0 0;
+  box-sizing: border-box;
+}
+
+/* Distinct Ambient Themed Panes with Visible Framed Corners (Approach 1) */
+.pane-toolbar.book-toolbar {
+  background: linear-gradient(180deg, rgba(224, 30, 90, 0.1) 0%, rgba(13, 18, 28, 0.98) 100%), #0d121c;
+  border: 1px solid rgba(224, 30, 90, 0.38);
+  border-bottom: 1px solid rgba(224, 30, 90, 0.45);
+  box-shadow: 0 0 12px rgba(224, 30, 90, 0.12), inset 0 1px 0 rgba(224, 30, 90, 0.25);
+}
+
+.pane-toolbar.ai-toolbar {
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.1) 0%, rgba(13, 18, 28, 0.98) 100%), #0d121c;
+  border: 1px solid rgba(16, 185, 129, 0.38);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.12), inset 0 1px 0 rgba(16, 185, 129, 0.25);
+}
+
+.pane-toolbar.note-toolbar {
+  background: linear-gradient(180deg, rgba(147, 51, 234, 0.1) 0%, rgba(13, 18, 28, 0.98) 100%), #0d121c;
+  border: 1px solid rgba(147, 51, 234, 0.38);
+  border-bottom: 1px solid rgba(147, 51, 234, 0.45);
+  box-shadow: 0 0 12px rgba(147, 51, 234, 0.12), inset 0 1px 0 rgba(147, 51, 234, 0.25);
 }
 
 .toolbar-section-left,
