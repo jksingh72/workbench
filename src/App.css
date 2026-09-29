@@ -300,6 +300,8 @@
   height: 100%;
   position: relative;
   overflow: hidden;
+  container-type: inline-size;
+  container-name: pane;
 }
 
 /* Pane Toolbars */
@@ -309,7 +311,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
+  padding: 0 14px 0 10px;
   background-color: #0d121c;
   user-select: none;
   z-index: 50;
@@ -341,12 +343,19 @@
   box-shadow: 0 0 12px rgba(147, 51, 234, 0.12), inset 0 1px 0 rgba(147, 51, 234, 0.25);
 }
 
-.toolbar-section-left,
+.toolbar-section-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .toolbar-section-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .toolbar-section-center {
@@ -2320,6 +2329,59 @@ input:checked + .slider-round:before {
 .badge-purple {
   background: rgba(147, 51, 234, 0.15);
   color: #a855f7;
+}
+
+/* Responsive Toolbar Collapsing for Narrow / Restored Panes (Approach 1) */
+@container pane (max-width: 820px) {
+  /* 1. Status badge text collapses to clean glowing indicator dot [●] with hover tooltip */
+  .book-status-badge .status-badge-text,
+  .ai-status-badge .status-badge-text,
+  .note-status-badge .status-badge-text,
+  .book-status-badge span:not(.book-active-indicator),
+  .ai-status-badge span:not(.ai-active-indicator),
+  .note-status-badge span:not(.note-active-indicator) {
+    display: none;
+  }
+
+  .book-status-badge,
+  .ai-status-badge,
+  .note-status-badge {
+    padding: 3px 6px;
+    gap: 0;
+  }
+
+  /* 2. Delete Login text collapses to Key icon with hover tooltip */
+  .session-manage-btn .session-manage-label {
+    display: none;
+  }
+
+  .session-manage-btn {
+    padding: 3px 6px;
+  }
+}
+
+@container pane (max-width: 720px) {
+  /* 3. Configure button text collapses to Gear icon with hover tooltip */
+  .configure-sources-quick-btn .config-btn-label,
+  .configure-sources-quick-btn span:not(.config-icon) {
+    display: none;
+  }
+
+  .configure-sources-quick-btn {
+    padding: 2px 6px;
+    margin-left: 3px;
+  }
+}
+
+@container pane (max-width: 600px) {
+  /* 4. Action button text collapses to icon-only in tight splits */
+  .clip-note-btn .action-btn-label {
+    display: none;
+  }
+
+  .clip-note-btn {
+    padding: 3px 6px;
+  }
 }
 
 .book-source-dropdown {

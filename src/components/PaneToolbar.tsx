@@ -184,7 +184,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Configure Book Sites (Add, edit, remove book websites)"
             >
               <Settings2 size={12} className="config-icon" />
-              <span>Configure</span>
+              <span className="config-btn-label">Configure</span>
             </button>
           </div>
         )}
@@ -213,7 +213,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Configure AI Platforms (Add, edit, remove AI websites)"
             >
               <Settings2 size={12} className="config-icon" />
-              <span>Configure</span>
+              <span className="config-btn-label">Configure</span>
             </button>
           </div>
         )}
@@ -242,7 +242,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Configure Note Platforms (OneNote, Evernote, Notion, Keep, custom sites)"
             >
               <Settings2 size={12} className="config-icon" />
-              <span>Configure</span>
+              <span className="config-btn-label">Configure</span>
             </button>
           </div>
         )}
@@ -456,7 +456,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Clip highlighted text from book directly into Notes (Ctrl+Shift+N)"
             >
               <BookMarked size={12} className="text-purple" />
-              <span>Clip to Note</span>
+              <span className="action-btn-label">Clip to Note</span>
             </button>
           </>
         )}
@@ -469,7 +469,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               title="Save selected text or latest response from AI to Notes (Ctrl+Shift+S)"
             >
               <BookMarked size={12} className="text-purple" />
-              <span>Save to Note</span>
+              <span className="action-btn-label">Save to Note</span>
             </button>
             {onExtractAICode && (
               <button
@@ -478,7 +478,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                 title="Extract code blocks from chat into project files"
               >
                 <Code2 size={12} className="text-cyan" />
-                <span>Extract Code</span>
+                <span className="action-btn-label">Extract Code</span>
               </button>
             )}
             {onExportAITranscript && (
@@ -488,7 +488,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                 title="Export full chat session as a Markdown note"
               >
                 <FileText size={12} className="text-amber" />
-                <span>Export Chat</span>
+                <span className="action-btn-label">Export Chat</span>
               </button>
             )}
           </>
@@ -501,7 +501,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
             title="Send selection from Note to AI Chat (Ctrl+Shift+A)"
           >
             <Bot size={12} className="text-emerald" />
-            <span>Send to AI</span>
+            <span className="action-btn-label">Send to AI</span>
           </button>
         )}
 
@@ -535,14 +535,14 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                 isLocalBook ? 'indicator-local' : 'indicator-cloud'
               }`}
             />
-            <span>{isLocalBook ? 'Local Books' : 'Connected'}</span>
+            <span className="status-badge-text">{isLocalBook ? 'Local Books' : 'Connected'}</span>
           </div>
         )}
 
         {isAI && (
           <div className="ai-status-badge" title={`Connected to ${activeAISource.name} web view`}>
             <span className="ai-active-indicator" />
-            <span>Ready for prompts</span>
+            <span className="status-badge-text">Ready for prompts</span>
           </div>
         )}
 
@@ -560,7 +560,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                 isLocalNote ? 'indicator-local' : 'indicator-cloud'
               }`}
             />
-            <span>{isLocalNote ? 'Local Notes' : 'Connected'}</span>
+            <span className="status-badge-text">{isLocalNote ? 'Local Notes' : 'Connected'}</span>
           </div>
         )}
       </div>
