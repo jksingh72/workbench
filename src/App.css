@@ -22,17 +22,28 @@
   z-index: 100;
 }
 
-.header-left, .header-right {
+.header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1;
+  min-width: 0;
 }
 
 .header-center {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
   flex: 1;
+  min-width: 0;
 }
 
 .logo-badge {
@@ -245,19 +256,31 @@
 .notification-banner {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 14px;
-  background: linear-gradient(90deg, rgba(16, 163, 127, 0.2), rgba(59, 130, 246, 0.2));
-  border: 1px solid rgba(16, 163, 127, 0.4);
+  gap: 7px;
+  padding: 3px 12px;
+  background: linear-gradient(90deg, rgba(16, 163, 127, 0.16), rgba(59, 130, 246, 0.16));
+  border: 1px solid rgba(16, 163, 127, 0.35);
   border-radius: 20px;
   color: #a7f3d0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   animation: fadeIn 0.2s ease;
+  white-space: nowrap;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
 }
 
 .notification-banner .accent-icon {
   color: #34d399;
+  flex-shrink: 0;
+}
+
+.notification-banner span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Workspace dual-pane container */

@@ -47,17 +47,18 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="dot active" />
           <span>{activeCount === 3 ? 'Triple View' : 'Dual View'}</span>
         </div>
+
+        {notification && (
+          <div className="notification-banner">
+            <Sparkles size={13} className="accent-icon" />
+            <span>{notification}</span>
+          </div>
+        )}
       </div>
 
       <div className="header-center">
-        {notification ? (
-          <div className="notification-banner">
-            <Sparkles size={14} className="accent-icon" />
-            <span>{notification}</span>
-          </div>
-        ) : (
-          <div className="header-controls">
-            {/* Pane Selector Toggles */}
+        <div className="header-controls">
+          {/* Pane Selector Toggles */}
             <div className="pane-selector-group">
               <span className="group-label">Panes:</span>
               <button
@@ -152,7 +153,6 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
           </div>
-        )}
       </div>
 
       <div className="header-right">
