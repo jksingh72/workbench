@@ -20,6 +20,8 @@ export class AIViewHandler {
   private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private isVisible: boolean = true
   private actionModeEnabled: boolean = false
+  private feedbackTurnCount: number = 0
+  private lastFeedbackTimestamp: number = 0
 
   constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
@@ -861,55 +863,25 @@ export class AIViewHandler {
     }
   }
 
-  public async sendFileToAI(
-    filePath: string,
+  public async sendFilesToAI(
+    filePaths: string[],
     customInstruction?: string
-  ): Promise<{ success: boolean; uploaded?: boolean; fileName?: string; error?: string }> {
+  ): Promise<{ success: boolean; count?: number; uploaded?: boolean; fileNames?: string[]; error?: string }> {
     if (!this.view || this.view.webContents.isDestroyed()) {
       return { success: false, error: 'AI view is not ready' }
     }
 
     try {
-      if (!fs.existsSync(filePath)) {
-        return { success: false, error: 'File does not exist' }
+      const validPaths = filePaths.filter((p) => p && fs.existsSync(p))
+      if (validPaths.length === 0) {
+        return { success: false, error: 'No valid files selected' }
       }
 
-      const stat = await fs.promises.stat(filePath)
-      if (stat.isDirectory()) {
-        return { success: false, error: 'Cannot send a folder to AI' }
-      }
-
-      if (stat.size > 25 * 1024 * 1024) {
-        return { success: false, error: 'File is too large (>25MB)' }
-      }
-
-      const fileName = path.basename(filePath)
-      const ext = path.extname(fileName).toLowerCase().replace('.', '')
       const textExtensions = [
         'txt', 'md', 'markdown', 'js', 'ts', 'jsx', 'tsx', 'py', 'json', 'html', 'htm',
         'css', 'scss', 'csv', 'xml', 'yaml', 'yml', 'sql', 'sh', 'bat', 'ps1',
         'c', 'cpp', 'h', 'hpp', 'java', 'rs', 'go', 'rb', 'php', 'swift', 'kt', 'log', 'ini', 'env'
       ]
-      const isKnownTextExt = textExtensions.includes(ext)
-
-      // Read buffer
-      const fileBuffer = await fs.promises.readFile(filePath)
-      const base64Data = fileBuffer.toString('base64')
-
-      // Detect if strictly text (known extension and no null bytes in sample)
-      let isText = false
-      let textContent = ''
-      if (isKnownTextExt) {
-        const sample = fileBuffer.subarray(0, Math.min(fileBuffer.length, 1024))
-        if (!sample.includes(0)) {
-          isText = true
-          try {
-            textContent = fileBuffer.toString('utf-8')
-          } catch (_) {
-            isText = false
-          }
-        }
-      }
 
       const mimeTypes: Record<string, string> = {
         pdf: 'application/pdf',
@@ -931,47 +903,90 @@ export class AIViewHandler {
         pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         zip: 'application/zip',
       }
-      const mimeType = mimeTypes[ext] || 'application/octet-stream'
 
-      // Optional user prompt instruction only (never dump file content if file is uploaded)
+      const filesData: Array<{
+        base64Data: string
+        fileName: string
+        mimeType: string
+        isText: boolean
+        textContent: string
+      }> = []
+
+      for (const fp of validPaths) {
+        const stat = await fs.promises.stat(fp)
+        if (stat.isDirectory()) continue
+        if (stat.size > 25 * 1024 * 1024) continue
+
+        const fileName = path.basename(fp)
+        const ext = path.extname(fileName).toLowerCase().replace('.', '')
+        const isKnownTextExt = textExtensions.includes(ext)
+        const fileBuffer = await fs.promises.readFile(fp)
+        const base64Data = fileBuffer.toString('base64')
+
+        let isText = false
+        let textContent = ''
+        if (isKnownTextExt) {
+          const sample = fileBuffer.subarray(0, Math.min(fileBuffer.length, 1024))
+          if (!sample.includes(0)) {
+            isText = true
+            try {
+              textContent = fileBuffer.toString('utf-8')
+            } catch (_) {
+              isText = false
+            }
+          }
+        }
+
+        const mimeType = mimeTypes[ext] || 'application/octet-stream'
+        filesData.push({ base64Data, fileName, mimeType, isText, textContent })
+      }
+
+      if (filesData.length === 0) {
+        return { success: false, error: 'No files eligible for upload (folders or files >25MB skipped)' }
+      }
+
       const userInstruction = (customInstruction || '').trim()
 
       const result = await this.view.webContents.executeJavaScript(`
-        (async function(base64Data, fileName, mimeType, isText, textContent, userInstruction) {
+        (async function(filesList, userInstruction) {
           let fileUploaded = false;
           try {
             const fileInput = document.querySelector('input[type="file"]');
             if (fileInput) {
-              const byteCharacters = atob(base64Data);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-              }
-              const byteArray = new Uint8Array(byteNumbers);
-              const blob = new Blob([byteArray], { type: mimeType });
-              const file = new File([blob], fileName, { type: mimeType, lastModified: Date.now() });
-
               const dt = new DataTransfer();
-              dt.items.add(file);
+              for (const item of filesList) {
+                const byteCharacters = atob(item.base64Data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: item.mimeType });
+                const file = new File([blob], item.fileName, { type: item.mimeType, lastModified: Date.now() });
+                dt.items.add(file);
+              }
               fileInput.files = dt.files;
               fileInput.dispatchEvent(new Event('change', { bubbles: true }));
               fileInput.dispatchEvent(new Event('input', { bubbles: true }));
               fileUploaded = true;
             }
           } catch (e) {
-            console.warn('[AIView] File upload injection failed:', e);
+            console.warn('[AIView] Batch file upload injection failed:', e);
           }
 
-          // If the file was successfully uploaded, we do NOT dump the file content into the prompt!
-          // We only inject userInstruction if one was provided.
-          // If file upload failed, we only fall back to text paste if the file is genuinely plain text.
           let textToInject = '';
           if (fileUploaded) {
             textToInject = userInstruction;
-          } else if (isText && textContent) {
-            const extName = fileName.split('.').pop() || 'txt';
-            textToInject = (userInstruction ? userInstruction + '\\n\\n' : '') +
-              'File: \`' + fileName + '\`\\n\`\`\`' + extName + '\\n' + textContent + '\\n\`\`\`';
+          } else {
+            const textParts = [];
+            if (userInstruction) textParts.push(userInstruction);
+            for (const item of filesList) {
+              if (item.isText && item.textContent) {
+                const extName = item.fileName.split('.').pop() || 'txt';
+                textParts.push('File: \`' + item.fileName + '\`\\n\`\`\`' + extName + '\\n' + item.textContent + '\\n\`\`\`');
+              }
+            }
+            textToInject = textParts.join('\\n\\n');
           }
 
           if (textToInject) {
@@ -1000,47 +1015,93 @@ export class AIViewHandler {
             }
           }
 
-          return { success: true, fileUploaded };
-        })(${JSON.stringify(base64Data)}, ${JSON.stringify(fileName)}, ${JSON.stringify(mimeType)}, ${isText}, ${JSON.stringify(textContent)}, ${JSON.stringify(userInstruction)})
+          return { success: true, fileUploaded, count: filesList.length };
+        })(${JSON.stringify(filesData)}, ${JSON.stringify(userInstruction)})
       `)
 
       this.view.webContents.focus()
-      return { success: true, uploaded: result?.fileUploaded, fileName }
+      return {
+        success: true,
+        count: filesData.length,
+        uploaded: result?.fileUploaded,
+        fileNames: filesData.map((f) => f.fileName),
+      }
     } catch (err: any) {
-      console.error('[AIView] sendFileToAI error:', err)
-      return { success: false, error: err.message || 'Failed to send file to AI' }
+      console.error('[AIView] sendFilesToAI error:', err)
+      return { success: false, error: err.message || 'Failed to send files to AI' }
+    }
+  }
+
+  public async sendFileToAI(
+    filePath: string,
+    customInstruction?: string
+  ): Promise<{ success: boolean; uploaded?: boolean; fileName?: string; error?: string }> {
+    const res = await this.sendFilesToAI([filePath], customInstruction)
+    return {
+      success: res.success,
+      uploaded: res.uploaded,
+      fileName: res.fileNames?.[0] || path.basename(filePath),
+      error: res.error,
     }
   }
 
   // =========================================================================
   // Modular Section: Drag & Drop File Upload Interceptor
   // =========================================================================
-  private currentDraggingFile: string | null = null
-  private currentClipboardFile: string | null = null
+  private currentDraggingFiles: string[] = []
+  private currentClipboardFiles: string[] = []
+
+  public setDraggingFiles(filePaths: string[]) {
+    this.currentDraggingFiles = filePaths.filter(Boolean)
+  }
 
   public setDraggingFile(filePath: string | null) {
-    this.currentDraggingFile = filePath
+    this.currentDraggingFiles = filePath ? [filePath] : []
+  }
+
+  public getDraggingFiles(): string[] {
+    return this.currentDraggingFiles
   }
 
   public getDraggingFile(): string | null {
-    return this.currentDraggingFile
+    return this.currentDraggingFiles[0] || null
   }
 
-  public setClipboardFile(filePath: string | null) {
-    this.currentClipboardFile = filePath
-    if (filePath && this.view && !this.view.webContents.isDestroyed()) {
-      this.view.webContents.send('workbench:staged-file-copied', { fileName: path.basename(filePath) })
+  public setClipboardFiles(filePaths: string[]) {
+    this.currentClipboardFiles = filePaths.filter(Boolean)
+    if (this.currentClipboardFiles.length > 0 && this.view && !this.view.webContents.isDestroyed()) {
+      this.view.webContents.send('workbench:staged-file-copied', {
+        fileName: path.basename(this.currentClipboardFiles[0]),
+        count: this.currentClipboardFiles.length,
+      })
     }
   }
 
+  public setClipboardFile(filePath: string | null) {
+    this.currentClipboardFiles = filePath ? [filePath] : []
+    if (filePath && this.view && !this.view.webContents.isDestroyed()) {
+      this.view.webContents.send('workbench:staged-file-copied', { fileName: path.basename(filePath), count: 1 })
+    }
+  }
+
+  public consumeClipboardFiles(): string[] {
+    const files = [...this.currentClipboardFiles]
+    this.currentClipboardFiles = []
+    return files
+  }
+
   public consumeClipboardFile(): string | null {
-    const file = this.currentClipboardFile
-    this.currentClipboardFile = null
+    const file = this.currentClipboardFiles[0] || null
+    this.currentClipboardFiles = []
     return file
   }
 
+  public getClipboardFiles(): string[] {
+    return this.currentClipboardFiles
+  }
+
   public getClipboardFile(): string | null {
-    return this.currentClipboardFile
+    return this.currentClipboardFiles[0] || null
   }
 
   /**
@@ -1216,8 +1277,10 @@ export class AIViewHandler {
               }
 
               // E. Must be inside an assistant container or turn
+              var host = (window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
               var isAssistant = Boolean(
-                (el.closest && (el.closest('[data-message-author-role="assistant"]') || el.closest('.agent-turn') || el.closest('[data-testid="assistant-message"]') || el.closest('.font-claude-message') || el.closest('model-response') || el.closest('.assistant-turn'))) ||
+                host.includes('perplexity') ||
+                (el.closest && (el.closest('[data-message-author-role="assistant"]') || el.closest('.agent-turn') || el.closest('[data-testid="assistant-message"]') || el.closest('.font-claude-message') || el.closest('model-response') || el.closest('.assistant-turn') || el.closest('.prose'))) ||
                 (el.querySelector && (el.querySelector('[data-message-author-role="assistant"]') || el.querySelector('.agent-turn') || el.querySelector('[data-testid="assistant-message"]')))
               );
               if (!isAssistant) {
@@ -1276,19 +1339,12 @@ export class AIViewHandler {
       const executionResults = []
 
       for (const payload of candidates) {
-        const res = await dispatcher.dispatch(payload, 'book')
+        const res = await dispatcher.dispatch(payload)
         executionResults.push(res)
 
-        // If the action produced a report/message or is a query (count/list), send feedback to ChatGPT
-        const actionName = (payload.action || payload.type || '').toLowerCase()
-        const isQuery = actionName.includes('count') || actionName.includes('list') || actionName.includes('read')
-        const feedbackMsg = res.success
-          ? `[Workbench Result]: ${res.message}`
-          : `[Workbench Error]: Action "${actionName}" failed: ${res.error || res.message}`
-
-        if (isQuery || res.details?.folderCount !== undefined) {
-          // Send back to AI chat to close the two-way loop
-          await this.sendActionFeedbackToAI(feedbackMsg)
+        // Close the execution feedback loop so the AI can observe the outcome
+        if (dispatcher.isAutoFeedbackLoopEnabled()) {
+          await this.handleActionExecutionFeedback(payload, res)
         }
       }
 
@@ -1309,52 +1365,171 @@ export class AIViewHandler {
   }
 
   /**
-   * Injects an action execution result back into the AI chat input and submits it,
-   * completing the two-way loop so the AI can answer user queries.
+   * Formats an ActionResult into an observation payload suitable for AI consumption.
    */
-  public async sendActionFeedbackToAI(feedbackText: string) {
+  public formatActionFeedback(payload: any, result: any): string {
+    const actionType = (payload.action || payload.type || result.action || 'action').toLowerCase()
+
+    if (result.message && result.message.includes('Ignored documentation schema template')) {
+      return ''
+    }
+
+    let body = ''
+    if (result.success) {
+      body = `[Workbench Action Result: ✅ ${result.message}]`
+
+      if (result.createdPath) {
+        body += `\nTarget: ${result.createdPath}`
+      }
+
+      if (result.details?.folderCount !== undefined || result.details?.fileCount !== undefined) {
+        const folders = result.details.folders || []
+        const files = result.details.files || []
+        body += `\nContents:\n`
+        body += `- Folders (${folders.length}): ${folders.join(', ') || 'none'}\n`
+        body += `- Files (${files.length}): ${files.join(', ') || 'none'}`
+      }
+
+      if (result.details?.content) {
+        body += `\nFile Content:\n\`\`\`\n${result.details.content}\n\`\`\``
+      }
+    } else {
+      body = `[Workbench Action Result: ❌ Action "${actionType}" failed: ${result.error || result.message}]`
+      body += `\nPlease inspect this error, adjust parameters or file paths, and proceed.`
+    }
+
+    return body
+  }
+
+  /**
+   * Closes the action execution feedback loop by sending the result of an executed action
+   * back to the AI chat, allowing multi-step reasoning and autonomous task execution.
+   */
+  public async handleActionExecutionFeedback(payload: any, result: any) {
+    if (!this.view || this.view.webContents.isDestroyed()) return
+    if (!this.actionModeEnabled) return
+
+    const feedbackText = this.formatActionFeedback(payload, result)
+    if (!feedbackText) return
+
+    // Loop Guard: Reset count if idle for more than 20 seconds
+    const now = Date.now()
+    if (now - this.lastFeedbackTimestamp > 20000) {
+      this.feedbackTurnCount = 0
+    }
+    this.lastFeedbackTimestamp = now
+
+    // Cap at 8 autonomous turns per sequence to prevent infinite runaway loops
+    const MAX_AUTONOMOUS_TURNS = 8
+    let autoSubmit = true
+
+    if (this.feedbackTurnCount >= MAX_AUTONOMOUS_TURNS) {
+      autoSubmit = false
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('workbench:toast', {
+          message: '⚠️ Action loop paused after 8 consecutive turns. Click Send in chat to continue.',
+          type: 'warning',
+        })
+      }
+    } else {
+      this.feedbackTurnCount++
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('workbench:toast', {
+          message: `🔄 Action Feedback Loop (turn ${this.feedbackTurnCount}/${MAX_AUTONOMOUS_TURNS}): Sent result to AI`,
+          type: result.success ? 'success' : 'warning',
+        })
+      }
+    }
+
+    console.log(`[AIView] Feedback Loop [Turn ${this.feedbackTurnCount}]: ${feedbackText.split('\n')[0]}`)
+    await this.sendActionFeedbackToAI(feedbackText, autoSubmit)
+  }
+
+  /**
+   * Injects an action execution result back into the AI chat input and submits it
+   * after verifying the AI has finished generating its previous response.
+   */
+  public async sendActionFeedbackToAI(feedbackText: string, autoSubmit: boolean = true) {
     if (!this.view || this.view.webContents.isDestroyed()) return
     try {
       await this.view.webContents.executeJavaScript(`
-        (function(textToInsert) {
-          try {
-            const input = document.querySelector('#prompt-textarea') || 
-                          document.querySelector('div[contenteditable="true"]') || 
-                          document.querySelector('textarea');
-            if (!input) return false;
+        (function(textToInsert, shouldSubmit) {
+          return new Promise(function(resolve) {
+            const startTime = Date.now();
+            const maxWaitMs = 45000; // Wait up to 45 seconds for streaming to finish
 
-            input.focus();
-            if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-              input.value = textToInsert;
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-            } else {
-              const selection = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(input);
-              selection.removeAllRanges();
-              selection.addRange(range);
-              document.execCommand('insertText', false, textToInsert);
-              input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
+            function checkAndSubmit() {
+              // 1. Check if AI is currently streaming/generating (Stop button is active)
+              const stopBtn = document.querySelector('button[data-testid="stop-button"]') ||
+                              document.querySelector('button[aria-label*="Stop"]') ||
+                              document.querySelector('button[aria-label*="stop"]');
+
+              if (stopBtn && (Date.now() - startTime < maxWaitMs)) {
+                setTimeout(checkAndSubmit, 350);
+                return;
+              }
+
+              // 2. Find prompt input field
+              const input = document.querySelector('#prompt-textarea') || 
+                            document.querySelector('div[contenteditable="true"].ProseMirror') ||
+                            document.querySelector('div[contenteditable="true"]') || 
+                            document.querySelector('textarea');
+
+              if (!input) {
+                if (Date.now() - startTime < maxWaitMs) {
+                  setTimeout(checkAndSubmit, 350);
+                  return;
+                }
+                resolve({ success: false, error: 'Input field not found' });
+                return;
+              }
+
+              input.focus();
+
+              // 3. Insert feedback text
+              if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+                input.value = textToInsert;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+              } else {
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(input);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                document.execCommand('insertText', false, textToInsert);
+                input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
+              }
+
+              if (!shouldSubmit) {
+                resolve({ success: true, submitted: false });
+                return;
+              }
+
+              // 4. Click send button after brief stabilization delay
+              setTimeout(function() {
+                const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
+                                document.querySelector('button[data-testid="fruitjuice-send-button"]') ||
+                                document.querySelector('button[aria-label*="Send"]') ||
+                                document.querySelector('button[aria-label*="send"]') ||
+                                document.querySelector('button.send-button');
+
+                if (sendBtn && !sendBtn.disabled) {
+                  sendBtn.click();
+                  resolve({ success: true, submitted: true });
+                } else {
+                  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                  resolve({ success: true, submitted: true });
+                }
+              }, 400);
             }
 
-            setTimeout(function() {
-              const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
-                              document.querySelector('button[aria-label="Send prompt"]') ||
-                              document.querySelector('button[aria-label="Send message"]');
-              if (sendBtn && !sendBtn.disabled) {
-                sendBtn.click();
-              } else {
-                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-              }
-            }, 350);
-
-            return true;
-          } catch (e) {
-            return false;
-          }
-        })(${JSON.stringify(feedbackText)})
+            checkAndSubmit();
+          });
+        })(${JSON.stringify(feedbackText)}, ${autoSubmit})
       `)
-    } catch (_) {}
+    } catch (err) {
+      console.warn('[AIView] sendActionFeedbackToAI error:', err)
+    }
   }
 
   public setActionMode(enabled: boolean) {
@@ -1425,31 +1600,55 @@ export class AIViewHandler {
               window.__wb_hide_observer.observe(document.body, { childList: true, subtree: true });
             }
 
+            // Check if current conversation is already primed
+            const bodyText = document.body ? document.body.innerText || '' : '';
+            if (bodyText.includes('You are integrated with Workbench Desktop') || bodyText.includes('Available Workbench Actions')) {
+              console.log('[AIView] Active chat is already primed with Workbench actions. Skipping duplicate injection.');
+              return { success: true, alreadyPrimed: true };
+            }
+
             // 2. Find the chat input
             const input = document.querySelector('#prompt-textarea') || 
+                          document.querySelector('div[contenteditable="true"].ProseMirror') ||
                           document.querySelector('div[contenteditable="true"]') || 
                           document.querySelector('textarea');
             if (!input) return { success: false, error: 'Chat input field not found' };
 
             input.focus();
             if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-              input.value = textToInsert;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+              if (nativeSetter) {
+                nativeSetter.call(input, textToInsert);
+              } else {
+                input.value = textToInsert;
+              }
               input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
             } else {
               const selection = window.getSelection();
               const range = document.createRange();
               range.selectNodeContents(input);
               selection.removeAllRanges();
               selection.addRange(range);
-              document.execCommand('insertText', false, textToInsert);
+              const success = document.execCommand('insertText', false, textToInsert);
+              if (!success || !input.textContent) {
+                input.textContent = textToInsert;
+              }
               input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
             }
 
             // 3. Auto-submit after short delay
             setTimeout(function() {
               const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
-                              document.querySelector('button[aria-label="Send prompt"]') ||
-                              document.querySelector('button[aria-label="Send message"]');
+                              document.querySelector('button[data-testid="fruitjuice-send-button"]') ||
+                              document.querySelector('button[aria-label*="Send prompt"]') ||
+                              document.querySelector('button[aria-label*="Send message"]') ||
+                              document.querySelector('button[aria-label*="Send"]') ||
+                              document.querySelector('button[aria-label*="send"]') ||
+                              document.querySelector('button[aria-label*="Submit"]') ||
+                              document.querySelector('button[aria-label*="submit"]') ||
+                              document.querySelector('button[type="submit"]') ||
+                              document.querySelector('button.send-button');
               if (sendBtn && !sendBtn.disabled) {
                 sendBtn.click();
               } else {
@@ -1459,7 +1658,7 @@ export class AIViewHandler {
               setTimeout(hidePromptElement, 150);
               setTimeout(hidePromptElement, 500);
               setTimeout(hidePromptElement, 1200);
-            }, 300);
+            }, 400);
 
             return { success: true };
           } catch (e) {

@@ -11,6 +11,7 @@ import { AISourceModal } from './components/AISourceModal'
 import { AIDeleteLoginModal } from './components/AIDeleteLoginModal'
 import { NoteSourceModal } from './components/NoteSourceModal'
 import { NoteDeleteModal } from './components/NoteDeleteModal'
+import { ActionModeModal } from './components/ActionModeModal'
 import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
@@ -92,6 +93,23 @@ export const App: React.FC = () => {
   ])
   const [activeNoteSourceId, setActiveNoteSourceId] = useState<string>('onenote')
   const [isNoteSourceModalOpen, setIsNoteSourceModalOpen] = useState<boolean>(false)
+  const [isActionModeModalOpen, setIsActionModeModalOpen] = useState<boolean>(false)
+  const [actionMode, setActionMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('workbench:action-mode') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [isActivatingAction, setIsActivatingAction] = useState<boolean>(false)
+  const [customInstructions, setCustomInstructions] = useState<string>(() => {
+    try {
+      return localStorage.getItem('workbench:action-custom-instructions') || ''
+    } catch {
+      return ''
+    }
+  })
+  const [activeActionDirectory, setActiveActionDirectory] = useState<string>('')
 
   // Per-source zoom memory persistence
   const [sourceZooms, setSourceZooms] = useState<Record<string, number>>(() => {
@@ -217,7 +235,8 @@ export const App: React.FC = () => {
     isNoteDeleteDataOpen ||
     isBookSourceModalOpen ||
     isAISourceModalOpen ||
-    isNoteSourceModalOpen
+    isNoteSourceModalOpen ||
+    isActionModeModalOpen
 
   const isAnyModalOpenRef = useRef(isAnyModalOpen)
   isAnyModalOpenRef.current = isAnyModalOpen
@@ -399,7 +418,10 @@ export const App: React.FC = () => {
     const handleCustomNotify = (e: any) => {
       if (e.detail) showNotification(String(e.detail))
     }
-    window.addEventListener('workbench:notification', handleCustomNotify)
+    const handleOpenActionModalEvent = () => {
+      handleOpenActionModeModal()
+    }
+    window.addEventListener('workbench:open-action-mode-modal', handleOpenActionModalEvent)
 
     return () => {
       unsubscribeNav()
@@ -411,7 +433,20 @@ export const App: React.FC = () => {
       unsubscribeNoteSourceChanged?.()
       unsubscribeOpenNoteModal?.()
       window.removeEventListener('workbench:notification', handleCustomNotify)
+      window.removeEventListener('workbench:open-action-mode-modal', handleOpenActionModalEvent)
     }
+  }, [])
+
+  // Sync Action Mode active directory for modal
+  useEffect(() => {
+    window.electron?.getWorkspaceFolders?.().then((wf) => {
+      if (wf?.activeDirectory) setActiveActionDirectory(wf.activeDirectory)
+    }).catch(() => {})
+
+    const unsub = window.electron?.onActionTargetChanged?.((wf) => {
+      if (wf?.activeDirectory) setActiveActionDirectory(wf.activeDirectory)
+    })
+    return () => unsub?.()
   }, [])
 
   // Whenever any modal opens or closes, strictly sync views with Electron
@@ -848,6 +883,78 @@ export const App: React.FC = () => {
     }
   }
 
+  // Auto-switch NoteView to Local Explorer when a Note folder is selected or navigated to
+  useEffect(() => {
+    if (window.electron?.onNavigateToFolder) {
+      const unsub = window.electron.onNavigateToFolder((data) => {
+        if (data.target === 'note' && data.path) {
+          const noteSource = noteSources.find((s) => s.id === activeNoteSourceId)
+          const isLocal = noteSource?.isLocal || noteSource?.id === 'local-explorer'
+          if (!isLocal) {
+            const localSrc = noteSources.find((s) => s.id === 'local-explorer' || s.isLocal)
+            if (localSrc) {
+              handleSelectNoteSource(localSrc.id)
+            }
+          }
+        }
+      })
+      return () => unsub()
+    }
+  }, [noteSources, activeNoteSourceId])
+
+  // Action Mode configuration handlers
+  const handleOpenActionModeModal = () => {
+    setIsActionModeModalOpen(true)
+    window.electron?.setViewsVisible(false)
+  }
+
+  const handleCloseActionModeModal = () => {
+    setIsActionModeModalOpen(false)
+    window.electron?.setViewsVisible(true)
+    setTimeout(syncBounds, 50)
+  }
+
+  const handleToggleActionMode = async () => {
+    const nextState = !actionMode
+    setIsActivatingAction(true)
+    try {
+      const res = await window.electron?.setActionMode?.({
+        enabled: nextState,
+        customInstructions: nextState ? customInstructions.trim() : undefined,
+        primeAI: false,
+      })
+      if (res?.success) {
+        setActionMode(nextState)
+        try {
+          localStorage.setItem('workbench:action-mode', String(nextState))
+        } catch (_) {}
+        if (nextState) {
+          showNotification('⚡ Action Mode: ON (Local file execution enabled)')
+        } else {
+          showNotification('⚡ Action Mode: OFF (Automated local execution paused)')
+        }
+      } else {
+        showNotification('⚠️ Failed to toggle Action Mode: ' + (res?.error || 'Unknown error'))
+      }
+    } catch (err: any) {
+      showNotification('⚠️ Error toggling Action Mode: ' + (err.message || 'Unknown error'))
+    } finally {
+      setIsActivatingAction(false)
+    }
+  }
+
+  const handleSaveCustomInstructions = (instructions: string) => {
+    setCustomInstructions(instructions)
+    try {
+      localStorage.setItem('workbench:action-custom-instructions', instructions)
+    } catch (_) {}
+    window.electron?.setActionMode?.({
+      enabled: actionMode,
+      customInstructions: instructions,
+      primeAI: false,
+    })
+  }
+
   // Clip highlighted book text to Notes
   const handleClipToNote = async (source: 'book' | 'ai' = 'book', rawText?: string) => {
     if (!activePanes.note) {
@@ -1151,6 +1258,11 @@ export const App: React.FC = () => {
       onExtractCode={() => handleExtractAICode()}
       onExportTranscript={() => handleExportAITranscript()}
       onNotify={showNotification}
+      actionMode={actionMode}
+      onToggleActionMode={handleToggleActionMode}
+      isActivatingAction={isActivatingAction}
+      customInstructions={customInstructions}
+      onOpenActionModeModal={handleOpenActionModeModal}
     />
   )
 
@@ -1414,6 +1526,17 @@ export const App: React.FC = () => {
         onClose={handleCloseNoteDeleteData}
         onNotify={showNotification}
         onCleared={() => setNoteResetTrigger(Date.now())}
+      />
+
+      <ActionModeModal
+        isOpen={isActionModeModalOpen}
+        onClose={handleCloseActionModeModal}
+        actionMode={actionMode}
+        onToggleActionMode={handleToggleActionMode}
+        customInstructions={customInstructions}
+        onSaveCustomInstructions={handleSaveCustomInstructions}
+        activeDirectory={activeActionDirectory}
+        onNotify={showNotification}
       />
     </div>
   )

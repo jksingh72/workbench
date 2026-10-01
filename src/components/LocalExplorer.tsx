@@ -151,6 +151,10 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   const [selectedPath, setSelectedPath] = useState<string | null>(() => {
     return persisted.selectedPath || null
   })
+  const [selectedPaths, setSelectedPaths] = useState<string[]>(() => {
+    return persisted.selectedPath ? [persisted.selectedPath] : []
+  })
+  const lastClickedPathRef = useRef<string | null>(persisted.selectedPath || null)
 
   // Tabbed Document Workspace State
   const [openTabs, setOpenTabs] = useState<OpenDocTab[]>(() => {
@@ -455,6 +459,15 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       cleanups.push(unsub)
     }
 
+    if (window.electron?.onNavigateToFolder) {
+      const unsub = window.electron.onNavigateToFolder((data) => {
+        if (data.target === target && data.path) {
+          navigateTo(data.path)
+        }
+      })
+      cleanups.push(unsub)
+    }
+
     return () => {
       cleanups.forEach((c) => c())
     }
@@ -618,38 +631,95 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     }
   }
 
+  // --- Selection Helpers (Multi-select: Ctrl+Click toggle, Shift+Click range) ---
+  const handleItemSelect = (item: FileItem, e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedPaths((prev) => {
+        const next = prev.includes(item.path) ? prev.filter((p) => p !== item.path) : [...prev, item.path]
+        setSelectedPath(next[next.length - 1] || null)
+        return next
+      })
+      lastClickedPathRef.current = item.path
+    } else if (e.shiftKey && lastClickedPathRef.current) {
+      const startIdx = sortedAndFilteredItems.findIndex((i) => i.path === lastClickedPathRef.current)
+      const endIdx = sortedAndFilteredItems.findIndex((i) => i.path === item.path)
+      if (startIdx !== -1 && endIdx !== -1) {
+        const min = Math.min(startIdx, endIdx)
+        const max = Math.max(startIdx, endIdx)
+        const rangePaths = sortedAndFilteredItems.slice(min, max + 1).map((i) => i.path)
+        setSelectedPaths(rangePaths)
+        setSelectedPath(item.path)
+      }
+    } else {
+      setSelectedPath(item.path)
+      setSelectedPaths([item.path])
+      lastClickedPathRef.current = item.path
+    }
+  }
+
+  const handleItemContextMenu = (item: FileItem, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!selectedPaths.includes(item.path)) {
+      setSelectedPath(item.path)
+      setSelectedPaths([item.path])
+      lastClickedPathRef.current = item.path
+    }
+    setActiveContextMenu({ item, x: e.clientX, y: e.clientY })
+  }
+
   // --- Copy, Cut, Paste Handlers ---
-  const handleCopy = (paths: string[]) => {
+  const handleCopy = (paths: string[] = selectedPaths.length > 0 ? selectedPaths : (selectedPath ? [selectedPath] : [])) => {
+    if (paths.length === 0) return
     setClipboard({ action: 'copy', paths })
     if (window.electron?.copyFilesToClipboard) {
       window.electron.copyFilesToClipboard(paths, false)
     }
-    onNotify(`📋 Copied ${paths.length} file${paths.length > 1 ? 's' : ''} to clipboard`)
+    onNotify(`📋 Copied ${paths.length} item${paths.length > 1 ? 's' : ''} to clipboard`)
   }
 
-  const handleCut = (paths: string[]) => {
+  const handleCut = (paths: string[] = selectedPaths.length > 0 ? selectedPaths : (selectedPath ? [selectedPath] : [])) => {
+    if (paths.length === 0) return
     setClipboard({ action: 'cut', paths })
     if (window.electron?.copyFilesToClipboard) {
       window.electron.copyFilesToClipboard(paths, true)
     }
-    onNotify(`✂️ Cut ${paths.length} file${paths.length > 1 ? 's' : ''} (ready to move or paste)`)
+    onNotify(`✂️ Cut ${paths.length} item${paths.length > 1 ? 's' : ''} (ready to move or paste)`)
   }
 
   const handlePaste = async (destDir: string = currentPath) => {
-    if (!clipboard || clipboard.paths.length === 0) return
-    let successCount = 0
+    let sourcePaths: string[] = []
+    let action: 'copy' | 'cut' = 'copy'
 
-    for (const src of clipboard.paths) {
-      if (clipboard.action === 'copy' && window.electron?.copyItem) {
+    if (clipboard && clipboard.paths.length > 0) {
+      sourcePaths = clipboard.paths
+      action = clipboard.action
+    } else if (window.electron?.getClipboardFiles) {
+      // Read directly from Windows OS Clipboard (CF_HDROP / FileDropList)!
+      const res = await window.electron.getClipboardFiles()
+      if (res.success && res.paths && res.paths.length > 0) {
+        sourcePaths = res.paths
+        action = 'copy'
+      }
+    }
+
+    if (sourcePaths.length === 0) {
+      onNotify('ℹ️ Clipboard is empty. Copy files first (Ctrl+C in Windows Explorer or Workbench).')
+      return
+    }
+
+    let successCount = 0
+    for (const src of sourcePaths) {
+      if (action === 'copy' && window.electron?.copyItem) {
         const res = await window.electron.copyItem(src, destDir)
         if (res.success) successCount++
-      } else if (clipboard.action === 'cut' && window.electron?.moveItem) {
+      } else if (action === 'cut' && window.electron?.moveItem) {
         const res = await window.electron.moveItem(src, destDir)
         if (res.success) successCount++
       }
     }
 
-    if (clipboard.action === 'cut') {
+    if (action === 'cut') {
       setClipboard(null)
     }
 
@@ -671,27 +741,47 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   }
 
   // --- Cross-Pane Movement & Transfer Actions ---
+  const handleSendFilesToAI = async (pathsToSend?: string[]) => {
+    const rawPaths = pathsToSend || (selectedPaths.length > 0 ? selectedPaths : (selectedPath ? [selectedPath] : []))
+    // Filter out directories (AI file upload only accepts files)
+    const filePaths = rawPaths.filter((p) => {
+      const it = items.find((i) => i.path === p)
+      return it ? !it.isDirectory : true
+    })
+
+    if (filePaths.length === 0) {
+      onNotify('⚠️ Select one or more files to send to AI (folders cannot be uploaded directly)')
+      return
+    }
+
+    if (window.electron?.sendFilesToAI) {
+      onNotify(`🤖 Sending ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} to Chat...`)
+      try {
+        const res = await window.electron.sendFilesToAI(filePaths)
+        if (res.success) {
+          if (res.uploaded) {
+            onNotify(`🚀 Uploaded ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} to Chat!`)
+          } else {
+            onNotify(`✨ Attached ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} to AI prompt!`)
+          }
+        } else {
+          onNotify(`⚠️ ${res.error || 'Failed to send files to AI'}`)
+        }
+      } catch (err: any) {
+        onNotify(`⚠️ Error: ${err.message}`)
+      }
+    } else if (filePaths.length === 1 && window.electron?.sendFileToAI) {
+      const it = items.find((i) => i.path === filePaths[0])
+      if (it) handleSendFileToAI(it)
+    }
+  }
+
   const handleSendFileToAI = async (item: FileItem) => {
     if (item.isDirectory) {
       onNotify('⚠️ Select a file to send to AI, not a folder')
       return
     }
-    if (!window.electron?.sendFileToAI) return
-    onNotify(`🤖 Sending ${item.name} to Chat...`)
-    try {
-      const res = await window.electron.sendFileToAI(item.path)
-      if (res.success) {
-        if (res.uploaded) {
-          onNotify(`🚀 Uploaded ${item.name} to Chat!`)
-        } else {
-          onNotify(`✨ Pasted ${item.name} into AI prompt!`)
-        }
-      } else {
-        onNotify(`⚠️ ${res.error || 'Failed to send file to AI'}`)
-      }
-    } catch (err: any) {
-      onNotify(`⚠️ Error: ${err.message}`)
-    }
+    handleSendFilesToAI([item.path])
   }
 
   const handleCopyFileContent = async (item: FileItem) => {
@@ -724,17 +814,19 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
 
   const handleDragStartItem = (e: React.DragEvent, item: FileItem) => {
     draggedItemRef.current = item
-    ;(window as any).__workbench_dragged_file = item.path
+    const pathsToDrag = selectedPaths.includes(item.path) && selectedPaths.length > 1 ? selectedPaths : [item.path]
+    ;(window as any).__workbench_dragged_file = pathsToDrag[0]
 
     try {
-      e.dataTransfer.setData('application/json', JSON.stringify({ paths: [item.path] }))
-      e.dataTransfer.setData('application/x-workbench-file', item.path)
+      e.dataTransfer.setData('text/plain', pathsToDrag.join('\n'))
+      e.dataTransfer.setData('application/json', JSON.stringify({ paths: pathsToDrag }))
+      e.dataTransfer.setData('application/x-workbench-file', pathsToDrag[0])
       e.dataTransfer.effectAllowed = 'copyMove'
     } catch (_) {}
 
     // Initiate native OS file drag without canceling the drag sequence
     if (window.electron?.startDragFile) {
-      window.electron.startDragFile(item.path)
+      window.electron.startDragFile(pathsToDrag)
     }
   }
 
@@ -879,6 +971,23 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     })
   }, [items, searchQuery, sortCol, sortDir])
 
+  // Delete multiple selected items
+  const handleDeleteSelected = async () => {
+    if (!window.electron?.deleteItem) return
+    const pathsToDelete = selectedPaths.length > 0 ? selectedPaths : (selectedPath ? [selectedPath] : [])
+    if (pathsToDelete.length === 0) return
+
+    let count = 0
+    for (const p of pathsToDelete) {
+      const res = await window.electron.deleteItem(p)
+      if (res.success) count++
+    }
+    onNotify(`🗑️ Moved ${count} item${count > 1 ? 's' : ''} to Recycle Bin`)
+    setSelectedPaths([])
+    setSelectedPath(null)
+    loadDirectory(currentPath)
+  }
+
   // --- Keyboard Shortcuts (strictly scoped to when focus/interaction is inside LocalExplorer) ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -891,23 +1000,31 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         return
       }
 
-      if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'p' || e.key.toLowerCase() === 'a') && selectedPath) {
+      if (e.ctrlKey && e.shiftKey && (e.key.toLowerCase() === 'p' || e.key.toLowerCase() === 'a')) {
         e.preventDefault()
-        const item = items.find((i) => i.path === selectedPath)
-        if (item) handleSendFileToAI(item)
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'c' && selectedPath) {
+        handleSendFilesToAI()
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'c') {
         e.preventDefault()
-        handleCopy([selectedPath])
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'x' && selectedPath) {
+        handleCopy()
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'x') {
         e.preventDefault()
-        handleCut([selectedPath])
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'v' && clipboard) {
+        handleCut()
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'v') {
         e.preventDefault()
         handlePaste(currentPath)
-      } else if (e.key === 'Delete' && selectedPath) {
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'a') {
         e.preventDefault()
-        const item = items.find((i) => i.path === selectedPath)
-        if (item) handleDeleteItem(item)
+        const allPaths = sortedAndFilteredItems.map((i) => i.path)
+        setSelectedPaths(allPaths)
+        if (allPaths.length > 0) setSelectedPath(allPaths[0])
+      } else if (e.key === 'Delete') {
+        e.preventDefault()
+        if (selectedPaths.length > 1) {
+          handleDeleteSelected()
+        } else if (selectedPath) {
+          const item = items.find((i) => i.path === selectedPath)
+          if (item) handleDeleteItem(item)
+        }
       } else if (e.key === 'F2' && selectedPath) {
         e.preventDefault()
         const item = items.find((i) => i.path === selectedPath)
@@ -926,22 +1043,28 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         e.preventDefault()
         const idx = sortedAndFilteredItems.findIndex((i) => i.path === selectedPath)
         if (idx < sortedAndFilteredItems.length - 1) {
-          setSelectedPath(sortedAndFilteredItems[idx + 1].path)
+          const next = sortedAndFilteredItems[idx + 1].path
+          setSelectedPath(next)
+          setSelectedPaths([next])
         } else if (sortedAndFilteredItems.length > 0 && idx === -1) {
-          setSelectedPath(sortedAndFilteredItems[0].path)
+          const first = sortedAndFilteredItems[0].path
+          setSelectedPath(first)
+          setSelectedPaths([first])
         }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         const idx = sortedAndFilteredItems.findIndex((i) => i.path === selectedPath)
         if (idx > 0) {
-          setSelectedPath(sortedAndFilteredItems[idx - 1].path)
+          const prev = sortedAndFilteredItems[idx - 1].path
+          setSelectedPath(prev)
+          setSelectedPaths([prev])
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedPath, clipboard, currentPath, items, sortedAndFilteredItems])
+  }, [selectedPath, selectedPaths, clipboard, currentPath, items, sortedAndFilteredItems])
 
   // Auto-scroll selected item into view when returning to explorer
   useEffect(() => {
@@ -1622,30 +1745,44 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
             <span>Note</span>
           </button>
 
-          {selectedPath && !items.find((i) => i.path === selectedPath)?.isDirectory && (
+          {/* Send to AI: Show if 1 or more files (non-folders) are selected */}
+          {(() => {
+            const rawPaths = selectedPaths.length > 0 ? selectedPaths : (selectedPath ? [selectedPath] : [])
+            const filePaths = rawPaths.filter((p) => !items.find((i) => i.path === p)?.isDirectory)
+            if (filePaths.length === 0) return null
+            return (
+              <button
+                className="action-icon-btn btn-send-ai text-emerald"
+                onClick={() => handleSendFilesToAI()}
+                title={`Send ${filePaths.length} file(s) to AI Chatview (Ctrl+Shift+P / Ctrl+Shift+A)`}
+              >
+                <Bot size={14} className="text-emerald" />
+                <span>Send to AI {filePaths.length > 1 ? `(${filePaths.length})` : ''}</span>
+              </button>
+            )
+          })()}
+
+          {/* Copy button when files/folders are selected */}
+          {(selectedPaths.length > 0 || selectedPath) && (
             <button
-              className="action-icon-btn btn-send-ai text-emerald"
-              onClick={() => {
-                const item = items.find((i) => i.path === selectedPath)
-                if (item) handleSendFileToAI(item)
-              }}
-              title="Send selected file to AI Chatview (Ctrl+Shift+P)"
+              className="action-icon-btn"
+              onClick={() => handleCopy()}
+              title={`Copy ${selectedPaths.length || 1} item(s) (Ctrl+C)`}
             >
-              <Bot size={14} className="text-emerald" />
-              <span>Send to AI</span>
+              <Copy size={14} />
+              <span>Copy {selectedPaths.length > 1 ? `(${selectedPaths.length})` : ''}</span>
             </button>
           )}
 
-          {clipboard && (
-            <button
-              className="action-icon-btn btn-paste-active"
-              onClick={() => handlePaste(currentPath)}
-              title={`Paste ${clipboard.paths.length} item(s) (Ctrl+V)`}
-            >
-              <Clipboard size={14} />
-              <span>Paste ({clipboard.paths.length})</span>
-            </button>
-          )}
+          {/* Paste button: Always accessible so user can paste files copied from Windows Explorer or Workbench */}
+          <button
+            className={`action-icon-btn ${clipboard ? 'btn-paste-active' : ''}`}
+            onClick={() => handlePaste(currentPath)}
+            title={clipboard ? `Paste ${clipboard.paths.length} item(s) (Ctrl+V)` : 'Paste files from clipboard (Ctrl+V)'}
+          >
+            <Clipboard size={14} />
+            <span>Paste {clipboard ? `(${clipboard.paths.length})` : ''}</span>
+          </button>
 
           <button
             className="action-icon-btn btn-open-folder"
@@ -1959,7 +2096,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               {/* Table Rows */}
               <div className="details-body-list">
                 {sortedAndFilteredItems.map((item) => {
-                  const isSelected = selectedPath === item.path
+                  const isSelected = selectedPaths.includes(item.path) || selectedPath === item.path
                   const isCut = clipboard?.action === 'cut' && clipboard.paths.includes(item.path)
                   const isNoteFile = item.extension === '.md' || item.extension === '.txt'
                   const isOver = dropTargetFolder === item.path && (item.isDirectory || isNoteFile)
@@ -1985,14 +2122,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                       onDrop={(e) => {
                         handleDropOnFolder(e, item.path)
                       }}
-                      onClick={() => setSelectedPath(item.path)}
+                      onClick={(e) => handleItemSelect(item, e)}
                       onDoubleClick={() => handleItemDoubleClick(item)}
-                      onContextMenu={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setSelectedPath(item.path)
-                        setActiveContextMenu({ item, x: e.clientX, y: e.clientY })
-                      }}
+                      onContextMenu={(e) => handleItemContextMenu(item, e)}
                     >
                       {/* Name Column */}
                       <div className="details-cell col-name" style={{ width: `${colWidths.name}px` }}>
@@ -2023,7 +2155,11 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                           className="item-menu-btn"
                           onClick={(e) => {
                             e.stopPropagation()
-                            setSelectedPath(item.path)
+                            if (!selectedPaths.includes(item.path)) {
+                              setSelectedPath(item.path)
+                              setSelectedPaths([item.path])
+                              lastClickedPathRef.current = item.path
+                            }
                             const rect = e.currentTarget.getBoundingClientRect()
                             setActiveContextMenu({ item, x: rect.right, y: rect.bottom })
                           }}
@@ -2039,7 +2175,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           ) : (
             <div className="explorer-grid-view">
               {sortedAndFilteredItems.map((item) => {
-                const isSelected = selectedPath === item.path
+                const isSelected = selectedPaths.includes(item.path) || selectedPath === item.path
                 const isCut = clipboard?.action === 'cut' && clipboard.paths.includes(item.path)
                 const isNoteFile = item.extension === '.md' || item.extension === '.txt'
                 const isOver = dropTargetFolder === item.path && (item.isDirectory || isNoteFile)
@@ -2065,14 +2201,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                     onDrop={(e) => {
                       handleDropOnFolder(e, item.path)
                     }}
-                    onClick={() => setSelectedPath(item.path)}
+                    onClick={(e) => handleItemSelect(item, e)}
                     onDoubleClick={() => handleItemDoubleClick(item)}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setSelectedPath(item.path)
-                      setActiveContextMenu({ item, x: e.clientX, y: e.clientY })
-                    }}
+                    onContextMenu={(e) => handleItemContextMenu(item, e)}
                   >
                     <div className="grid-icon-area">{renderItemIcon(item)}</div>
                     <div className="grid-info">
@@ -2102,143 +2233,165 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           style={{ top: `${activeContextMenu.y}px`, left: `${activeContextMenu.x}px` }}
           onClick={(e) => e.stopPropagation()}
         >
-          {activeContextMenu.item ? (
-            <>
-              {!activeContextMenu.item.isDirectory && (
-                <>
-                  <button
-                    className="menu-option menu-option-highlight text-emerald"
-                    onClick={() => {
-                      handleSendFileToAI(activeContextMenu.item!)
-                      setActiveContextMenu(null)
-                    }}
-                  >
-                    <Bot size={13} className="text-emerald" />
-                    <span>Send to AI Chat (Upload File)</span>
-                  </button>
+          {activeContextMenu.item ? (() => {
+            const item = activeContextMenu.item
+            const isMulti = selectedPaths.length > 1 && selectedPaths.includes(item.path)
+            const targetPaths = isMulti ? selectedPaths : [item.path]
+            const filePaths = targetPaths.filter((p) => !items.find((i) => i.path === p)?.isDirectory)
+            const count = targetPaths.length
+
+            return (
+              <>
+                {filePaths.length > 0 && (
+                  <>
+                    <button
+                      className="menu-option menu-option-highlight text-emerald"
+                      onClick={() => {
+                        handleSendFilesToAI(targetPaths)
+                        setActiveContextMenu(null)
+                      }}
+                    >
+                      <Bot size={13} className="text-emerald" />
+                      <span>Send to AI Chat ({filePaths.length} File{filePaths.length > 1 ? 's' : ''})</span>
+                    </button>
+                    {!isMulti && (
+                      <button
+                        className="menu-option"
+                        onClick={() => {
+                          handleCopyFileContent(item)
+                          setActiveContextMenu(null)
+                        }}
+                      >
+                        <ClipboardCopy size={13} />
+                        <span>Copy File Content</span>
+                      </button>
+                    )}
+                    {!isMulti && (
+                      <button
+                        className="menu-option menu-option-highlight text-cyan"
+                        onClick={() => {
+                          handleOpenDocInTab(item)
+                          setActiveContextMenu(null)
+                        }}
+                      >
+                        <FileText size={13} className="text-cyan" />
+                        <span>{target === 'book' ? 'Open in Tab (In-Pane Reader)' : 'Open in Tab (In-Pane Editor)'}</span>
+                      </button>
+                    )}
+                    {!isMulti && (
+                      <button
+                        className="menu-option"
+                        onClick={() => {
+                          window.electron?.openPath(item.path)
+                          setActiveContextMenu(null)
+                        }}
+                      >
+                        <ExternalLink size={13} />
+                        <span>Open Outside (System App)</span>
+                      </button>
+                    )}
+                    <div className="menu-divider" />
+                  </>
+                )}
+                {item.isDirectory && !isMulti && (
                   <button
                     className="menu-option"
                     onClick={() => {
-                      handleCopyFileContent(activeContextMenu.item!)
+                      handleItemDoubleClick(item)
                       setActiveContextMenu(null)
                     }}
                   >
-                    <ClipboardCopy size={13} />
-                    <span>Copy File Content</span>
+                    <FolderOpen size={13} />
+                    <span>Open Folder</span>
                   </button>
-                  <button
-                    className="menu-option menu-option-highlight text-cyan"
-                    onClick={() => {
-                      handleOpenDocInTab(activeContextMenu.item!)
-                      setActiveContextMenu(null)
-                    }}
-                  >
-                    <FileText size={13} className="text-cyan" />
-                    <span>{target === 'book' ? 'Open in Tab (In-Pane Reader)' : 'Open in Tab (In-Pane Editor)'}</span>
-                  </button>
+                )}
+                {!isMulti && (
                   <button
                     className="menu-option"
                     onClick={() => {
-                      window.electron?.openPath(activeContextMenu.item!.path)
+                      window.electron?.showItemInFolder(item.path)
                       setActiveContextMenu(null)
                     }}
                   >
-                    <ExternalLink size={13} />
-                    <span>Open Outside (System App)</span>
+                    <Folder size={13} />
+                    <span>Reveal in Windows Explorer</span>
                   </button>
-                  <div className="menu-divider" />
-                </>
-              )}
-              {activeContextMenu.item.isDirectory && (
+                )}
+                <div className="menu-divider" />
                 <button
                   className="menu-option"
                   onClick={() => {
-                    handleItemDoubleClick(activeContextMenu.item!)
+                    handleCut(targetPaths)
                     setActiveContextMenu(null)
                   }}
                 >
-                  <FolderOpen size={13} />
-                  <span>Open Folder</span>
+                  <Scissors size={13} />
+                  <span>Cut {count > 1 ? `(${count} Items)` : ''} (Ctrl+X)</span>
                 </button>
-              )}
-              <button
-                className="menu-option"
-                onClick={() => {
-                  window.electron?.showItemInFolder(activeContextMenu.item!.path)
-                  setActiveContextMenu(null)
-                }}
-              >
-                <Folder size={13} />
-                <span>Reveal in Windows Explorer</span>
-              </button>
-              <div className="menu-divider" />
-              <button
-                className="menu-option"
-                onClick={() => {
-                  handleCut([activeContextMenu.item!.path])
-                  setActiveContextMenu(null)
-                }}
-              >
-                <Scissors size={13} />
-                <span>Cut (Ctrl+X)</span>
-              </button>
-              <button
-                className="menu-option"
-                onClick={() => {
-                  handleCopy([activeContextMenu.item!.path])
-                  setActiveContextMenu(null)
-                }}
-              >
-                <Copy size={13} />
-                <span>Copy (Ctrl+C)</span>
-              </button>
-              {activeContextMenu.item.isDirectory && clipboard && (
                 <button
                   className="menu-option"
                   onClick={() => {
-                    handlePaste(activeContextMenu.item!.path)
+                    handleCopy(targetPaths)
                     setActiveContextMenu(null)
                   }}
                 >
-                  <Clipboard size={13} />
-                  <span>Paste into this Folder (Ctrl+V)</span>
+                  <Copy size={13} />
+                  <span>Copy {count > 1 ? `(${count} Items)` : ''} (Ctrl+C)</span>
                 </button>
-              )}
-              <button
-                className="menu-option"
-                onClick={() => {
-                  navigator.clipboard.writeText(activeContextMenu.item!.path)
-                  onNotify('📋 Copied full path to clipboard')
-                  setActiveContextMenu(null)
-                }}
-              >
-                <Copy size={13} />
-                <span>Copy Full Path</span>
-              </button>
-              <div className="menu-divider" />
-              <button
-                className="menu-option"
-                onClick={() => {
-                  setRenamingItem(activeContextMenu.item!)
-                  setRenameValue(activeContextMenu.item!.name)
-                  setActiveContextMenu(null)
-                }}
-              >
-                <Edit3 size={13} />
-                <span>Rename (F2)</span>
-              </button>
-              <button
-                className="menu-option text-red"
-                onClick={() => {
-                  handleDeleteItem(activeContextMenu.item!)
-                  setActiveContextMenu(null)
-                }}
-              >
-                <Trash2 size={13} />
-                <span>Move to Recycle Bin (Del)</span>
-              </button>
-            </>
-          ) : activeContextMenu.targetFolder ? (
+                {item.isDirectory && (
+                  <button
+                    className="menu-option"
+                    onClick={() => {
+                      handlePaste(item.path)
+                      setActiveContextMenu(null)
+                    }}
+                  >
+                    <Clipboard size={13} />
+                    <span>Paste into this Folder (Ctrl+V)</span>
+                  </button>
+                )}
+                <button
+                  className="menu-option"
+                  onClick={() => {
+                    navigator.clipboard.writeText(isMulti ? targetPaths.join('\n') : item.path)
+                    onNotify(`📋 Copied ${count > 1 ? `${count} paths` : 'full path'} to clipboard`)
+                    setActiveContextMenu(null)
+                  }}
+                >
+                  <Copy size={13} />
+                  <span>Copy {count > 1 ? `${count} Paths` : 'Full Path'}</span>
+                </button>
+                <div className="menu-divider" />
+                {!isMulti && (
+                  <button
+                    className="menu-option"
+                    onClick={() => {
+                      setRenamingItem(item)
+                      setRenameValue(item.name)
+                      setActiveContextMenu(null)
+                    }}
+                  >
+                    <Edit3 size={13} />
+                    <span>Rename (F2)</span>
+                  </button>
+                )}
+                <button
+                  className="menu-option text-red"
+                  onClick={() => {
+                    if (isMulti) {
+                      handleDeleteSelected()
+                    } else {
+                      handleDeleteItem(item)
+                    }
+                    setActiveContextMenu(null)
+                  }}
+                >
+                  <Trash2 size={13} />
+                  <span>Move to Recycle Bin {count > 1 ? `(${count} Items)` : ''} (Del)</span>
+                </button>
+              </>
+            )
+          })() : activeContextMenu.targetFolder ? (
             <>
               <button
                 className="menu-option"
@@ -2250,18 +2403,16 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 <Folder size={13} />
                 <span>Open Folder</span>
               </button>
-              {clipboard && (
-                <button
-                  className="menu-option"
-                  onClick={() => {
-                    handlePaste(activeContextMenu.targetFolder!)
-                    setActiveContextMenu(null)
-                  }}
-                >
-                  <Clipboard size={13} />
-                  <span>Paste into this Folder (Ctrl+V)</span>
-                </button>
-              )}
+              <button
+                className="menu-option"
+                onClick={() => {
+                  handlePaste(activeContextMenu.targetFolder!)
+                  setActiveContextMenu(null)
+                }}
+              >
+                <Clipboard size={13} />
+                <span>Paste into this Folder (Ctrl+V)</span>
+              </button>
               <button
                 className="menu-option"
                 onClick={() => {
@@ -2298,18 +2449,16 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 <Plus size={13} />
                 <span>New File</span>
               </button>
-              {clipboard && (
-                <button
-                  className="menu-option"
-                  onClick={() => {
-                    handlePaste(currentPath)
-                    setActiveContextMenu(null)
-                  }}
-                >
-                  <Clipboard size={13} />
-                  <span>Paste (Ctrl+V)</span>
-                </button>
-              )}
+              <button
+                className="menu-option"
+                onClick={() => {
+                  handlePaste(currentPath)
+                  setActiveContextMenu(null)
+                }}
+              >
+                <Clipboard size={13} />
+                <span>Paste (Ctrl+V)</span>
+              </button>
               <div className="menu-divider" />
               <button
                 className="menu-option"

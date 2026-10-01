@@ -20,8 +20,8 @@ export const writeFileAction: ActionDefinition = {
     openInTab: {
       type: 'boolean',
       required: false,
-      default: true,
-      description: 'Whether to open the newly created file in an editor tab',
+      default: false,
+      description: 'Whether to open the newly created file in an editor tab (default: false)',
     },
   },
   example: {
@@ -35,7 +35,7 @@ export const writeFileAction: ActionDefinition = {
     const subPath = params.path ?? payload.path
     const target = params.target ?? payload.target
     const content = params.content ?? payload.content ?? ''
-    const openInTab = params.openInTab ?? payload.openInTab ?? true
+    const openInTab = Boolean(params.openInTab ?? payload.openInTab ?? false)
 
     const fileTarget = name || subPath || target
     if (!fileTarget) {

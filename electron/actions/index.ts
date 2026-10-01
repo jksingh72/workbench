@@ -7,6 +7,8 @@ import { deleteFileAction } from './deleteFileAction'
 import { openFileAction } from './openFileAction'
 import { batchAction } from './batchAction'
 import { listDirectoryAction } from './listDirectoryAction'
+import { readFileAction } from './readFileAction'
+import { getWorkspaceFoldersAction, setActiveDirectoryAction } from './workspaceActions'
 
 export * from './types'
 export * from './registry'
@@ -18,6 +20,8 @@ export * from './deleteFileAction'
 export * from './openFileAction'
 export * from './batchAction'
 export * from './listDirectoryAction'
+export * from './readFileAction'
+export * from './workspaceActions'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -35,6 +39,9 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(openFileAction)
   registry.register(batchAction)
   registry.register(listDirectoryAction)
+  registry.register(readFileAction)
+  registry.register(getWorkspaceFoldersAction)
+  registry.register(setActiveDirectoryAction)
 
   return registry
 }

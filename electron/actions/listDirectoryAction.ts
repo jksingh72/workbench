@@ -13,8 +13,8 @@ export const listDirectoryAction: ActionDefinition = {
     },
   },
   example: {
-    action: 'count_folders',
-    path: '<directory_path>',
+    action: 'list_directory',
+    path: '.',
   },
   async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult> {
     const params = payload.params || {}

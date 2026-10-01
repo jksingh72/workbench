@@ -8,13 +8,20 @@ export interface ActionResult {
 }
 
 export interface ActionContext {
-  resolveSafePath(inputPath: string, targetPane?: 'book' | 'note'): string
-  getActiveDirectory(targetPane?: 'book' | 'note'): string
+  resolveSafePath(inputPath: string, targetPane?: 'book' | 'note' | 'custom'): string
+  getActiveDirectory(targetPane?: 'book' | 'note' | 'custom'): string
   notify(message: string): void
   refreshExplorer(targetPane?: 'book' | 'note'): void
   openInTab(filePath: string): void
-  dispatch(action: any, targetPane?: 'book' | 'note'): Promise<ActionResult>
+  dispatch(action: any, targetPane?: 'book' | 'note' | 'custom'): Promise<ActionResult>
   confirm(options: { title: string; message: string; detail?: string }): Promise<boolean>
+  getWorkspaceFolders(): {
+    activeTarget: 'book' | 'note' | 'custom'
+    activeDirectory: string
+    bookDirectory: string
+    noteDirectory: string
+  }
+  setActiveTarget(target: 'book' | 'note' | 'custom', customPath?: string): void
 }
 
 export interface ActionDefinition {

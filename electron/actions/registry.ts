@@ -51,13 +51,35 @@ export class ActionRegistry {
    * Generates a dynamic markdown prompt guide listing all available modular actions.
    * This can be fed directly to ChatGPT, Claude, or Gemini.
    */
-  public generatePromptGuide(activeDirectory?: string, customInstructions?: string): string {
+  public generatePromptGuide(
+    workspaceInfo?:
+      | string
+      | {
+          activeTarget: string
+          activeDirectory: string
+          bookDirectory?: string
+          noteDirectory?: string
+        },
+    customInstructions?: string
+  ): string {
     const actionsList = this.getAll()
-    const activeDirText = activeDirectory ? `Active Directory: \`${activeDirectory}\`\n` : ''
+    let workspaceText = ''
+    if (typeof workspaceInfo === 'string') {
+      workspaceText = workspaceInfo ? `Active Directory: \`${workspaceInfo}\`\n` : ''
+    } else if (workspaceInfo) {
+      const targetLabel =
+        workspaceInfo.activeTarget === 'note'
+          ? 'Note View'
+          : workspaceInfo.activeTarget === 'custom'
+          ? 'Custom Directory'
+          : 'Book View'
+
+      workspaceText = `Active Workspace Folders:\n- Current Action Target: ${targetLabel} (\`${workspaceInfo.activeDirectory}\`)\n- Book View Folder: \`${workspaceInfo.bookDirectory || 'None'}\`\n- Note View Folder: \`${workspaceInfo.noteDirectory || 'None'}\`\n(All relative file actions execute inside Current Action Target. Use \`set_active_directory\` to switch)\n`
+    }
 
     const lines: string[] = [
       `You are integrated with Workbench Desktop as an automated coding and filesystem assistant.`,
-      activeDirText,
+      workspaceText,
       `When the user asks you to create folders, write code files, scaffold projects, or perform file operations, you MUST output a single \`\`\`workbench:action code block containing JSON.`,
       `Workbench will automatically intercept and execute the action on the user's computer.`,
       ``,
@@ -83,6 +105,12 @@ export class ActionRegistry {
 
     lines.push(`### Batch Execution:`)
     lines.push(`You can also output multiple actions as a JSON array in a single \`\`\`workbench:action block to run them sequentially.`)
+    lines.push(``)
+    lines.push(`### Action Execution Feedback Loop:`)
+    lines.push(`After Workbench executes your action on the local machine, it will automatically return an observation message to this chat:`)
+    lines.push(`\`[Workbench Action Result: ✅ ...]\` (or \`❌ ...\` on error)`)
+    lines.push(`Use this feedback to verify what happened, self-correct if needed, or proceed to the next step.`)
+    lines.push(``)
     lines.push(
       'Always respond briefly and provide the ```workbench:action block. Workbench will execute it locally.'
     )

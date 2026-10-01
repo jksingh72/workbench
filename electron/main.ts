@@ -437,37 +437,88 @@ function registerIpcHandlers() {
     return await aiHandler.sendFileToAI(filePath, instruction)
   })
 
+  // Cross-Pane: Send Multiple Files to AI (Batch Upload)
+  ipcMain.handle('workbench:send-files-to-ai', async (_, { filePaths, instruction }: { filePaths: string[]; instruction?: string }) => {
+    if (!aiHandler) return { success: false, error: 'AI handler not ready' }
+    return await aiHandler.sendFilesToAI(filePaths, instruction)
+  })
+
   // Workbench Action Model Handlers
   ipcMain.on('workbench:action-triggered', async (_, payload) => {
     try {
-      await ActionDispatcher.getInstance().dispatch(payload)
+      const result = await ActionDispatcher.getInstance().dispatch(payload)
+      if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
+        await aiHandler.handleActionExecutionFeedback(payload, result)
+      }
     } catch (err: any) {
       console.error('[Main] action-triggered error:', err)
+      if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
+        await aiHandler.handleActionExecutionFeedback(payload, {
+          success: false,
+          message: err.message,
+          error: err.message,
+        })
+      }
     }
   })
 
   ipcMain.handle('workbench:execute-action', async (_, payload) => {
-    return await ActionDispatcher.getInstance().dispatch(payload)
+    const result = await ActionDispatcher.getInstance().dispatch(payload)
+    if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
+      await aiHandler.handleActionExecutionFeedback(payload, result)
+    }
+    return result
   })
 
-  ipcMain.handle('workbench:set-action-mode', async (_, params: { enabled: boolean; customInstructions?: string }) => {
+  ipcMain.handle('workbench:set-auto-feedback-loop', (_, enabled: boolean) => {
+    ActionDispatcher.getInstance().setAutoFeedbackLoop(Boolean(enabled))
+    return { success: true, enabled: Boolean(enabled) }
+  })
+
+  ipcMain.handle('workbench:get-auto-feedback-loop', () => {
+    return ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()
+  })
+
+  ipcMain.handle('workbench:get-workspace-folders', () => {
+    return ActionDispatcher.getInstance().getWorkspaceFolders()
+  })
+
+  ipcMain.handle('workbench:set-action-target', (_, { target, customPath }: { target: 'book' | 'note' | 'custom'; customPath?: string }) => {
+    ActionDispatcher.getInstance().setActiveTarget(target, customPath)
+    return ActionDispatcher.getInstance().getWorkspaceFolders()
+  })
+
+  ipcMain.handle('workbench:browse-directory', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null
+    const res = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Select Action Working Directory',
+    })
+    if (!res.canceled && res.filePaths.length > 0) {
+      return res.filePaths[0]
+    }
+    return null
+  })
+
+  ipcMain.handle('workbench:set-action-mode', async (_, params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) => {
     const enabled = Boolean(params?.enabled)
     ActionDispatcher.getInstance().setActionMode(enabled)
     if (aiHandler) {
       aiHandler.setActionMode(enabled)
-      if (enabled) {
-        const prompt = ActionDispatcher.getInstance().getPromptGuide('book', params?.customInstructions)
+      // Only prime AI if explicitly requested (params.primeAI === true).
+      // NEVER auto-prime on app launch, component mount, toggle, or settings save!
+      if (enabled && params?.primeAI === true) {
+        const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, params?.customInstructions)
         const primeResult = await aiHandler.enableActionMode(prompt)
         return { enabled: true, ...primeResult }
       }
     }
-    return { success: true, enabled: false }
+    return { success: true, enabled }
   })
 
   ipcMain.handle('workbench:get-action-prompt', async (_, params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') => {
-    const targetPane = typeof params === 'string' ? params : (params?.targetPane || 'book')
     const customInstructions = typeof params === 'object' ? params?.customInstructions : undefined
-    return ActionDispatcher.getInstance().getPromptGuide(targetPane, customInstructions)
+    return ActionDispatcher.getInstance().getPromptGuide(undefined, customInstructions)
   })
 
   ipcMain.on('workbench:report-active-directory', (_, data: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) => {
@@ -494,7 +545,7 @@ function registerIpcHandlers() {
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAExJREFUWEft0rERwCAMBEEa/TfpvE4LhBhyyD2c9SvdjR2PZfX4mAC4/fEZAOAJAOABAOABAOABAOAJAOABAOABAOABAOABAOAJAOABAODnAX5sUo1k8zI4/AAAAABJRU5ErkJggg=='
       )
 
-      aiHandler?.setDraggingFile(validPaths[0])
+      aiHandler?.setDraggingFiles(validPaths)
 
       event.sender.startDrag({
         file: validPaths[0],
@@ -505,9 +556,7 @@ function registerIpcHandlers() {
       // Retain the dragged file reference during the drag loop.
       // Auto-clear after 15s if the drag was abandoned without drop
       setTimeout(() => {
-        if (aiHandler?.getDraggingFile() === validPaths[0]) {
-          aiHandler.setDraggingFile(null)
-        }
+        aiHandler?.setDraggingFile(null)
       }, 15000)
 
       if (!event.sender.isDestroyed()) {
@@ -522,25 +571,24 @@ function registerIpcHandlers() {
     }
   })
 
-  // Modular Handler: ChatView Dropped File Upload
-  ipcMain.on('workbench:chatview-file-dropped', async (_, data: { fileName?: string; filePath?: string }) => {
+  // Modular Handler: ChatView Dropped File Upload (single or multiple)
+  ipcMain.on('workbench:chatview-file-dropped', async (_, data: { fileName?: string; filePath?: string; filePaths?: string[] }) => {
     try {
-      const targetPath = data?.filePath || aiHandler?.getDraggingFile()
+      const targetPaths = data?.filePaths || (data?.filePath ? [data.filePath] : (aiHandler?.getDraggingFiles() || []))
       aiHandler?.setDraggingFile(null)
 
-      if (targetPath && aiHandler) {
-        const res = await aiHandler.sendFileToAI(targetPath)
-        const fileName = path.basename(targetPath)
+      if (targetPaths.length > 0 && aiHandler) {
+        const res = await aiHandler.sendFilesToAI(targetPaths)
         if (mainWindow && !mainWindow.isDestroyed()) {
           if (res.success) {
             mainWindow.webContents.send(
               'workbench:notify',
-              `🚀 Uploaded ${res.fileName || fileName} to Chat!`
+              `🚀 Uploaded ${targetPaths.length} file${targetPaths.length > 1 ? 's' : ''} to Chat!`
             )
           } else {
             mainWindow.webContents.send(
               'workbench:notify',
-              `⚠️ ${res.error || 'Failed to upload file to Chat'}`
+              `⚠️ ${res.error || 'Failed to upload files to Chat'}`
             )
           }
         }
@@ -551,17 +599,21 @@ function registerIpcHandlers() {
   })
 
   // Modular Handler: ChatView Pasted File Upload (Ctrl+V into ChatView)
-  ipcMain.on('workbench:chatview-file-pasted', async (_, data: { fileName?: string; filePath?: string }) => {
+  ipcMain.on('workbench:chatview-file-pasted', async (_, data: { fileName?: string; filePath?: string; filePaths?: string[] }) => {
     try {
-      const targetPath = data?.filePath || aiHandler?.consumeClipboardFile()
-      if (targetPath && aiHandler) {
-        const res = await aiHandler.sendFileToAI(targetPath)
-        const fileName = path.basename(targetPath)
+      const targetPaths = data?.filePaths || (data?.filePath ? [data.filePath] : (aiHandler?.consumeClipboardFiles() || []))
+      if (targetPaths.length > 0 && aiHandler) {
+        const res = await aiHandler.sendFilesToAI(targetPaths)
         if (mainWindow && !mainWindow.isDestroyed()) {
           if (res.success) {
             mainWindow.webContents.send(
               'workbench:notify',
-              `📎 Attached ${res.fileName || fileName} to Chat!`
+              `📎 Attached ${targetPaths.length} file${targetPaths.length > 1 ? 's' : ''} to Chat!`
+            )
+          } else {
+            mainWindow.webContents.send(
+              'workbench:notify',
+              `⚠️ ${res.error || 'Failed to attach files to Chat'}`
             )
           }
         }
@@ -577,25 +629,128 @@ function registerIpcHandlers() {
       const validPaths = paths.filter((p) => p && fs.existsSync(p))
       if (validPaths.length === 0) return { success: false, error: 'No valid files to copy' }
 
-      // Strictly single-file staging: only track the file from this single latest copy event
-      const singleFile = validPaths[0]
-      aiHandler?.setClipboardFile(singleFile)
+      aiHandler?.setClipboardFiles(validPaths)
 
-      // Fallback plain text in clipboard
-      clipboard.writeText(singleFile)
+      // Fallback plain text in clipboard (one per line)
+      clipboard.writeText(validPaths.join('\r\n'))
 
       // On Windows: Execute PowerShell Set-Clipboard -Path to populate true OS CF_HDROP format
       if (process.platform === 'win32') {
-        const escapedPath = `'${singleFile.replace(/'/g, "''")}'`
-        const psCommand = `powershell.exe -NoProfile -Command "Set-Clipboard -Path ${escapedPath}"`
+        const escapedPaths = validPaths.map((p) => `'${p.replace(/'/g, "''")}'`).join(',')
+        const psCommand = `powershell.exe -NoProfile -Command "Set-Clipboard -Path @(${escapedPaths})"`
         exec(psCommand, { windowsHide: true }, (err) => {
           if (err) console.warn('[Main] Set-Clipboard warning:', err)
         })
       }
 
-      return { success: true, count: 1 }
+      return { success: true, count: validPaths.length }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to copy files to clipboard' }
+    }
+  })
+
+  // Modular Handler: Read Files from System Clipboard (Windows File Explorer / CF_HDROP / URI-list)
+  ipcMain.handle('workbench:get-clipboard-files', async () => {
+    try {
+      const resultPaths: string[] = []
+
+      // 1. Try reading CF_HDROP buffer directly on Windows
+      if (process.platform === 'win32') {
+        try {
+          const hdrop = clipboard.readBuffer('CF_HDROP')
+          if (hdrop && hdrop.length >= 20) {
+            const pFiles = hdrop.readUInt32LE(0)
+            const fWide = hdrop.readUInt32LE(16)
+            if (pFiles < hdrop.length) {
+              const sub = hdrop.subarray(pFiles)
+              const encoding = fWide !== 0 ? 'utf16le' : 'utf8'
+              const rawStr = sub.toString(encoding)
+              const parts = rawStr.split('\0').map((s) => s.trim()).filter((s) => s.length > 0)
+              for (const p of parts) {
+                if (fs.existsSync(p)) {
+                  resultPaths.push(path.normalize(p))
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[Main] CF_HDROP parse warning:', err)
+        }
+
+        // 2. Try FileNameW format
+        if (resultPaths.length === 0) {
+          try {
+            const fileNameW = clipboard.read('FileNameW')
+            if (fileNameW && fileNameW.trim() && fs.existsSync(fileNameW.trim())) {
+              resultPaths.push(path.normalize(fileNameW.trim()))
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 3. Try text/uri-list
+      if (resultPaths.length === 0) {
+        try {
+          const uriList = clipboard.read('text/uri-list')
+          if (uriList && uriList.trim()) {
+            const lines = uriList.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith('file://'))
+            for (const line of lines) {
+              try {
+                const parsed = new URL(line)
+                let filePath = decodeURIComponent(parsed.pathname)
+                if (process.platform === 'win32' && filePath.startsWith('/')) {
+                  filePath = filePath.slice(1)
+                }
+                if (fs.existsSync(filePath)) {
+                  resultPaths.push(path.normalize(filePath))
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 4. Try plain text lines (in case paths were copied as text)
+      if (resultPaths.length === 0) {
+        try {
+          const text = clipboard.readText()
+          if (text && text.trim()) {
+            const lines = text.split(/\r?\n/).map((l) => l.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+            for (const l of lines) {
+              if (fs.existsSync(l)) {
+                resultPaths.push(path.normalize(l))
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 5. PowerShell Get-Clipboard -Format FileDropList fallback on Windows
+      if (resultPaths.length === 0 && process.platform === 'win32') {
+        try {
+          const psCommand = `powershell.exe -NoProfile -Command "(Get-Clipboard -Format FileDropList).FullName"`
+          const output = await new Promise<string>((resolve) => {
+            exec(psCommand, { windowsHide: true, timeout: 2000 }, (err, stdout) => {
+              if (err || !stdout) resolve('')
+              else resolve(stdout)
+            })
+          })
+          if (output && output.trim()) {
+            const psLines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+            for (const p of psLines) {
+              if (fs.existsSync(p)) {
+                resultPaths.push(path.normalize(p))
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      const uniquePaths = [...new Set(resultPaths)]
+      return { success: true, paths: uniquePaths }
+    } catch (err: any) {
+      console.error('[Main] get-clipboard-files error:', err)
+      return { success: false, paths: [], error: err.message || 'Failed to read clipboard files' }
     }
   })
 

@@ -122,6 +122,8 @@ contextBridge.exposeInMainWorld('electron', {
   // Cross-Pane Movement & Transfer APIs
   sendFileToAI: (filePath: string, instruction?: string) =>
     ipcRenderer.invoke('workbench:send-file-to-ai', { filePath, instruction }),
+  sendFilesToAI: (filePaths: string[], instruction?: string) =>
+    ipcRenderer.invoke('workbench:send-files-to-ai', { filePaths, instruction }),
   sendTextToAI: (params: { text: string; templateKey?: string; customPrompt?: string }) =>
     ipcRenderer.invoke('workbench:send-text-to-ai', params),
   extractSelection: (target: 'book' | 'ai' | 'note' = 'book') =>
@@ -154,6 +156,8 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:read-pdf', params),
   copyFilesToClipboard: (paths: string[], isCut?: boolean) =>
     ipcRenderer.invoke('workbench:copy-files-to-clipboard', { paths, isCut }),
+  getClipboardFiles: () =>
+    ipcRenderer.invoke('workbench:get-clipboard-files'),
 
   startDragFile: (filePath: string | string[]) =>
     ipcRenderer.send('workbench:start-drag-file', filePath),
@@ -213,10 +217,20 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.send('workbench:report-active-directory', params),
   executeAction: (payload: any) =>
     ipcRenderer.invoke('workbench:execute-action', payload),
-  setActionMode: (params: { enabled: boolean; customInstructions?: string }) =>
+  setActionMode: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) =>
     ipcRenderer.invoke('workbench:set-action-mode', params),
+  setAutoFeedbackLoop: (enabled: boolean) =>
+    ipcRenderer.invoke('workbench:set-auto-feedback-loop', enabled),
+  getAutoFeedbackLoop: () =>
+    ipcRenderer.invoke('workbench:get-auto-feedback-loop'),
   getActionPrompt: (params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') =>
     ipcRenderer.invoke('workbench:get-action-prompt', params),
+  getWorkspaceFolders: () =>
+    ipcRenderer.invoke('workbench:get-workspace-folders'),
+  setActionTarget: (params: { target: 'book' | 'note' | 'custom'; customPath?: string }) =>
+    ipcRenderer.invoke('workbench:set-action-target', params),
+  browseDirectory: () =>
+    ipcRenderer.invoke('workbench:browse-directory'),
   onExplorerRefreshNeeded: (callback: (data: { target?: 'book' | 'note'; path?: string }) => void) => {
     const listener = (_: any, data: any) => callback(data)
     ipcRenderer.on('workbench:explorer-refresh-needed', listener)
@@ -236,6 +250,20 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('workbench:active-directory-changed', listener)
     return () => {
       ipcRenderer.removeListener('workbench:active-directory-changed', listener)
+    }
+  },
+  onActionTargetChanged: (callback: (data: { activeTarget: 'book' | 'note' | 'custom'; activeDirectory: string; bookDirectory: string; noteDirectory: string; customDirectory?: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:action-target-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:action-target-changed', listener)
+    }
+  },
+  onNavigateToFolder: (callback: (data: { target: 'book' | 'note'; path: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:navigate-to-folder', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:navigate-to-folder', listener)
     }
   },
 })

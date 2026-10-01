@@ -60,7 +60,7 @@ export const createProjectAction: ActionDefinition = {
     ctx.notify(`🚀 Project created: ${projectFolderName} (${createdCount} files)`)
     ctx.refreshExplorer(targetPane)
 
-    if (primaryFileToOpen) {
+    if (primaryFileToOpen && Boolean(payload.openInTab || params.openInTab)) {
       ctx.openInTab(primaryFileToOpen)
     }
 

@@ -16,6 +16,11 @@ export interface ChatPaneProps {
   onExtractCode?: () => void
   onExportTranscript?: () => void
   onNotify?: (msg: string) => void
+  actionMode?: boolean
+  onToggleActionMode?: () => void
+  isActivatingAction?: boolean
+  customInstructions?: string
+  onOpenActionModeModal?: () => void
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
@@ -31,6 +36,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onExtractCode,
   onExportTranscript,
   onNotify,
+  actionMode,
+  onToggleActionMode,
+  isActivatingAction,
+  customInstructions,
+  onOpenActionModeModal,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounter = useRef(0)
@@ -69,67 +79,94 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setIsDragOver(false)
 
     // Check in-memory dragged file
-    let filePath = (window as any).__workbench_dragged_file || ''
-
-    // Check for custom workbench file or JSON path from LocalExplorer
-    if (!filePath) {
-      filePath = e.dataTransfer.getData('application/x-workbench-file') || ''
-    }
-    if (!filePath) {
-      const jsonData = e.dataTransfer.getData('application/json')
-      if (jsonData) {
-        try {
-          const { paths } = JSON.parse(jsonData)
-          if (paths && paths.length > 0) filePath = paths[0]
-        } catch (_) {}
-      }
+    // Check for JSON paths from LocalExplorer
+    let filePaths: string[] = []
+    const jsonData = e.dataTransfer.getData('application/json')
+    if (jsonData) {
+      try {
+        const parsed = JSON.parse(jsonData)
+        if (Array.isArray(parsed?.paths) && parsed.paths.length > 0) {
+          filePaths = parsed.paths
+        }
+      } catch (_) {}
     }
 
     // Check for external OS file drop
-    if (!filePath && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      filePath = (e.dataTransfer.files[0] as any).path || ''
+    if (filePaths.length === 0 && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        const p = (e.dataTransfer.files[i] as any).path
+        if (p) filePaths.push(p)
+      }
     }
 
-    // Check text/plain (could be file path or highlighted quote)
-    if (!filePath) {
+    // Check in-memory dragged file or custom workbench file header
+    if (filePaths.length === 0) {
+      const single = (window as any).__workbench_dragged_file || e.dataTransfer.getData('application/x-workbench-file')
+      if (single) filePaths.push(single)
+    }
+
+    // Check text/plain (could be newline-separated file paths or highlighted quote)
+    if (filePaths.length === 0) {
       const text = e.dataTransfer.getData('text/plain')
-      if (text && (text.includes(':\\') || text.startsWith('/'))) {
-        filePath = text.trim()
-      } else if (text && text.trim()) {
-        // Plain text snippet dropped from BookView or NoteView
-        onNotify?.(`🤖 Sending dropped text to ${currentSource.name}...`)
-        try {
-          if (window.electron?.sendTextToAI) {
-            const res = await window.electron.sendTextToAI({ text: text.trim(), templateKey: 'explain' })
-            if (res.success) {
-              onNotify?.(`✨ Transferred text snippet to ${currentSource.name} prompt!`)
-            } else {
-              onNotify?.(`⚠️ ${res.error || 'Failed to send text to AI'}`)
+      if (text) {
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+        const isPathList = lines.length > 0 && lines.every((l) => l.includes(':\\') || l.startsWith('/'))
+        if (isPathList) {
+          filePaths = lines
+        } else if (text.trim()) {
+          // Plain text snippet dropped from BookView or NoteView
+          onNotify?.(`🤖 Sending dropped text to ${currentSource.name}...`)
+          try {
+            if (window.electron?.sendTextToAI) {
+              const res = await window.electron.sendTextToAI({ text: text.trim(), templateKey: 'explain' })
+              if (res.success) {
+                onNotify?.(`✨ Transferred text snippet to ${currentSource.name} prompt!`)
+              } else {
+                onNotify?.(`⚠️ ${res.error || 'Failed to send text to AI'}`)
+              }
             }
+          } catch (err: any) {
+            onNotify?.(`⚠️ Error: ${err.message}`)
+          }
+          return
+        }
+      }
+    }
+
+    if (filePaths.length > 0) {
+      if (window.electron?.sendFilesToAI) {
+        onNotify?.(`🤖 Sending ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} to ${currentSource.name}...`)
+        try {
+          const res = await window.electron.sendFilesToAI(filePaths)
+          if (res.success) {
+            if (res.uploaded) {
+              onNotify?.(`🚀 Uploaded ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} to ${currentSource.name}!`)
+            } else {
+              onNotify?.(`✨ Pasted ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} into ${currentSource.name} prompt!`)
+            }
+          } else {
+            onNotify?.(`⚠️ ${res.error || 'Failed to send files'}`)
           }
         } catch (err: any) {
           onNotify?.(`⚠️ Error: ${err.message}`)
         }
-        return
-      }
-    }
-
-    if (filePath && window.electron?.sendFileToAI) {
-      const fileName = filePath.split(/[\\/]/).pop() || 'file'
-      onNotify?.(`🤖 Sending ${fileName} to ${currentSource.name}...`)
-      try {
-        const res = await window.electron.sendFileToAI(filePath)
-        if (res.success) {
-          if (res.uploaded) {
-            onNotify?.(`🚀 Uploaded ${res.fileName || fileName} to ${currentSource.name}!`)
+      } else if (window.electron?.sendFileToAI) {
+        const fileName = filePaths[0].split(/[\\/]/).pop() || 'file'
+        onNotify?.(`🤖 Sending ${fileName} to ${currentSource.name}...`)
+        try {
+          const res = await window.electron.sendFileToAI(filePaths[0])
+          if (res.success) {
+            if (res.uploaded) {
+              onNotify?.(`🚀 Uploaded ${res.fileName || fileName} to ${currentSource.name}!`)
+            } else {
+              onNotify?.(`✨ Pasted ${res.fileName || fileName} into ${currentSource.name} prompt!`)
+            }
           } else {
-            onNotify?.(`✨ Pasted ${res.fileName || fileName} into ${currentSource.name} prompt!`)
+            onNotify?.(`⚠️ ${res.error || 'Failed to send file'}`)
           }
-        } else {
-          onNotify?.(`⚠️ ${res.error || 'Failed to send file'}`)
+        } catch (err: any) {
+          onNotify?.(`⚠️ Error: ${err.message}`)
         }
-      } catch (err: any) {
-        onNotify?.(`⚠️ Error: ${err.message}`)
       }
     }
   }
@@ -154,6 +191,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         aiSources={aiSources}
         activeAISourceId={activeAISourceId}
         onOpenAISourceModal={onOpenAISourceModal}
+        actionMode={actionMode}
+        onToggleActionMode={onToggleActionMode}
+        isActivatingAction={isActivatingAction}
+        customInstructions={customInstructions}
+        onOpenActionModeModal={onOpenActionModeModal}
       />
       <div className="native-view-anchor" ref={anchorRef}>
         {isDragOver && (

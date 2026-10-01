@@ -33,6 +33,9 @@ export class ActionDispatcher {
   private mainWindow: BrowserWindow | null = null
   private registry: ActionRegistry
   private actionModeEnabled: boolean = false
+  private autoFeedbackLoopEnabled: boolean = true
+  private activeTarget: 'book' | 'note' | 'custom' = 'book'
+  private customDirectory: string = ''
 
   private activeDirectories: {
     book: string
@@ -70,6 +73,77 @@ export class ActionDispatcher {
     return this.actionModeEnabled
   }
 
+  public setAutoFeedbackLoop(enabled: boolean) {
+    this.autoFeedbackLoopEnabled = enabled
+    console.log(`[ActionDispatcher] Action feedback loop is now: ${enabled ? 'ENABLED' : 'DISABLED'}`)
+  }
+
+  public isAutoFeedbackLoopEnabled(): boolean {
+    return this.autoFeedbackLoopEnabled && this.actionModeEnabled
+  }
+
+  public setActiveTarget(target: 'book' | 'note' | 'custom', customPath?: string) {
+    this.activeTarget = target
+    if (customPath && fs.existsSync(customPath)) {
+      const normalized = path.normalize(customPath)
+      if (target === 'book') {
+        this.activeDirectories.book = normalized
+      } else if (target === 'note') {
+        this.activeDirectories.note = normalized
+      } else {
+        this.customDirectory = normalized
+      }
+    }
+    console.log(`[ActionDispatcher] Active target switched to: ${target} (${this.getActiveDirectory()})`)
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('workbench:action-target-changed', this.getWorkspaceFolders())
+      if (customPath && (target === 'book' || target === 'note')) {
+        this.mainWindow.webContents.send('workbench:navigate-to-folder', {
+          target,
+          path: path.normalize(customPath),
+        })
+      }
+    }
+  }
+
+  public getActiveTarget(): 'book' | 'note' | 'custom' {
+    return this.activeTarget
+  }
+
+  public getWorkspaceFolders(): {
+    activeTarget: 'book' | 'note' | 'custom'
+    activeDirectory: string
+    bookDirectory: string
+    noteDirectory: string
+    customDirectory: string
+  } {
+    const bookDir = this.activeDirectories.book || this.activeRoots.book || ''
+    const noteDir = this.activeDirectories.note || this.activeRoots.note || ''
+    let activeDir = ''
+
+    if (this.activeTarget === 'note') {
+      activeDir = noteDir || bookDir
+    } else if (this.activeTarget === 'custom' && this.customDirectory) {
+      activeDir = this.customDirectory
+    } else {
+      activeDir = bookDir || noteDir
+    }
+
+    if (!activeDir || !fs.existsSync(activeDir)) {
+      activeDir = process.platform === 'win32'
+        ? path.join(process.env.USERPROFILE || 'C:\\', 'Documents')
+        : path.join(process.env.HOME || '/', 'Documents')
+    }
+
+    return {
+      activeTarget: this.activeTarget,
+      activeDirectory: activeDir,
+      bookDirectory: bookDir,
+      noteDirectory: noteDir,
+      customDirectory: this.customDirectory || '',
+    }
+  }
+
   public setMainWindow(win: BrowserWindow) {
     this.mainWindow = win
   }
@@ -95,22 +169,30 @@ export class ActionDispatcher {
     if (rootPath && fs.existsSync(rootPath)) {
       this.activeRoots[target] = path.normalize(rootPath)
     }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('workbench:action-target-changed', this.getWorkspaceFolders())
+    }
   }
 
-  public getActiveDirectory(target: 'book' | 'note' = 'book'): string {
-    const dir = this.activeDirectories[target] || this.activeRoots[target]
-    if (dir && fs.existsSync(dir)) {
-      return dir
+  public getActiveDirectory(targetPane?: 'book' | 'note' | 'custom'): string {
+    const target = targetPane || this.activeTarget
+    if (target === 'note') {
+      const dir = this.activeDirectories.note || this.activeRoots.note
+      if (dir && fs.existsSync(dir)) return dir
+    } else if (target === 'custom' && this.customDirectory && fs.existsSync(this.customDirectory)) {
+      return this.customDirectory
+    } else if (target === 'book') {
+      const dir = this.activeDirectories.book || this.activeRoots.book
+      if (dir && fs.existsSync(dir)) return dir
     }
-    return process.platform === 'win32'
-      ? path.join(process.env.USERPROFILE || 'C:\\', 'Documents')
-      : path.join(process.env.HOME || '/', 'Documents')
+
+    return this.getWorkspaceFolders().activeDirectory
   }
 
   /**
    * Resolves a relative or absolute path safely.
    */
-  public resolveSafePath(inputPath: string, targetPane: 'book' | 'note' = 'book'): string {
+  public resolveSafePath(inputPath: string, targetPane?: 'book' | 'note' | 'custom'): string {
     const trimmed = (inputPath || '').trim()
     if (!trimmed) {
       throw new Error('Path cannot be empty')
@@ -120,7 +202,7 @@ export class ActionDispatcher {
     if (path.isAbsolute(trimmed)) {
       resolved = path.normalize(trimmed)
     } else {
-      const baseDir = this.getActiveDirectory(targetPane)
+      const baseDir = this.getActiveDirectory(targetPane || this.activeTarget)
       const cleanRelative = trimmed.replace(/^[/\\]+/, '')
       resolved = path.resolve(baseDir, cleanRelative)
     }
@@ -173,16 +255,20 @@ export class ActionDispatcher {
    */
   private createContext(): ActionContext {
     return {
-      resolveSafePath: (inputPath: string, targetPane?: 'book' | 'note') =>
-        this.resolveSafePath(inputPath, targetPane),
-      getActiveDirectory: (targetPane?: 'book' | 'note') =>
-        this.getActiveDirectory(targetPane),
+      resolveSafePath: (inputPath: string, targetPane?: 'book' | 'note' | 'custom') =>
+        this.resolveSafePath(inputPath, targetPane || this.activeTarget),
+      getActiveDirectory: (targetPane?: 'book' | 'note' | 'custom') =>
+        this.getActiveDirectory(targetPane || this.activeTarget),
       notify: (message: string) => this.notify(message),
-      refreshExplorer: (targetPane?: 'book' | 'note') => this.refreshExplorer(targetPane),
+      refreshExplorer: (targetPane?: 'book' | 'note') =>
+        this.refreshExplorer(targetPane || (this.activeTarget === 'note' ? 'note' : 'book')),
       openInTab: (filePath: string) => this.openInTab(filePath),
-      dispatch: (action: any, targetPane?: 'book' | 'note') =>
-        this.dispatch(action, targetPane),
+      dispatch: (action: any, targetPane?: 'book' | 'note' | 'custom') =>
+        this.dispatch(action, targetPane || this.activeTarget),
       confirm: (options) => this.confirm(options),
+      getWorkspaceFolders: () => this.getWorkspaceFolders(),
+      setActiveTarget: (target: 'book' | 'note' | 'custom', customPath?: string) =>
+        this.setActiveTarget(target, customPath),
     }
   }
 
@@ -191,8 +277,9 @@ export class ActionDispatcher {
    */
   public async dispatch(
     rawPayload: any,
-    targetPane: 'book' | 'note' = 'book'
+    targetPane?: 'book' | 'note' | 'custom'
   ): Promise<ActionResult> {
+    const effectivePane: 'book' | 'note' = (targetPane || this.activeTarget) === 'note' ? 'note' : 'book'
     try {
       if (!this.actionModeEnabled) {
         console.log('[ActionDispatcher] Action blocked: Action Mode is OFF in Workbench.')
@@ -242,7 +329,7 @@ export class ActionDispatcher {
         const batchHandler = this.registry.get('batch')
         if (batchHandler) {
           const ctx = this.createContext()
-          return await batchHandler.execute(ctx, { actions: payload }, targetPane)
+          return await batchHandler.execute(ctx, { actions: payload }, effectivePane)
         }
       }
 
@@ -267,9 +354,9 @@ export class ActionDispatcher {
         }
       }
 
-      console.log(`[ActionDispatcher] Executing modular action: ${handler.id} (${actionType})`)
+      console.log(`[ActionDispatcher] Executing modular action: ${handler.id} (${actionType}) on target "${effectivePane}"`)
       const ctx = this.createContext()
-      const result = await handler.execute(ctx, payload, targetPane)
+      const result = await handler.execute(ctx, payload, effectivePane)
       return result
     } catch (err: any) {
       console.error('[ActionDispatcher] Execution error:', err)
@@ -283,11 +370,10 @@ export class ActionDispatcher {
   }
 
   /**
-   * Generates prompt guide for AI models
+   * Generates prompt guide for AI models with both Book and Note folder context
    */
-  public getPromptGuide(targetPane: 'book' | 'note' = 'book', customInstructions?: string): string {
-    const activeDir = this.getActiveDirectory(targetPane)
-    return this.registry.generatePromptGuide(activeDir, customInstructions)
+  public getPromptGuide(_targetPane?: 'book' | 'note', customInstructions?: string): string {
+    return this.registry.generatePromptGuide(this.getWorkspaceFolders(), customInstructions)
   }
 
   public notify(message: string) {

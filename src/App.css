@@ -1500,6 +1500,31 @@ input:checked + .slider-round:before {
   color: #f1f5f9;
 }
 
+.action-mode-prime-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(245, 158, 11, 0.14);
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.action-mode-prime-btn:hover {
+  background: rgba(245, 158, 11, 0.25);
+  color: #fde68a;
+}
+
+.action-mode-prime-btn.pulsing {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 .active-workspace-badge {
   display: flex;
   align-items: center;

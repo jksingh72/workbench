@@ -83,6 +83,7 @@ export interface ElectronAPI {
 
   // Cross-Pane Movement & Transfer APIs
   sendFileToAI: (filePath: string, instruction?: string) => Promise<{ success: boolean; uploaded?: boolean; fileName?: string; error?: string }>
+  sendFilesToAI?: (filePaths: string[], instruction?: string) => Promise<{ success: boolean; count?: number; uploaded?: boolean; fileNames?: string[]; error?: string }>
   sendTextToAI: (params: { text: string; templateKey?: string; customPrompt?: string }) => Promise<AskAIResult>
   extractSelection: (target?: 'book' | 'ai' | 'note') => Promise<{ success: boolean; text?: string; error?: string }>
   extractLastResponse?: () => Promise<{ success: boolean; data?: { selectedText: string; prompt: string; response: string; fullMarkdown: string }; error?: string }>
@@ -111,6 +112,7 @@ export interface ElectronAPI {
     truncated?: boolean
   }>
   copyFilesToClipboard?: (paths: string[], isCut?: boolean) => Promise<{ success: boolean; count?: number; error?: string }>
+  getClipboardFiles?: () => Promise<{ success: boolean; paths: string[]; error?: string }>
   startDragFile?: (filePath: string | string[]) => void
   onDragEnded?: (callback: () => void) => () => void
 
@@ -124,12 +126,19 @@ export interface ElectronAPI {
   // Workbench Action Model APIs
   reportActiveDirectory?: (params: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) => void
   executeAction?: (payload: any) => Promise<{ success: boolean; action?: string; message: string; createdPath?: string; error?: string; details?: any }>
-  setActionMode?: (params: { enabled: boolean; customInstructions?: string }) => Promise<{ success: boolean; enabled: boolean; error?: string }>
+  setActionMode?: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) => Promise<{ success: boolean; enabled: boolean; error?: string; alreadyPrimed?: boolean }>
+  setAutoFeedbackLoop?: (enabled: boolean) => Promise<{ success: boolean; enabled: boolean }>
+  getAutoFeedbackLoop?: () => Promise<boolean>
   getActionPrompt?: (params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') => Promise<string>
+  getWorkspaceFolders?: () => Promise<{ activeTarget: 'book' | 'note' | 'custom'; activeDirectory: string; bookDirectory: string; noteDirectory: string; customDirectory?: string }>
+  setActionTarget?: (params: { target: 'book' | 'note' | 'custom'; customPath?: string }) => Promise<{ activeTarget: 'book' | 'note' | 'custom'; activeDirectory: string; bookDirectory: string; noteDirectory: string; customDirectory?: string }>
+  browseDirectory?: () => Promise<string | null>
   scanAiActions?: () => Promise<{ success: boolean; executedCount: number; message: string; results?: any[] }>
   onExplorerRefreshNeeded?: (callback: (data: { target?: 'book' | 'note'; path?: string }) => void) => () => void
   onActionOpenTab?: (callback: (data: { filePath: string }) => void) => () => void
   onActiveDirectoryChanged?: (callback: (data: { target: 'book' | 'note'; currentPath: string; rootPath?: string }) => void) => () => void
+  onActionTargetChanged?: (callback: (data: { activeTarget: 'book' | 'note' | 'custom'; activeDirectory: string; bookDirectory: string; noteDirectory: string; customDirectory?: string }) => void) => () => void
+  onNavigateToFolder?: (callback: (data: { target: 'book' | 'note'; path: string }) => void) => () => void
 }
 
 export interface SystemRootItem {

@@ -426,13 +426,16 @@ try {
       }
 
       // E. Must be inside an assistant container or turn
+      const host = (window.location?.hostname || '').toLowerCase()
       const isAssistant = Boolean(
+        host.includes('perplexity') ||
         el.closest('[data-message-author-role="assistant"]') ||
         el.closest('.agent-turn') ||
         el.closest('[data-testid="assistant-message"]') ||
         el.closest('.font-claude-message') ||
         el.closest('model-response') ||
         el.closest('.assistant-turn') ||
+        el.closest('.prose') ||
         el.querySelector('[data-message-author-role="assistant"]') ||
         el.querySelector('.agent-turn')
       )
