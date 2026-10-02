@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('electron', {
   saveNoteSources: (params: { sources: any[]; activeSourceId?: string }) =>
     ipcRenderer.invoke('workbench:save-note-sources', params),
   showNoteSourceMenu: () => ipcRenderer.send('workbench:show-note-source-menu'),
+  showAIExportMenu: () => ipcRenderer.send('workbench:show-ai-export-menu'),
   onNoteSourceChanged: (callback: (data: { activeSourceId: string; activeSource: any }) => void) => {
     const listener = (_: any, data: any) => callback(data)
     ipcRenderer.on('workbench:note-source-changed', listener)
@@ -219,6 +220,22 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:execute-action', payload),
   setActionMode: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) =>
     ipcRenderer.invoke('workbench:set-action-mode', params),
+  getChatPrimeStatus: () =>
+    ipcRenderer.invoke('workbench:get-chat-prime-status'),
+  onChatPrimeStatusChanged: (callback: (data: { isPrimed: boolean }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:chat-prime-status-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:chat-prime-status-changed', listener)
+    }
+  },
+  onActionModeChanged: (callback: (data: { enabled: boolean }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:action-mode-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:action-mode-changed', listener)
+    }
+  },
   setAutoFeedbackLoop: (enabled: boolean) =>
     ipcRenderer.invoke('workbench:set-auto-feedback-loop', enabled),
   getAutoFeedbackLoop: () =>

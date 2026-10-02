@@ -903,6 +903,16 @@ export const App: React.FC = () => {
   }, [noteSources, activeNoteSourceId])
 
   // Action Mode configuration handlers
+  useEffect(() => {
+    const unsub = window.electron?.onActionModeChanged?.((data) => {
+      setActionMode(Boolean(data?.enabled))
+      try {
+        localStorage.setItem('workbench:action-mode', String(data?.enabled))
+      } catch (_) {}
+    })
+    return () => unsub?.()
+  }, [])
+
   const handleOpenActionModeModal = () => {
     setIsActionModeModalOpen(true)
     window.electron?.setViewsVisible(false)

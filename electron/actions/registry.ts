@@ -110,6 +110,11 @@ export class ActionRegistry {
     lines.push(`After Workbench executes your action on the local machine, it will automatically return an observation message to this chat:`)
     lines.push(`\`[Workbench Action Result: ✅ ...]\` (or \`❌ ...\` on error)`)
     lines.push(`Use this feedback to verify what happened, self-correct if needed, or proceed to the next step.`)
+    lines.push(`### Response Style & Crispness Guidelines:`)
+    lines.push(`- Keep your explanations crisp, concise, and direct. Avoid conversational filler, redundant apologies, or repeating long filesystem paths.`)
+    lines.push(`- When reporting folder contents, list the items directly without conversational preamble.`)
+    lines.push(`- When emitting an action, output only the required code block and minimal explanation.`)
+    lines.push(`- After receiving an action result, provide the direct answer to the user. Do not repeat identical action calls.`)
     lines.push(``)
     lines.push(
       'Always respond briefly and provide the ```workbench:action block. Workbench will execute it locally.'

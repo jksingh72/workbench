@@ -300,38 +300,68 @@ try {
   (function initWorkbenchActionObserver() {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
 
-    let actionModeEnabled = false
+    let actionModeEnabled = true
+    let userExplicitlyDisabled = false
     try {
-      ipcRenderer.on('workbench:action-mode-changed', (_e, enabled: boolean) => {
-        actionModeEnabled = Boolean(enabled)
+      ipcRenderer.invoke('workbench:get-action-mode').then((res) => {
+        if (res && typeof res.enabled === 'boolean') {
+          actionModeEnabled = res.enabled
+          if (!res.enabled) userExplicitlyDisabled = true
+          checkPrimedStatus()
+        }
+      }).catch(() => {})
+
+      ipcRenderer.on('workbench:action-mode-changed', (_e, dataOrBool: any) => {
+        const enabled = typeof dataOrBool === 'boolean' ? dataOrBool : Boolean(dataOrBool?.enabled)
+        actionModeEnabled = enabled
+        userExplicitlyDisabled = !enabled
+        checkPrimedStatus()
+      })
+    } catch (_) {}
+
+    let isAiChatView = false
+    try {
+      ipcRenderer.invoke('workbench:is-ai-view').then((res) => {
+        if (res === true) {
+          isAiChatView = true
+          scanForActions()
+          checkPrimedStatus()
+        }
+      }).catch(() => {})
+
+      ipcRenderer.on('workbench:set-view-role', (_e, role) => {
+        if (role === 'ai') {
+          isAiChatView = true
+          scanForActions()
+          checkPrimedStatus()
+        }
       })
     } catch (_) {}
 
     function isChatSite(): boolean {
+      if (isAiChatView) return true
       const host = (window.location?.hostname || '').toLowerCase()
-      if (!host) return true // In early load stages allow observer to initialize
+      if (!host) return false
       return (
         host.includes('chatgpt') ||
+        host.includes('openai') ||
         host.includes('claude') ||
+        host.includes('anthropic') ||
         host.includes('gemini') ||
         host.includes('perplexity') ||
         host.includes('deepseek') ||
         host.includes('grok') ||
+        host.includes('x.ai') ||
         host.includes('copilot') ||
-        host.includes('localhost')
+        host.includes('microsoft') ||
+        host.includes('poe') ||
+        host.includes('mistral') ||
+        host.includes('localhost') ||
+        host.includes('127.0.0.1')
       )
     }
 
-    const executedCodeHashes = new Set<string>()
-
-    function simpleHash(str: string): string {
-      let hash = 0
-      for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i)
-        hash |= 0
-      }
-      return String(hash)
-    }
+    const executedElements = new WeakSet<HTMLElement>()
 
     function extractActionsFromText(fullText: string): Array<{ payload: any; raw: string }> {
       const actions: Array<{ payload: any; raw: string }> = []
@@ -389,12 +419,20 @@ try {
         if (window.getComputedStyle(el).display === 'none') return false
       } catch (_) {}
 
-      // B. Skip input forms, textareas, and contenteditables
-      if (el.closest('#prompt-textarea') || el.closest('form') || el.closest('[contenteditable="true"]')) {
+      // B. Skip input forms, textareas, and contenteditables across all platforms
+      if (
+        el.closest('#prompt-textarea') ||
+        el.closest('form') ||
+        el.closest('[contenteditable="true"]') ||
+        el.closest('textarea') ||
+        el.closest('input') ||
+        el.closest('.ql-editor') ||
+        el.closest('rich-textarea')
+      ) {
         return false
       }
 
-      // C. Skip user messages (check ancestors, self, AND descendants)
+      // C. Skip user messages across all platforms (check ancestors, self, AND descendants)
       if (
         el.closest('[data-message-author-role="user"]') ||
         el.querySelector('[data-message-author-role="user"]') ||
@@ -404,7 +442,9 @@ try {
         el.querySelector('.font-user-message') ||
         el.closest('[data-testid="user-message"]') ||
         el.querySelector('[data-testid="user-message"]') ||
-        el.closest('user-query')
+        el.closest('user-query') ||
+        el.closest('[class*="user-message"]') ||
+        el.closest('[data-is-user="true"]')
       ) {
         return false
       }
@@ -425,31 +465,55 @@ try {
         return false
       }
 
-      // E. Must be inside an assistant container or turn
-      const host = (window.location?.hostname || '').toLowerCase()
-      const isAssistant = Boolean(
-        host.includes('perplexity') ||
-        el.closest('[data-message-author-role="assistant"]') ||
-        el.closest('.agent-turn') ||
-        el.closest('[data-testid="assistant-message"]') ||
-        el.closest('.font-claude-message') ||
-        el.closest('model-response') ||
-        el.closest('.assistant-turn') ||
-        el.closest('.prose') ||
-        el.querySelector('[data-message-author-role="assistant"]') ||
-        el.querySelector('.agent-turn')
-      )
-      if (!isAssistant) {
+      // E. Must be inside an AI chat view
+      if (!isChatSite()) {
         return false
       }
 
       return true
     }
 
+    function hideFeedbackBubbles() {
+      try {
+        const keywords = [
+          '[Workbench Action Result:',
+          'You are integrated with Workbench Desktop',
+          'Available Workbench Actions'
+        ]
+        const turnSelectors = [
+          'article',
+          'user-query',
+          'model-response',
+          '[data-message-author-role="user"]',
+          'div[data-testid="user-message"]',
+          'div.font-user-message',
+          '[class*="user-message"]',
+          '[class*="chat-message"]',
+          'div[class*="message-row"]',
+          'div[class*="message-bubble"]'
+        ]
+        const candidateElements = document.querySelectorAll(turnSelectors.join(', '))
+        candidateElements.forEach((el) => {
+          const htmlEl = el as HTMLElement
+          if (htmlEl.getAttribute('data-wb-hidden') === 'true') return
+          const text = htmlEl.innerText || ''
+          if (keywords.some((k) => text.includes(k))) {
+            htmlEl.setAttribute('data-wb-hidden', 'true')
+            htmlEl.style.display = 'none'
+          }
+        })
+      } catch (_) {}
+    }
+
     function checkAndExecuteAction(containerEl: HTMLElement) {
       if (!actionModeEnabled) return
       if (!isChatSite()) return
-      if (containerEl.getAttribute('data-workbench-executed') === 'true') {
+      if (
+        containerEl.getAttribute('data-workbench-executed') === 'true' ||
+        executedElements.has(containerEl) ||
+        containerEl.closest('[data-workbench-executed="true"]') ||
+        containerEl.parentElement?.querySelector('.workbench-action-badge')
+      ) {
         return
       }
 
@@ -470,25 +534,65 @@ try {
       }
 
       const extracted = extractActionsFromText(rawText)
-      for (const item of extracted) {
-        const hash = simpleHash(item.raw)
-        if (executedCodeHashes.has(hash)) continue
-        executedCodeHashes.add(hash)
-        containerEl.setAttribute('data-workbench-executed', 'true')
+      if (extracted.length === 0) return
 
+      // Tag container immediately
+      executedElements.add(containerEl)
+      containerEl.setAttribute('data-workbench-executed', 'true')
+
+      // Target full code wrapper across Gemini, Claude, ChatGPT, Grok, etc.
+      const targetBox =
+        containerEl.closest('pre') ||
+        containerEl.closest('code-block') ||
+        containerEl.closest('[class*="code-container"]') ||
+        containerEl.closest('[class*="code-block"]') ||
+        (containerEl.closest('div.rounded-md') && containerEl.closest('div.rounded-md')?.querySelector('code') ? (containerEl.closest('div.rounded-md') as HTMLElement) : null) ||
+        containerEl
+
+      if (targetBox) {
+        executedElements.add(targetBox)
+        targetBox.setAttribute('data-workbench-executed', 'true')
+        targetBox.querySelectorAll('code, pre').forEach((c) => {
+          executedElements.add(c as HTMLElement)
+          c.setAttribute('data-workbench-executed', 'true')
+        })
+      }
+
+      for (const item of extracted) {
         // Send to main process
         ipcRenderer.send('workbench:action-triggered', item.payload)
 
-        // Inject visual confirmation badge
+        // Inject sleek collapsible tool badge & auto-collapse raw JSON code block
         try {
+          const actionType = item.payload.action || item.payload.type || 'action'
+          const actionParam = item.payload.path || item.payload.folderName || item.payload.filePath || item.payload.targetDirectory || '.'
           const badge = document.createElement('div')
           badge.className = 'workbench-action-badge'
           badge.style.cssText =
-            'display:flex;align-items:center;gap:6px;padding:4px 8px;margin:6px 0;background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.4);border-radius:4px;font-size:11px;font-family:sans-serif;color:#34d399;font-weight:600;user-select:none;'
-          badge.innerHTML = `<span>⚡ Executed in Workbench: ${item.payload.action || item.payload.type}</span>`
+            'display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin:6px 0;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#34d399;font-weight:500;cursor:pointer;user-select:none;transition:all 0.15s ease;'
+          badge.title = 'Click to show / hide raw action JSON'
+          badge.innerHTML = `
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:12px;">⚡</span>
+              <span style="font-weight:600;color:#10b981;">${actionType}</span>
+              <span style="color:#94a3b8;font-size:11px;font-family:monospace;">(${actionParam})</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;">
+              <span>Executed</span>
+              <span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span>
+            </div>
+          `
 
-          if (containerEl.parentNode) {
-            containerEl.parentNode.insertBefore(badge, containerEl)
+          const collapseTarget = targetBox || containerEl
+          collapseTarget.style.display = 'none'
+          badge.addEventListener('click', () => {
+            const isHidden = collapseTarget.style.display === 'none'
+            collapseTarget.style.display = isHidden ? 'block' : 'none'
+            const arrow = badge.querySelector('.wb-badge-arrow')
+            if (arrow) arrow.textContent = isHidden ? '▲' : '▼'
+          })
+          if (collapseTarget.parentNode) {
+            collapseTarget.parentNode.insertBefore(badge, collapseTarget)
           }
         } catch (_) {}
       }
@@ -497,32 +601,428 @@ try {
     let scanTimeout: any = null
     function scanForActions() {
       if (!actionModeEnabled) return
+      if (!isChatSite()) return
       if (scanTimeout) clearTimeout(scanTimeout)
       scanTimeout = setTimeout(() => {
-        const blocks = document.querySelectorAll(
-          'pre, code, div[data-message-author-role="assistant"], article, div.markdown'
-        )
-        blocks.forEach((el) => {
-          checkAndExecuteAction(el as HTMLElement)
+        const codeElements: HTMLElement[] = []
+        document.querySelectorAll(
+          'pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
+        ).forEach((el) => {
+          codeElements.push(el as HTMLElement)
+          if ((el as any).shadowRoot) {
+            try {
+              (el as any).shadowRoot.querySelectorAll('pre, code').forEach((s: any) => codeElements.push(s))
+            } catch (_) {}
+          }
         })
-      }, 350)
+        codeElements.forEach((el) => {
+          checkAndExecuteAction(el)
+        })
+      }, 150)
+    }
+
+    let lastReportedPrimed: boolean | null = null
+    let primeCheckTimeout: any = null
+
+    function checkPrimedStatus() {
+      if (!isChatSite()) return
+      if (primeCheckTimeout) clearTimeout(primeCheckTimeout)
+      primeCheckTimeout = setTimeout(() => {
+        try {
+          const hasHiddenPrompt = Boolean(document.querySelector('.wb-hidden-action-prompt'))
+          const text = (document.body ? (document.body.innerText || document.body.textContent || '') : '')
+          const hasPromptGuide =
+            hasHiddenPrompt ||
+            text.includes('You are integrated with Workbench Desktop') ||
+            text.includes('Available Workbench Actions')
+
+          // If the chat conversation already has the prompt guide in its history,
+          // ensure action execution is active so existing chats work immediately.
+          if (hasPromptGuide && !actionModeEnabled && !userExplicitlyDisabled) {
+            actionModeEnabled = true
+            ipcRenderer.invoke('workbench:set-action-mode', { enabled: true }).catch(() => {})
+          }
+
+          const isPrimed = hasPromptGuide && actionModeEnabled
+
+          if (isPrimed !== lastReportedPrimed) {
+            lastReportedPrimed = isPrimed
+            ipcRenderer.send('workbench:chat-prime-status-changed', { isPrimed })
+          }
+        } catch (_) {}
+      }, 300)
     }
 
     // Set up MutationObserver on document
     const observer = new MutationObserver(() => {
       scanForActions()
+      checkPrimedStatus()
+      hideFeedbackBubbles()
     })
 
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      checkPrimedStatus()
+      hideFeedbackBubbles()
     } else {
       document.addEventListener('DOMContentLoaded', () => {
         observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+        checkPrimedStatus()
+        hideFeedbackBubbles()
       })
     }
 
+    window.addEventListener('popstate', checkPrimedStatus)
+    try {
+      const origPush = history.pushState
+      history.pushState = function(...args) {
+        const ret = origPush.apply(this, args)
+        checkPrimedStatus()
+        return ret
+      }
+      const origReplace = history.replaceState
+      history.replaceState = function(...args) {
+        const ret = origReplace.apply(this, args)
+        checkPrimedStatus()
+        return ret
+      }
+    } catch (_) {}
+
     // Periodic sweep for safety
-    setInterval(scanForActions, 1500)
+    setInterval(() => {
+      scanForActions()
+      checkPrimedStatus()
+    }, 1500)
+  })()
+} catch (_) {}
+
+// =========================================================================
+// Modular Section: In-Chat Workbench Commands (/status, /connect, /prime)
+// Intercepts /status and /connect commands right in the chat prompt box,
+// rendering live connection state and allowing 1-click priming directly in chat.
+// =========================================================================
+try {
+  (function initInChatCommands() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+    function isChatSite(): boolean {
+      const host = (window.location?.hostname || '').toLowerCase()
+      if (!host) return true
+      return (
+        host.includes('chatgpt') ||
+        host.includes('openai') ||
+        host.includes('claude') ||
+        host.includes('anthropic') ||
+        host.includes('gemini') ||
+        host.includes('perplexity') ||
+        host.includes('deepseek') ||
+        host.includes('grok') ||
+        host.includes('copilot') ||
+        host.includes('localhost') ||
+        host.includes('127.0.0.1')
+      )
+    }
+
+    let isActionModeGloballyEnabled = true
+    try {
+      ipcRenderer.on('workbench:action-mode-changed', (_e, dataOrBool: any) => {
+        const enabled = typeof dataOrBool === 'boolean' ? dataOrBool : Boolean(dataOrBool?.enabled)
+        isActionModeGloballyEnabled = enabled
+        const existing = document.getElementById('wb-chat-status-card')
+        if (existing) {
+          renderStatusCard('status')
+        }
+      })
+    } catch (_) {}
+
+    function getInputField(): HTMLElement | null {
+      return (
+        document.querySelector('#prompt-textarea') ||
+        document.querySelector('div[contenteditable="true"].ProseMirror') ||
+        document.querySelector('rich-textarea div[contenteditable="true"]') ||
+        document.querySelector('.ql-editor') ||
+        document.querySelector('#chat-input') ||
+        document.querySelector('div[contenteditable="true"]') ||
+        document.querySelector('textarea')
+      ) as HTMLElement | null
+    }
+
+    function getInputValue(el: HTMLElement): string {
+      if (el.tagName === 'TEXTAREA') {
+        return (el as HTMLTextAreaElement).value || ''
+      }
+      return el.innerText || el.textContent || ''
+    }
+
+    function clearInputField(el: HTMLElement) {
+      if (el.tagName === 'TEXTAREA') {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
+        if (nativeSetter) {
+          nativeSetter.call(el, '')
+        } else {
+          (el as HTMLTextAreaElement).value = ''
+        }
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+      } else {
+        el.textContent = ''
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: '' }))
+      }
+    }
+
+    function checkIsPrimed(): boolean {
+      try {
+        if (document.querySelector('.wb-hidden-action-prompt')) return true
+        const text = document.body ? document.body.innerText || document.body.textContent || '' : ''
+        return (
+          text.includes('You are integrated with Workbench Desktop') ||
+          text.includes('Available Workbench Actions')
+        )
+      } catch (_) {
+        return false
+      }
+    }
+
+    async function renderStatusCard(type: 'status' | 'connected') {
+      const existing = document.getElementById('wb-chat-status-card')
+      if (existing) existing.remove()
+
+      let currentActionTarget = 'note'
+      let currentActiveDir = ''
+      try {
+        const wf = await ipcRenderer.invoke('workbench:get-workspace-folders')
+        if (wf) {
+          currentActionTarget = wf.activeTarget || 'note'
+          currentActiveDir = wf.activeDirectory || ''
+        }
+      } catch (_) {}
+
+      const isPrimed = type === 'connected' ? true : (isActionModeGloballyEnabled && checkIsPrimed())
+      const folderName = currentActiveDir
+        ? currentActiveDir.split(/[/\\]/).filter(Boolean).pop() || currentActiveDir
+        : 'None'
+      const targetLabel =
+        currentActionTarget === 'note'
+          ? 'Note View'
+          : currentActionTarget === 'custom'
+          ? 'Custom Directory'
+          : 'Book View'
+
+      const card = document.createElement('div')
+      card.id = 'wb-chat-status-card'
+      card.style.cssText = `
+        display: block;
+        margin: 10px auto;
+        max-width: 680px;
+        width: calc(100% - 24px);
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.96));
+        border: 1px solid ${isPrimed ? 'rgba(52, 211, 153, 0.4)' : 'rgba(245, 158, 11, 0.4)'};
+        border-radius: 8px;
+        padding: 12px 16px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #f1f5f9;
+        font-size: 13px;
+        line-height: 1.5;
+        z-index: 9999;
+        animation: wbFadeIn 0.2s ease-out;
+      `
+
+      if (!document.getElementById('wb-chat-cmd-styles')) {
+        const style = document.createElement('style')
+        style.id = 'wb-chat-cmd-styles'
+        style.textContent = `
+          @keyframes wbFadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          .wb-cmd-btn-prime {
+            background: rgba(245, 158, 11, 0.22);
+            border: 1px solid rgba(245, 158, 11, 0.5);
+            color: #fbbf24;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .wb-cmd-btn-prime:hover {
+            background: rgba(245, 158, 11, 0.38);
+            color: #fef08a;
+          }
+          .wb-cmd-btn-disable {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #94a3b8;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .wb-cmd-btn-disable:hover {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+          }
+          .wb-cmd-close-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px 6px;
+            line-height: 1;
+            border-radius: 3px;
+          }
+          .wb-cmd-close-btn:hover {
+            color: #f1f5f9;
+            background: rgba(255, 255, 255, 0.1);
+          }
+        `
+        document.head.appendChild(style)
+      }
+
+      if (isPrimed) {
+        card.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399;">
+              <span>⚡</span> <span>Workbench</span>
+              <span style="font-size:11px; background:rgba(52,211,153,0.15); border:1px solid rgba(52,211,153,0.4); padding:1px 6px; border-radius:3px;">● Primed</span>
+            </div>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
+          </div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:4px;">
+            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#a7f3d0;">${targetLabel}: ${folderName}</code>
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${currentActiveDir || 'No path'})</span>
+          </div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-bottom:8px;">
+            This chat is primed and connected to local files.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="wb-cmd-btn-disable" id="wb-cmd-trigger-disable-btn">Disable</button>
+          </div>
+        `
+      } else {
+        card.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#f59e0b;">
+              <span>⚡</span> <span>Workbench</span>
+              <span style="font-size:11px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); padding:1px 6px; border-radius:3px; color:#fbbf24;">○ Unprimed</span>
+            </div>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
+          </div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">
+            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#fde68a;">${targetLabel}: ${folderName}</code>
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${currentActiveDir || 'No path'})</span>
+          </div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-bottom:8px;">
+            This chat is not connected to local files yet.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="wb-cmd-btn-prime" id="wb-cmd-trigger-prime-btn">⚡ Prime Chat</button>
+            <span style="font-size:11px; color:#64748b;">or type <code style="color:#cbd5e1;">/connect</code></span>
+          </div>
+        `
+      }
+
+      const inputEl = getInputField()
+      const formEl = inputEl
+        ? inputEl.closest('form') || inputEl.closest('fieldset') || inputEl.closest('div[class*="relative"]')
+        : null
+      if (formEl && formEl.parentNode) {
+        formEl.parentNode.insertBefore(card, formEl)
+      } else {
+        document.body.appendChild(card)
+      }
+
+      const closeBtn = card.querySelector('#wb-card-close-btn')
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => card.remove())
+      }
+
+      const primeBtn = card.querySelector('#wb-cmd-trigger-prime-btn')
+      if (primeBtn) {
+        primeBtn.addEventListener('click', () => {
+          primeBtn.textContent = '⚡ Priming...'
+          ;(primeBtn as HTMLButtonElement).disabled = true
+          isActionModeGloballyEnabled = true
+          ipcRenderer.send('workbench:prime-active-chat', {})
+          setTimeout(() => {
+            renderStatusCard('connected')
+          }, 1200)
+        })
+      }
+
+      const disableBtn = card.querySelector('#wb-cmd-trigger-disable-btn')
+      if (disableBtn) {
+        disableBtn.addEventListener('click', () => {
+          disableBtn.textContent = 'Disabling...'
+          ;(disableBtn as HTMLButtonElement).disabled = true
+          isActionModeGloballyEnabled = false
+          ipcRenderer.invoke('workbench:set-action-mode', { enabled: false })
+          setTimeout(() => {
+            renderStatusCard('status')
+          }, 300)
+        })
+      }
+    }
+
+    function handleCommand(cmd: string) {
+      if (cmd === '/status') {
+        renderStatusCard('status')
+      } else if (cmd === '/connect' || cmd === '/prime') {
+        isActionModeGloballyEnabled = true
+        ipcRenderer.send('workbench:prime-active-chat', {})
+        renderStatusCard('connected')
+      }
+    }
+
+    window.addEventListener(
+      'keydown',
+      (e: KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          if (!isChatSite()) return
+          const inputEl = getInputField()
+          if (!inputEl) return
+          const val = getInputValue(inputEl).trim().toLowerCase()
+          if (val === '/status' || val === '/connect' || val === '/prime') {
+            e.preventDefault()
+            e.stopPropagation()
+            e.stopImmediatePropagation()
+            clearInputField(inputEl)
+            handleCommand(val)
+          }
+        }
+      },
+      true
+    )
+
+    window.addEventListener(
+      'click',
+      (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null
+        const sendBtn = target?.closest(
+          'button[data-testid*="send"], button[aria-label*="Send"], button[aria-label*="send"], button[type="submit"]'
+        )
+        if (sendBtn) {
+          if (!isChatSite()) return
+          const inputEl = getInputField()
+          if (!inputEl) return
+          const val = getInputValue(inputEl).trim().toLowerCase()
+          if (val === '/status' || val === '/connect' || val === '/prime') {
+            e.preventDefault()
+            e.stopPropagation()
+            e.stopImmediatePropagation()
+            clearInputField(inputEl)
+            handleCommand(val)
+          }
+        }
+      },
+      true
+    )
   })()
 } catch (_) {}
 

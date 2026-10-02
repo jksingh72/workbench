@@ -20,7 +20,8 @@ import {
   BookMarked,
   Settings2,
   Folder,
-  Zap
+  Zap,
+  Power
 } from 'lucide-react'
 import { NavState, BookSource, AISource, NoteSource } from '../types/electron'
 
@@ -76,8 +77,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   activeNoteSourceId = 'onenote',
   onOpenNoteSourceModal,
   isAskingAI = false,
-  actionMode: propActionMode,
-  onToggleActionMode: propToggleActionMode,
+  actionMode: _propActionMode,
+  onToggleActionMode: _propToggleActionMode,
   isActivatingAction: propIsActivatingAction,
   customInstructions: propCustomInstructions,
   onOpenActionModeModal,
@@ -122,18 +123,16 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   const isBook = target === 'book'
   const isAI = target === 'ai'
   const isNote = target === 'note'
-  const [localActionMode, setLocalActionMode] = useState<boolean>(() => {
+  const [, setLocalActionMode] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('workbench:action-mode') === 'true'
+      return localStorage.getItem('workbench:action-mode') !== 'false'
     } catch {
-      return false
+      return true
     }
   })
-  const actionMode = typeof propActionMode === 'boolean' ? propActionMode : localActionMode
 
   const [localIsActivating, setLocalIsActivating] = useState(false)
   const isActivatingAction = typeof propIsActivatingAction === 'boolean' ? propIsActivatingAction : localIsActivating
-  const [isPriming, setIsPriming] = useState(false)
 
   const [localCustomInstructions] = useState<string>(() => {
     try {
@@ -157,8 +156,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
     noteDirectory: '',
     customDirectory: '',
   })
-  const [showFolderDropdown, setShowFolderDropdown] = useState(false)
-  const folderDropdownRef = useRef<HTMLDivElement>(null)
+
+  const [isChatPrimed, setIsChatPrimed] = useState<boolean>(false)
 
   // Sync workspace folders and Action Mode state on mount + live folder navigation
   useEffect(() => {
@@ -175,6 +174,14 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
     }
     fetchWorkspaceFolders()
 
+    window.electron?.getChatPrimeStatus?.().then((res) => {
+      if (res) setIsChatPrimed(Boolean(res.isPrimed))
+    })
+
+    const unsubPrime = window.electron?.onChatPrimeStatusChanged?.((data) => {
+      setIsChatPrimed(Boolean(data?.isPrimed))
+    })
+
     const unsubTarget = window.electron?.onActionTargetChanged?.((wf) => {
       if (wf) {
         setWorkspaceFolders(wf)
@@ -186,168 +193,94 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
       fetchWorkspaceFolders()
     })
 
+    const unsubMode = window.electron?.onActionModeChanged?.((data) => {
+      const enabled = Boolean(data?.enabled)
+      setLocalActionMode(enabled)
+      if (!enabled) {
+        setIsChatPrimed(false)
+      } else {
+        window.electron?.getChatPrimeStatus?.().then((res) => {
+          if (res) setIsChatPrimed(Boolean(res.isPrimed))
+        })
+      }
+    })
+
     // Ensure backend is aware of restored Action Mode state
     try {
-      const savedMode = localStorage.getItem('workbench:action-mode') === 'true'
+      const savedMode = localStorage.getItem('workbench:action-mode') !== 'false'
       const savedInst = localStorage.getItem('workbench:action-custom-instructions') || ''
-      if (savedMode) {
-        window.electron?.setActionMode?.({ enabled: true, customInstructions: savedInst, primeAI: false })
-      }
+      window.electron?.setActionMode?.({ enabled: savedMode, customInstructions: savedInst, primeAI: false })
     } catch (_) {}
 
     return () => {
       unsubTarget?.()
       unsubDir?.()
+      unsubPrime?.()
+      unsubMode?.()
     }
   }, [isAI])
 
-  // Close folder dropdown on outside click
-  useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (folderDropdownRef.current && !folderDropdownRef.current.contains(e.target as Node)) {
-        setShowFolderDropdown(false)
-      }
-    }
-    if (showFolderDropdown) {
-      document.addEventListener('mousedown', handleOutsideClick)
-    }
-    return () => document.removeEventListener('mousedown', handleOutsideClick)
-  }, [showFolderDropdown])
-
-  const handleSelectTarget = async (target: 'book' | 'note') => {
-    setShowFolderDropdown(false)
-    try {
-      const currentDir = target === 'note' ? workspaceFolders.noteDirectory : workspaceFolders.bookDirectory
-      if (!currentDir) {
-        // If not opened in this view yet, let the user browse for a folder directly
-        const picked = await window.electron?.browseDirectory?.()
-        if (picked) {
-          const updated = await window.electron?.setActionTarget?.({ target, customPath: picked })
-          if (updated) {
-            setWorkspaceFolders(updated)
-            setActiveDirectory(updated.activeDirectory)
-            const label = target === 'note' ? 'Note View' : 'Book View'
-            window.electron?.showNotification?.({
-              title: 'Action Target Set',
-              body: `🎯 Action Mode now targets ${label}: ${picked}`,
-              type: 'success',
-            })
-          }
-        }
-        return
-      }
-
-      const updated = await window.electron?.setActionTarget?.({ target })
-      if (updated) {
-        setWorkspaceFolders(updated)
-        setActiveDirectory(updated.activeDirectory)
-        const label = target === 'note' ? 'Note View' : 'Book View'
-        window.electron?.showNotification?.({
-          title: 'Action Target Changed',
-          body: `🎯 Action Mode now targets ${label}: ${updated.activeDirectory}`,
-          type: 'success',
-        })
-      }
-    } catch (_) {}
-  }
-
-  const handlePickCustomFolder = async () => {
-    setShowFolderDropdown(false)
-    try {
-      const picked = await window.electron?.browseDirectory?.()
-      if (picked) {
-        const updated = await window.electron?.setActionTarget?.({ target: 'custom', customPath: picked })
-        if (updated) {
-          setWorkspaceFolders(updated)
-          setActiveDirectory(updated.activeDirectory)
-          window.electron?.showNotification?.({
-            title: 'Action Target Changed',
-            body: `🎯 Action Mode now targets: ${picked}`,
-            type: 'success',
-          })
-        }
-      }
-    } catch (_) {}
-  }
-
-  const handleToggleActionMode = async () => {
-    if (propToggleActionMode) {
-      propToggleActionMode()
-      return
-    }
-    const nextState = !actionMode
+  const handleDisableChat = async () => {
     setLocalIsActivating(true)
     try {
       const res = await window.electron?.setActionMode?.({
-        enabled: nextState,
-        customInstructions: nextState ? customInstructions.trim() : undefined,
-        primeAI: nextState, // When explicitly toggled ON by user, prime the active chat!
+        enabled: false,
       })
       if (res?.success) {
-        setLocalActionMode(nextState)
+        setLocalActionMode(false)
+        setIsChatPrimed(false)
         try {
-          localStorage.setItem('workbench:action-mode', String(nextState))
+          localStorage.setItem('workbench:action-mode', 'false')
         } catch (_) {}
-        if (nextState) {
-          window.electron?.showNotification?.({
-            title: '⚡ Action Mode: ON',
-            body: res?.alreadyPrimed
-              ? 'Action Mode active (chat already primed). Local execution enabled.'
-              : 'Action Mode active! Chat primed in background (prompt hidden).',
-            type: 'success',
-          })
-        } else {
-          window.electron?.showNotification?.({
-            title: '⚡ Action Mode: OFF',
-            body: 'Automated local filesystem execution paused.',
-            type: 'info',
-          })
-        }
-      } else {
         window.electron?.showNotification?.({
-          title: '⚠️ Action Mode Error',
-          body: res?.error || 'Failed to toggle Action Mode',
-          type: 'error',
+          title: 'Chat Disconnected',
+          body: 'Chat is now unprimed. Local file actions are disabled.',
+          type: 'info',
         })
       }
     } catch (err: any) {
-      console.error('Toggle Action Mode error:', err)
+      console.error('Disable Chat error:', err)
     } finally {
       setLocalIsActivating(false)
     }
   }
 
-  const handlePrimeChat = async () => {
-    setIsPriming(true)
+
+
+  const handlePrimeCurrentChat = async () => {
+    setLocalIsActivating(true)
     try {
       const res = await window.electron?.setActionMode?.({
         enabled: true,
         customInstructions: customInstructions.trim(),
         primeAI: true,
       })
-      if (res?.alreadyPrimed) {
+      if (res?.success) {
+        setLocalActionMode(true)
+        setIsChatPrimed(true)
+        try {
+          localStorage.setItem('workbench:action-mode', 'true')
+        } catch (_) {}
         window.electron?.showNotification?.({
-          title: '⚡ Chat Already Primed',
-          body: 'This conversation already has Workbench action context & folder access.',
-          type: 'info',
-        })
-      } else if (res?.success) {
-        window.electron?.showNotification?.({
-          title: '⚡ Chat Primed with Workbench',
-          body: `AI now knows active folder (${workspaceFolders.activeDirectory || 'Current'}) and can execute actions!`,
+          title: '⚡ Chat Primed',
+          body: 'Connected to ' + ((workspaceFolders.activeDirectory || activeDirectory).split(/[/\\]/).filter(Boolean).pop() || 'target folder') + '! AI can now run local file actions.',
           type: 'success',
         })
       } else {
         window.electron?.showNotification?.({
           title: '⚠️ Could Not Prime Chat',
-          body: res?.error || 'Make sure the chat input is loaded.',
-          type: 'warning',
+          body: res?.error || 'Chat input not ready. Ensure Claude or ChatGPT is fully loaded.',
+          type: 'error',
         })
       }
     } catch (err: any) {
-      console.error('Prime error:', err)
+      window.electron?.showNotification?.({
+        title: '⚠️ Error Priming Chat',
+        body: err.message || 'Failed to prime chat',
+        type: 'error',
+      })
     } finally {
-      setIsPriming(false)
+      setLocalIsActivating(false)
     }
   }
 
@@ -512,7 +445,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
             <RotateCw size={13} className={navState.isLoading && !isLocalActive ? 'spin' : ''} />
           </button>
           <button
-            className="nav-btn"
+            className="nav-btn nav-btn-home"
             disabled={isLocalActive}
             onClick={() => onNavAction('home')}
             title={
@@ -702,78 +635,81 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
         {isAI && (
           <>
+            {/* 1. Primary Direct Action: Save latest AI response or selection to Notes */}
             <button
               className="clip-note-btn ai-save-note-btn"
               onClick={onSaveAIToNote}
-              title="Save selected text or latest response from AI to Notes (Ctrl+Shift+S)"
+              title="Save latest AI response or highlighted selection to Notes (Ctrl+Shift+S)"
             >
               <BookMarked size={12} className="text-purple" />
               <span className="action-btn-label">Save to Note</span>
             </button>
-            {onExtractAICode && (
-              <button
-                className="clip-note-btn ai-extract-code-btn"
-                onClick={onExtractAICode}
-                title="Extract code blocks from chat into project files"
-              >
-                <Code2 size={12} className="text-cyan" />
-                <span className="action-btn-label">Extract Code</span>
-              </button>
-            )}
-            {onExportAITranscript && (
-              <button
-                className="clip-note-btn ai-export-chat-btn"
-                onClick={onExportAITranscript}
-                title="Export full chat session as a Markdown note"
-              >
-                <FileText size={12} className="text-amber" />
-                <span className="action-btn-label">Export Chat</span>
-              </button>
-            )}
-            <div className="action-mode-group">
-              <button
-                className={`clip-note-btn action-mode-btn ${actionMode ? 'active' : 'inactive'}`}
-                onClick={handleToggleActionMode}
-                disabled={isActivatingAction}
+
+            {/* 2. Secondary Export Options: Native Dropdown Menu (Extract Code / Export Transcript) */}
+            <button
+              className="clip-note-btn ai-export-dropdown-btn"
+              onClick={() => {
+                if (window.electron?.showAIExportMenu) {
+                  window.electron.showAIExportMenu()
+                } else if (onExportAITranscript) {
+                  onExportAITranscript()
+                } else if (onExtractAICode) {
+                  onExtractAICode()
+                }
+              }}
+              title="Export chat options: Extract code blocks or export conversation transcript"
+            >
+              <FileText size={12} className="text-amber" />
+              <span className="action-btn-label">Export</span>
+              <ChevronDown size={10} className="export-chevron" style={{ opacity: 0.6, marginLeft: '2px' }} />
+            </button>
+
+            {/* 3. Streamlined Action Mode Pill: Segregated Status, Action, and Target Folder */}
+            <div className={`action-mode-pill ${isChatPrimed ? 'primed' : 'unprimed'}`}>
+              {/* 1. Status Indicator */}
+              <span
+                className={`action-pill-status ${isChatPrimed ? 'primed' : 'unprimed'}`}
                 title={
-                  actionMode
-                    ? '⚡ Action Mode is ON: AI commands execute on your computer. Click to turn OFF.'
-                    : '⚡ Action Mode is OFF. Click to turn ON (auto-primes AI in background & enables local execution).'
+                  isChatPrimed
+                    ? '● Primed: Connected and ready to execute local file actions.'
+                    : '○ Unprimed: Not connected to local files.'
                 }
               >
-                <Zap
-                  size={12}
-                  className={
-                    isActivatingAction
-                      ? 'animate-spin text-amber'
-                      : actionMode
-                        ? 'text-emerald fill-emerald animate-pulse'
-                        : 'text-gray-400'
-                  }
-                />
-                <span className="action-btn-label">
-                  {isActivatingAction
-                    ? 'Priming AI...'
-                    : actionMode
-                      ? 'Action Mode: ON'
-                      : 'Action Mode: OFF'}
-                </span>
-              </button>
+                <span className={`status-dot ${isChatPrimed ? 'primed' : 'unprimed'}`} />
+                <span className="status-text">{isChatPrimed ? 'Primed' : 'Unprimed'}</span>
+              </span>
 
-              {actionMode && (
+              <span className="pill-internal-divider">|</span>
+
+              {/* 2. Button to change status */}
+              {!isChatPrimed ? (
                 <button
-                  className={`action-mode-prime-btn ${isPriming ? 'pulsing' : ''}`}
-                  onClick={handlePrimeChat}
-                  disabled={isPriming}
-                  title="Prime this active chat with Workbench action rules & active folder path so AI knows how to view and manage your files"
+                  className="action-pill-btn prime-action"
+                  onClick={handlePrimeCurrentChat}
+                  disabled={isActivatingAction}
+                  title="Prime this chat to connect with local files"
                 >
-                  <Sparkles size={11} className={isPriming ? 'animate-spin text-amber' : 'text-amber'} />
-                  <span className="action-btn-label">{isPriming ? 'Priming...' : 'Prime Chat'}</span>
+                  <Zap
+                    size={11}
+                    className={isActivatingAction ? 'animate-spin text-amber' : 'text-amber fill-amber'}
+                  />
+                  <span className="pill-btn-label">{isActivatingAction ? 'Priming...' : 'Prime Chat'}</span>
+                </button>
+              ) : (
+                <button
+                  className="action-pill-btn disable-action"
+                  onClick={handleDisableChat}
+                  disabled={isActivatingAction}
+                  title="Click to disable connection and unprime this chat"
+                >
+                  <Power size={10} className="pill-disable-icon" />
+                  <span className="pill-btn-label">Disable</span>
                 </button>
               )}
 
+              {/* 3. Target Folder button */}
               <button
-                className="action-mode-config-btn"
+                className={`action-pill-target target-${workspaceFolders.activeTarget}`}
                 onClick={() => {
                   if (onOpenActionModeModal) {
                     onOpenActionModeModal()
@@ -781,158 +717,33 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                     window.dispatchEvent(new CustomEvent('workbench:open-action-mode-modal'))
                   }
                 }}
-                title="Configure Action Mode prompt, custom instructions & rules"
+                title={`Target: ${
+                  workspaceFolders.activeTarget === 'note'
+                    ? 'Note View'
+                    : workspaceFolders.activeTarget === 'custom'
+                    ? 'Custom Directory'
+                    : 'Book View'
+                } (${workspaceFolders.activeDirectory || activeDirectory})\nClick to change destination folder or settings`}
               >
-                <Settings2 size={11} className={customInstructions ? 'text-amber' : 'text-gray-400'} />
+                <span className="target-divider">|</span>
+                {workspaceFolders.activeTarget === 'note' ? (
+                  <FileText size={11} style={{ color: isChatPrimed ? '#38bdf8' : '#94a3b8' }} />
+                ) : workspaceFolders.activeTarget === 'custom' ? (
+                  <Folder size={11} style={{ color: isChatPrimed ? '#f59e0b' : '#94a3b8' }} />
+                ) : (
+                  <BookOpen size={11} style={{ color: isChatPrimed ? '#34d399' : '#94a3b8' }} />
+                )}
+                <span className="target-folder-label">
+                  <span className="target-type-prefix">
+                    {workspaceFolders.activeTarget === 'note' ? 'Note: ' : workspaceFolders.activeTarget === 'custom' ? 'Custom: ' : 'Book: '}
+                  </span>
+                  <span className="target-folder-name">
+                    {(workspaceFolders.activeDirectory || activeDirectory).split(/[/\\]/).filter(Boolean).pop() || activeDirectory || 'Select'}
+                  </span>
+                </span>
+                <Settings2 size={10} className="target-settings-icon" style={{ opacity: 0.6, marginLeft: '2px' }} />
               </button>
             </div>
-
-            {/* Target Working Directory Badge & Dropdown */}
-            {(actionMode || workspaceFolders.activeDirectory || activeDirectory) && (
-              <div className="active-workspace-wrapper" ref={folderDropdownRef} style={{ position: 'relative' }}>
-                <div
-                  className={`active-workspace-badge target-${workspaceFolders.activeTarget}`}
-                  title={`Target: ${
-                    workspaceFolders.activeTarget === 'note'
-                      ? 'Note View'
-                      : workspaceFolders.activeTarget === 'custom'
-                      ? 'Custom Directory'
-                      : 'Book View'
-                  } (${workspaceFolders.activeDirectory || activeDirectory})\nClick to switch destination between Book View, Note View, or Custom folder`}
-                  onClick={() => setShowFolderDropdown(!showFolderDropdown)}
-                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
-                >
-                  {workspaceFolders.activeTarget === 'note' ? (
-                    <FileText size={11} style={{ color: '#38bdf8' }} />
-                  ) : workspaceFolders.activeTarget === 'custom' ? (
-                    <Folder size={11} style={{ color: '#f59e0b' }} />
-                  ) : (
-                    <BookOpen size={11} style={{ color: '#34d399' }} />
-                  )}
-                  <span className="workspace-name" style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <span style={{ opacity: 0.75, fontSize: '10px' }}>
-                      {workspaceFolders.activeTarget === 'note' ? 'Note:' : workspaceFolders.activeTarget === 'custom' ? 'Custom:' : 'Book:'}
-                    </span>
-                    {(workspaceFolders.activeDirectory || activeDirectory).split(/[/\\]/).filter(Boolean).pop() || activeDirectory}
-                  </span>
-                  <ChevronDown size={10} style={{ opacity: 0.6, transform: showFolderDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-                </div>
-
-                {/* Dropdown Menu */}
-                {showFolderDropdown && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 5px)',
-                      left: 0,
-                      zIndex: 1000,
-                      minWidth: '280px',
-                      background: 'rgba(20, 24, 33, 0.98)',
-                      border: '1px solid rgba(255, 255, 255, 0.14)',
-                      borderRadius: '8px',
-                      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.08)',
-                      padding: '6px',
-                      backdropFilter: 'blur(16px)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                    }}
-                  >
-                    <div style={{ padding: '4px 8px', fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Action Mode Target Folder
-                    </div>
-
-                    {/* Book View Option */}
-                    <button
-                      onClick={() => handleSelectTarget('book')}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 8px',
-                        background: workspaceFolders.activeTarget === 'book' ? 'rgba(52, 211, 153, 0.12)' : 'transparent',
-                        border: workspaceFolders.activeTarget === 'book' ? '1px solid rgba(52, 211, 153, 0.3)' : '1px solid transparent',
-                        borderRadius: '5px',
-                        color: '#f8fafc',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        gap: '8px',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                        <BookOpen size={13} style={{ color: '#34d399', flexShrink: 0 }} />
-                        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Book View Folder</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {workspaceFolders.bookDirectory || 'Not opened in Book View'}
-                          </span>
-                        </div>
-                      </div>
-                      {workspaceFolders.activeTarget === 'book' && <Check size={12} style={{ color: '#34d399', flexShrink: 0 }} />}
-                    </button>
-
-                    {/* Note View Option */}
-                    <button
-                      onClick={() => handleSelectTarget('note')}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 8px',
-                        background: workspaceFolders.activeTarget === 'note' ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
-                        border: workspaceFolders.activeTarget === 'note' ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid transparent',
-                        borderRadius: '5px',
-                        color: '#f8fafc',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        gap: '8px',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                        <FileText size={13} style={{ color: '#38bdf8', flexShrink: 0 }} />
-                        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Note View Folder</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {workspaceFolders.noteDirectory || 'Not opened in Note View'}
-                          </span>
-                        </div>
-                      </div>
-                      {workspaceFolders.activeTarget === 'note' && <Check size={12} style={{ color: '#38bdf8', flexShrink: 0 }} />}
-                    </button>
-
-                    <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '2px 0' }} />
-
-                    {/* Browse Custom Folder Option */}
-                    <button
-                      onClick={handlePickCustomFolder}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '6px 8px',
-                        background: workspaceFolders.activeTarget === 'custom' ? 'rgba(245, 158, 11, 0.12)' : 'transparent',
-                        border: workspaceFolders.activeTarget === 'custom' ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid transparent',
-                        borderRadius: '5px',
-                        color: '#f8fafc',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <Folder size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
-                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600 }}>Browse / Choose Custom Folder...</span>
-                        {workspaceFolders.activeTarget === 'custom' && (
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {workspaceFolders.activeDirectory}
-                          </span>
-                        )}
-                      </div>
-                      {workspaceFolders.activeTarget === 'custom' && <Check size={12} style={{ color: '#f59e0b', flexShrink: 0, marginLeft: 'auto' }} />}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </>
         )}
 

@@ -19,7 +19,7 @@ export class AIViewHandler {
   private sourceBaseUrls: Map<string, string> = new Map()
   private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
   private isVisible: boolean = true
-  private actionModeEnabled: boolean = false
+  private actionModeEnabled: boolean = true
   private feedbackTurnCount: number = 0
   private lastFeedbackTimestamp: number = 0
 
@@ -59,6 +59,18 @@ export class AIViewHandler {
     }
   }
 
+  public hasWebContents(wc: Electron.WebContents): boolean {
+    if (this.view && !this.view.webContents.isDestroyed() && this.view.webContents.id === wc.id) {
+      return true
+    }
+    for (const v of this.views.values()) {
+      if (!v.webContents.isDestroyed() && v.webContents.id === wc.id) {
+        return true
+      }
+    }
+    return false
+  }
+
   private getOrCreateView(source: AISource): WebContentsView {
     const existing = this.views.get(source.id)
     if (existing && !existing.webContents.isDestroyed()) {
@@ -84,6 +96,11 @@ export class AIViewHandler {
     wc.setWindowOpenHandler((details) =>
       authCoordinator.handleWindowOpen(details, newView, this.mainWindow)
     )
+    wc.on('dom-ready', () => {
+      if (!wc.isDestroyed()) {
+        wc.send('workbench:set-view-role', 'ai')
+      }
+    })
 
     // Restore saved zoom level for this source
     const initialZoom = this.aiSourceManager.getZoom(source.id)
@@ -153,12 +170,23 @@ export class AIViewHandler {
         onStateChange()
       }
     })
-    wc.on('did-navigate', onStateChange)
+    const checkPrimeDebounced = () => {
+      setTimeout(() => this.notifyChatPrimeStatus(), 300)
+      setTimeout(() => this.notifyChatPrimeStatus(), 1200)
+    }
+    wc.on('did-navigate', () => {
+      onStateChange()
+      checkPrimeDebounced()
+    })
     wc.on('did-navigate-in-page', () => {
       onStateChange()
       this.attachDropAndUploadInterceptor(viewInstance)
+      checkPrimeDebounced()
     })
-    wc.on('page-title-updated', onStateChange)
+    wc.on('page-title-updated', () => {
+      onStateChange()
+      checkPrimeDebounced()
+    })
 
     wc.on('context-menu', (_e, params) => {
       const selection = (params.selectionText || '').trim()
@@ -1171,19 +1199,6 @@ export class AIViewHandler {
       const candidates: any[] = await this.view.webContents.executeJavaScript(`
         (function() {
           try {
-            if (!window.__wb_executed_hashes) {
-              window.__wb_executed_hashes = new Set();
-            }
-
-            function simpleHash(str) {
-              var hash = 0;
-              for (var i = 0; i < str.length; i++) {
-                hash = ((hash << 5) - hash) + str.charCodeAt(i);
-                hash |= 0;
-              }
-              return String(hash);
-            }
-
             // Extract valid JSON objects with 'action' or 'type' from any text string
             function extractActionsFromText(fullText) {
               var actions = [];
@@ -1214,16 +1229,12 @@ export class AIViewHandler {
                     depth--;
                     if (depth === 0 && startIdx !== -1) {
                       var candidate = fullText.substring(startIdx, i + 1).trim();
-                      var hash = simpleHash(candidate);
-                      if (!window.__wb_executed_hashes.has(hash)) {
-                        try {
-                          var parsed = JSON.parse(candidate);
-                          if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
-                            window.__wb_executed_hashes.add(hash);
-                            actions.push({ payload: parsed, raw: candidate });
-                          }
-                        } catch (_) {}
-                      }
+                      try {
+                        var parsed = JSON.parse(candidate);
+                        if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
+                          actions.push({ payload: parsed, raw: candidate });
+                        }
+                      } catch (_) {}
                       startIdx = -1;
                     }
                   }
@@ -1248,14 +1259,38 @@ export class AIViewHandler {
               } catch (_) {}
 
               // B. Skip input forms, textareas, and contenteditables
-              if (el.closest && (el.closest('#prompt-textarea') || el.closest('form') || el.closest('[contenteditable="true"]'))) {
+              if (el.closest && (
+                el.closest('#prompt-textarea') ||
+                el.closest('form') ||
+                el.closest('[contenteditable="true"]') ||
+                el.closest('textarea') ||
+                el.closest('input') ||
+                el.closest('.ql-editor') ||
+                el.closest('rich-textarea')
+              )) {
                 return false;
               }
 
               // C. Skip user messages (check ancestors, self, AND descendants)
               if (
-                (el.closest && (el.closest('[data-message-author-role="user"]') || el.closest('[data-user-message="true"]') || el.closest('.font-user-message') || el.closest('[data-testid="user-message"]') || el.closest('user-query'))) ||
-                (el.querySelector && (el.querySelector('[data-message-author-role="user"]') || el.querySelector('[data-user-message="true"]') || el.querySelector('.font-user-message') || el.querySelector('[data-testid="user-message"]') || el.querySelector('user-query')))
+                (el.closest && (
+                  el.closest('[data-message-author-role="user"]') ||
+                  el.closest('[data-user-message="true"]') ||
+                  el.closest('.font-user-message') ||
+                  el.closest('[data-testid="user-message"]') ||
+                  el.closest('user-query') ||
+                  el.closest('[class*="user-message"]') ||
+                  el.closest('[data-is-user="true"]')
+                )) ||
+                (el.querySelector && (
+                  el.querySelector('[data-message-author-role="user"]') ||
+                  el.querySelector('[data-user-message="true"]') ||
+                  el.querySelector('.font-user-message') ||
+                  el.querySelector('[data-testid="user-message"]') ||
+                  el.querySelector('user-query') ||
+                  el.querySelector('[class*="user-message"]') ||
+                  el.querySelector('[data-is-user="true"]')
+                ))
               ) {
                 return false;
               }
@@ -1276,24 +1311,19 @@ export class AIViewHandler {
                 return false;
               }
 
-              // E. Must be inside an assistant container or turn
-              var host = (window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
-              var isAssistant = Boolean(
-                host.includes('perplexity') ||
-                (el.closest && (el.closest('[data-message-author-role="assistant"]') || el.closest('.agent-turn') || el.closest('[data-testid="assistant-message"]') || el.closest('.font-claude-message') || el.closest('model-response') || el.closest('.assistant-turn') || el.closest('.prose'))) ||
-                (el.querySelector && (el.querySelector('[data-message-author-role="assistant"]') || el.querySelector('.agent-turn') || el.querySelector('[data-testid="assistant-message"]')))
-              );
-              if (!isAssistant) {
-                return false;
-              }
-
+              // E. Inside active AI view, any visible non-user element is an assistant block
               return true;
             }
 
-            // 1. Scan code and pre containers
-            var codeBlocks = document.querySelectorAll('pre, code, div[data-message-author-role="assistant"], article, div.markdown');
+            // 1. Scan code and pre containers across all AI platforms (Gemini, ChatGPT, Claude, Grok, etc.)
+            var codeBlocks = document.querySelectorAll('pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]');
             for (var c = 0; c < codeBlocks.length; c++) {
               var el = codeBlocks[c];
+
+              // Skip already executed elements
+              if (el.getAttribute('data-workbench-executed') === 'true' || el.getAttribute('data-wb-executed') === 'true' || (el.closest && el.closest('[data-workbench-executed="true"], [data-wb-executed="true"]'))) {
+                continue;
+              }
 
               if (!isSafeAssistantBlock(el)) {
                 continue;
@@ -1302,19 +1332,43 @@ export class AIViewHandler {
               var text = (el.innerText || el.textContent || '').trim();
               if (text.includes('create_folder') || text.includes('write_file') || text.includes('workbench:action') || text.includes('"action"')) {
                 var extracted = extractActionsFromText(text);
-                for (var e = 0; e < extracted.length; e++) {
-                  results.push(extracted[e].payload);
-                  
-                  // Inject confirmation badge into the DOM
-                  try {
-                    var badge = document.createElement('div');
-                    badge.className = 'workbench-action-badge';
-                    badge.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;margin:6px 0;background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.4);border-radius:4px;font-size:11px;font-family:sans-serif;color:#34d399;font-weight:600;user-select:none;';
-                    badge.innerHTML = '<span>⚡ Executed in Workbench: ' + (extracted[e].payload.action || extracted[e].payload.type) + '</span>';
-                    if (el.parentNode) {
-                      el.parentNode.insertBefore(badge, el);
+                if (extracted.length > 0) {
+                  el.setAttribute('data-workbench-executed', 'true');
+                  el.setAttribute('data-wb-executed', 'true');
+
+                  var targetBox = el.closest('pre') || el.closest('[class*="code-block"]') || (el.closest('div.rounded-md') && el.closest('div.rounded-md').querySelector('code') ? el.closest('div.rounded-md') : null) || el;
+                  if (targetBox) {
+                    targetBox.setAttribute('data-workbench-executed', 'true');
+                    targetBox.setAttribute('data-wb-executed', 'true');
+                    targetBox.style.display = 'none';
+
+                    for (var e = 0; e < extracted.length; e++) {
+                      results.push(extracted[e].payload);
+                      var actionType = extracted[e].payload.action || extracted[e].payload.type || 'action';
+                      var actionParam = extracted[e].payload.path || extracted[e].payload.folderName || extracted[e].payload.filePath || extracted[e].payload.targetDirectory || '.';
+
+                      try {
+                        var badge = document.createElement('div');
+                        badge.className = 'workbench-action-badge';
+                        badge.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin:6px 0;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#34d399;font-weight:500;cursor:pointer;user-select:none;';
+                        badge.title = 'Click to show / hide raw action JSON';
+                        badge.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span>⚡</span><span style="font-weight:600;color:#10b981;">' + actionType + '</span><span style="color:#94a3b8;font-size:11px;font-family:monospace;">(' + actionParam + ')</span></div><div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;"><span>Executed</span><span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span></div>';
+
+                        (function(box, b) {
+                          b.addEventListener('click', function() {
+                            var isHidden = box.style.display === 'none';
+                            box.style.display = isHidden ? 'block' : 'none';
+                            var arrow = b.querySelector('.wb-badge-arrow');
+                            if (arrow) arrow.textContent = isHidden ? '▲' : '▼';
+                          });
+                        })(targetBox, badge);
+
+                        if (targetBox.parentNode) {
+                          targetBox.parentNode.insertBefore(badge, targetBox);
+                        }
+                      } catch (_) {}
                     }
-                  } catch (_) {}
+                  }
                 }
               }
             }
@@ -1469,9 +1523,12 @@ export class AIViewHandler {
                 return;
               }
 
-              // 2. Find prompt input field
+              // 2. Find prompt input field across all supported chat sites
               const input = document.querySelector('#prompt-textarea') || 
                             document.querySelector('div[contenteditable="true"].ProseMirror') ||
+                            document.querySelector('rich-textarea div[contenteditable="true"]') ||
+                            document.querySelector('.ql-editor') ||
+                            document.querySelector('#chat-input') ||
                             document.querySelector('div[contenteditable="true"]') || 
                             document.querySelector('textarea');
 
@@ -1488,16 +1545,27 @@ export class AIViewHandler {
 
               // 3. Insert feedback text
               if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-                input.value = textToInsert;
+                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                if (nativeSetter) {
+                  nativeSetter.call(input, textToInsert);
+                } else {
+                  input.value = textToInsert;
+                }
                 input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
               } else {
                 const selection = window.getSelection();
                 const range = document.createRange();
                 range.selectNodeContents(input);
                 selection.removeAllRanges();
                 selection.addRange(range);
-                document.execCommand('insertText', false, textToInsert);
+                const success = document.execCommand('insertText', false, textToInsert);
+                if (!success || !input.textContent) {
+                  input.textContent = textToInsert;
+                }
                 input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
               }
 
               if (!shouldSubmit) {
@@ -1509,9 +1577,17 @@ export class AIViewHandler {
               setTimeout(function() {
                 const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
                                 document.querySelector('button[data-testid="fruitjuice-send-button"]') ||
+                                document.querySelector('button[aria-label*="Send prompt"]') ||
+                                document.querySelector('button[aria-label*="Send message"]') ||
+                                document.querySelector('button[aria-label*="send message"]') ||
                                 document.querySelector('button[aria-label*="Send"]') ||
                                 document.querySelector('button[aria-label*="send"]') ||
-                                document.querySelector('button.send-button');
+                                document.querySelector('button[aria-label*="Submit query"]') ||
+                                document.querySelector('button[aria-label*="Submit"]') ||
+                                document.querySelector('button[aria-label*="submit"]') ||
+                                document.querySelector('button[type="submit"]') ||
+                                document.querySelector('button.send-button') ||
+                                document.querySelector('div[role="button"][aria-label*="Send"]');
 
                 if (sendBtn && !sendBtn.disabled) {
                   sendBtn.click();
@@ -1534,6 +1610,9 @@ export class AIViewHandler {
 
   public setActionMode(enabled: boolean) {
     this.actionModeEnabled = enabled
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.webContents.send('workbench:action-mode-changed', enabled)
+    }
     for (const v of this.views.values()) {
       if (!v.webContents.isDestroyed()) {
         v.webContents.send('workbench:action-mode-changed', enabled)
@@ -1570,26 +1649,32 @@ export class AIViewHandler {
               document.head.appendChild(style);
             }
 
-            // Function to tag and hide the prompt bubble
+            // Function to tag and hide the prompt bubble across all AI chat platforms
             function hidePromptElement() {
               const keywords = [
                 'You are integrated with Workbench Desktop',
                 'Available Workbench Actions',
-                'workbench:action'
+                'workbench:action',
+                '[Workbench Action Result:'
               ];
               const selectors = [
                 'article',
+                'user-query',
+                'model-response',
                 '[data-message-author-role="user"]',
                 'div[data-testid="user-message"]',
                 'div.font-user-message',
-                'user-query',
-                '[class*="user-message"]'
+                '[class*="user-message"]',
+                '[class*="chat-message"]',
+                'div[class*="message-row"]',
+                'div[class*="message-bubble"]'
               ];
               const elements = document.querySelectorAll(selectors.join(', '));
               elements.forEach(function(el) {
                 const text = el.innerText || '';
                 if (keywords.some(function(k) { return text.includes(k); })) {
                   el.classList.add('wb-hidden-action-prompt');
+                  el.style.display = 'none';
                 }
               });
             }
@@ -1607,9 +1692,12 @@ export class AIViewHandler {
               return { success: true, alreadyPrimed: true };
             }
 
-            // 2. Find the chat input
+            // 2. Find the chat input across all supported platforms
             const input = document.querySelector('#prompt-textarea') || 
                           document.querySelector('div[contenteditable="true"].ProseMirror') ||
+                          document.querySelector('rich-textarea div[contenteditable="true"]') ||
+                          document.querySelector('.ql-editor') ||
+                          document.querySelector('#chat-input') ||
                           document.querySelector('div[contenteditable="true"]') || 
                           document.querySelector('textarea');
             if (!input) return { success: false, error: 'Chat input field not found' };
@@ -1635,6 +1723,8 @@ export class AIViewHandler {
                 input.textContent = textToInsert;
               }
               input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
             // 3. Auto-submit after short delay
@@ -1643,12 +1733,15 @@ export class AIViewHandler {
                               document.querySelector('button[data-testid="fruitjuice-send-button"]') ||
                               document.querySelector('button[aria-label*="Send prompt"]') ||
                               document.querySelector('button[aria-label*="Send message"]') ||
+                              document.querySelector('button[aria-label*="send message"]') ||
                               document.querySelector('button[aria-label*="Send"]') ||
                               document.querySelector('button[aria-label*="send"]') ||
+                              document.querySelector('button[aria-label*="Submit query"]') ||
                               document.querySelector('button[aria-label*="Submit"]') ||
                               document.querySelector('button[aria-label*="submit"]') ||
                               document.querySelector('button[type="submit"]') ||
-                              document.querySelector('button.send-button');
+                              document.querySelector('button.send-button') ||
+                              document.querySelector('div[role="button"][aria-label*="Send"]');
               if (sendBtn && !sendBtn.disabled) {
                 sendBtn.click();
               } else {
@@ -1667,11 +1760,46 @@ export class AIViewHandler {
         })(${JSON.stringify(promptText)})
       `)
 
+      setTimeout(() => this.notifyChatPrimeStatus(), 800)
+      setTimeout(() => this.notifyChatPrimeStatus(), 2000)
+
       return injected || { success: true }
     } catch (err: any) {
       console.error('[AIView] enableActionMode error:', err)
       return { success: false, error: err.message || 'Failed to enable Action Mode' }
     }
+  }
+
+  public async isChatPrimed(): Promise<boolean> {
+    if (!this.actionModeEnabled) {
+      return false
+    }
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return false
+    }
+    try {
+      const primed = await this.view.webContents.executeJavaScript(`
+        (function() {
+          try {
+            if (document.querySelector('.wb-hidden-action-prompt')) return true;
+            const bodyText = (document.body ? (document.body.innerText || document.body.textContent || '') : '');
+            return bodyText.includes('You are integrated with Workbench Desktop') ||
+                   bodyText.includes('Available Workbench Actions');
+          } catch (_) {
+            return false;
+          }
+        })()
+      `)
+      return Boolean(primed)
+    } catch (_) {
+      return false
+    }
+  }
+
+  public async notifyChatPrimeStatus(): Promise<void> {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    const isPrimed = await this.isChatPrimed()
+    this.mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed })
   }
 }
 

@@ -510,10 +510,52 @@ function registerIpcHandlers() {
       if (enabled && params?.primeAI === true) {
         const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, params?.customInstructions)
         const primeResult = await aiHandler.enableActionMode(prompt)
+        aiHandler.notifyChatPrimeStatus()
         return { enabled: true, ...primeResult }
+      } else {
+        aiHandler.notifyChatPrimeStatus()
       }
     }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('workbench:action-mode-changed', { enabled })
+    }
     return { success: true, enabled }
+  })
+
+  ipcMain.on('workbench:chat-prime-status-changed', (_, data: { isPrimed: boolean }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('workbench:chat-prime-status-changed', data)
+    }
+  })
+
+  ipcMain.handle('workbench:is-ai-view', (event) => {
+    return Boolean(aiHandler && aiHandler.hasWebContents(event.sender))
+  })
+
+  ipcMain.handle('workbench:get-action-mode', async () => {
+    return { enabled: ActionDispatcher.getInstance().isActionModeEnabled() }
+  })
+
+  ipcMain.handle('workbench:get-chat-prime-status', async () => {
+    if (aiHandler) {
+      const isPrimed = await aiHandler.isChatPrimed()
+      return { isPrimed }
+    }
+    return { isPrimed: false }
+  })
+
+  ipcMain.on('workbench:prime-active-chat', async () => {
+    if (aiHandler) {
+      ActionDispatcher.getInstance().setActionMode(true)
+      aiHandler.setActionMode(true)
+      const prompt = ActionDispatcher.getInstance().getPromptGuide()
+      await aiHandler.enableActionMode(prompt)
+      aiHandler.notifyChatPrimeStatus()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('workbench:action-mode-changed', { enabled: true })
+        mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed: true })
+      }
+    }
   })
 
   ipcMain.handle('workbench:get-action-prompt', async (_, params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') => {
@@ -967,6 +1009,29 @@ function registerIpcHandlers() {
         label: '⚙️ Configure Note Sites...',
         click: () => {
           mainWindow!.webContents.send('workbench:open-note-source-modal')
+        },
+      },
+    ]
+
+    const menu = Menu.buildFromTemplate(menuTemplate)
+    menu.popup({ window: mainWindow })
+  })
+
+  ipcMain.on('workbench:show-ai-export-menu', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+      { label: 'Chat Export Options', enabled: false },
+      { type: 'separator' },
+      {
+        label: '💻 Extract Code Blocks to Files',
+        click: () => {
+          mainWindow!.webContents.send('workbench:extract-code-trigger')
+        },
+      },
+      {
+        label: '📜 Export Chat Transcript (.md)',
+        click: () => {
+          mainWindow!.webContents.send('workbench:export-transcript-trigger')
         },
       },
     ]

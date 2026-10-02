@@ -363,6 +363,7 @@
   text-align: center;
   overflow: hidden;
   padding: 0 12px;
+  min-width: 0;
 }
 
 .url-display {
@@ -1481,81 +1482,207 @@ input:checked + .slider-round:before {
   opacity: 1;
 }
 
-.action-mode-config-btn {
-  display: flex;
+/* AI Export Dropdown Button */
+.ai-export-dropdown-btn {
+  background: rgba(245, 158, 11, 0.12) !important;
+  border-color: rgba(245, 158, 11, 0.28) !important;
+  color: #fbbf24 !important;
+  padding: 4px 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.ai-export-dropdown-btn:hover {
+  background: rgba(245, 158, 11, 0.22) !important;
+  border-color: rgba(245, 158, 11, 0.5) !important;
+  color: #fde68a !important;
+}
+
+/* Unified Action Mode Pill */
+.action-mode-pill {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 4px 6px;
-  background: transparent;
-  border: none;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  color: #94a3b8;
-  cursor: pointer;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  height: 26px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: all 0.15s ease;
 }
 
-.action-mode-config-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f1f5f9;
+.action-mode-pill.primed {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
 }
 
-.action-mode-prime-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: rgba(245, 158, 11, 0.14);
-  border: none;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fbbf24;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
+.action-mode-pill.unprimed {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.1);
 }
 
-.action-mode-prime-btn:hover {
-  background: rgba(245, 158, 11, 0.25);
-  color: #fde68a;
+.action-mode-pill.inactive {
+  background: rgba(30, 41, 59, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
-.action-mode-prime-btn.pulsing {
-  opacity: 0.7;
-  cursor: wait;
-}
-
-.active-workspace-badge {
-  display: flex;
+/* Status Indicator inside Pill */
+.action-pill-status {
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(6, 182, 212, 0.1);
-  border: 1px solid rgba(6, 182, 212, 0.25);
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
+  padding: 0 5px 0 8px;
   font-size: 11px;
-  color: #67e8f9;
-  cursor: pointer;
+  font-weight: 500;
   user-select: none;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: all 0.15s ease;
 }
 
-.active-workspace-badge:hover {
-  background: rgba(6, 182, 212, 0.2);
-  border-color: rgba(6, 182, 212, 0.5);
-  color: #a5f3fc;
+.action-pill-status.primed {
+  color: #34d399;
 }
 
-.active-workspace-badge .workspace-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.action-pill-status.unprimed {
+  color: #94a3b8;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot.primed {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.8);
+}
+
+.status-dot.unprimed {
+  border: 1.5px solid #94a3b8;
+  background: transparent;
+}
+
+/* Internal Divider */
+.pill-internal-divider {
+  opacity: 0.2;
+  color: #94a3b8;
+  font-size: 11px;
+  user-select: none;
+}
+
+/* Action Button inside Pill */
+.action-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  margin: 0 3px;
+  border-radius: 3px;
+  font-size: 10.5px;
   font-weight: 600;
-  font-family: monospace;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+
+.action-pill-btn.prime-action {
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.action-pill-btn.prime-action:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.32);
+  color: #fef08a;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+}
+
+.action-pill-btn.disable-action {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+}
+
+.action-pill-btn.disable-action:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.pill-disable-icon {
+  color: #fca5a5;
+  flex-shrink: 0;
+}
+
+.action-pill-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.action-pill-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.action-pill-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 4px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  cursor: pointer;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.action-pill-target:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.action-pill-target .target-divider {
+  opacity: 0.25;
+  margin-right: 3px;
+  font-weight: 300;
+}
+
+.action-pill-target .target-folder-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.action-pill-target.target-book .target-folder-label {
+  color: #a7f3d0;
+}
+
+.action-pill-target.target-note .target-folder-label {
+  color: #bae6fd;
+}
+
+.action-pill-target.target-custom .target-folder-label {
+  color: #fde68a;
 }
 
 /* Horizontal Splitter (ChatGPT vs OneNote) */
@@ -2453,8 +2580,8 @@ input:checked + .slider-round:before {
   color: #a855f7;
 }
 
-/* Responsive Toolbar Collapsing for Narrow / Restored Panes (Approach 1) */
-@container pane (max-width: 820px) {
+/* Responsive Toolbar Collapsing for Narrow / Restored Panes (Option A) */
+@container pane (max-width: 860px) {
   /* 1. Status badge text collapses to clean glowing indicator dot [●] with hover tooltip */
   .book-status-badge .status-badge-text,
   .ai-status-badge .status-badge-text,
@@ -2480,10 +2607,31 @@ input:checked + .slider-round:before {
   .session-manage-btn {
     padding: 3px 6px;
   }
+
+  /* 3. Allow source tag to shrink gracefully instead of rigid 145px */
+  .pane-tag {
+    width: auto;
+    min-width: 110px;
+    max-width: 135px;
+  }
+
+  /* 4. Action Pill: Hide target prefix ('Book: ', 'Note: ', 'Custom: ') */
+  .action-pill-target .target-type-prefix {
+    display: none;
+  }
+
+  .action-pill-target {
+    max-width: 120px;
+  }
 }
 
-@container pane (max-width: 720px) {
-  /* 3. Configure button text collapses to Gear icon with hover tooltip */
+@container pane (max-width: 740px) {
+  /* 5. Hide center URL/title to prioritize all interactive buttons */
+  .toolbar-section-center {
+    display: none;
+  }
+
+  /* 6. Configure button text collapses to Gear icon with hover tooltip */
   .configure-sources-quick-btn .config-btn-label,
   .configure-sources-quick-btn span:not(.config-icon) {
     display: none;
@@ -2493,16 +2641,141 @@ input:checked + .slider-round:before {
     padding: 2px 6px;
     margin-left: 3px;
   }
-}
 
-@container pane (max-width: 600px) {
-  /* 4. Action button text collapses to icon-only in tight splits */
+  /* 7. Action button text collapses to icon-only in tight splits */
   .clip-note-btn .action-btn-label {
     display: none;
   }
 
   .clip-note-btn {
     padding: 3px 6px;
+  }
+
+  .ask-ai-btn .btn-text {
+    display: none;
+  }
+
+  .ask-ai-btn {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+
+  .ai-export-dropdown-btn .export-chevron {
+    display: none;
+  }
+
+  .action-pill-target {
+    max-width: 90px;
+  }
+}
+
+@container pane (max-width: 640px) {
+  /* 8. Hide Home button (Back, Forward, Reload remain) */
+  .nav-btn.nav-btn-home {
+    display: none;
+  }
+
+  /* 9. Hide zoom percentage readout to slim the zoom control pill */
+  .zoom-controls .zoom-reset-btn {
+    display: none;
+  }
+
+  /* 10. Action Pill: Collapse status to just the glowing dot [●] */
+  .action-pill-status .status-text {
+    display: none;
+  }
+
+  .action-pill-status {
+    padding: 0 4px 0 6px;
+  }
+
+  /* 11. Action Pill: Hide target folder text, leaving folder icon + settings gear */
+  .action-pill-target .target-folder-label {
+    display: none;
+  }
+
+  .action-pill-target {
+    max-width: none;
+    padding: 0 6px 0 2px;
+  }
+
+  /* 12. Allow pane tag to be more compact */
+  .pane-tag {
+    min-width: 80px;
+    max-width: 110px;
+    padding: 2px 5px;
+  }
+
+  .toolbar-section-left {
+    gap: 4px;
+  }
+
+  .toolbar-section-right {
+    gap: 4px;
+  }
+
+  .pane-toolbar {
+    padding: 0 8px 0 6px;
+  }
+}
+
+@container pane (max-width: 520px) {
+  /* 13. Hide stationary zoom controls in ultra-narrow split views */
+  .zoom-controls {
+    display: none;
+  }
+
+  /* 14. Action Pill: Collapse buttons to icon-only (Zap for Prime, Power for Disable) */
+  .action-pill-btn .pill-btn-label {
+    display: none;
+  }
+
+  .action-pill-btn {
+    padding: 0 5px;
+    margin: 0 2px;
+  }
+
+  .action-pill-btn.disable-action {
+    padding: 0 4px;
+  }
+
+  /* 15. Pill internal dividers hidden for ultra-compact fit */
+  .pill-internal-divider,
+  .action-pill-target .target-divider {
+    display: none;
+  }
+
+  .action-mode-pill {
+    gap: 2px;
+    padding: 0 2px;
+  }
+
+  /* 16. Source selector chevron hidden */
+  .pane-tag .selector-chevron {
+    display: none;
+  }
+
+  .pane-tag {
+    min-width: 32px;
+    max-width: 85px;
+  }
+}
+
+@container pane (max-width: 390px) {
+  /* 17. Extreme compact mode for tiny split views */
+  .pane-tag .tag-label {
+    display: none;
+  }
+
+  .pane-tag {
+    min-width: 26px;
+    max-width: 30px;
+    padding: 2px 4px;
+    justify-content: center;
+  }
+
+  .pane-toolbar {
+    padding: 0 4px 0 4px;
   }
 }
 

@@ -32,7 +32,7 @@ export class ActionDispatcher {
   private static instance: ActionDispatcher | null = null
   private mainWindow: BrowserWindow | null = null
   private registry: ActionRegistry
-  private actionModeEnabled: boolean = false
+  private actionModeEnabled: boolean = true
   private autoFeedbackLoopEnabled: boolean = true
   private activeTarget: 'book' | 'note' | 'custom' = 'book'
   private customDirectory: string = ''

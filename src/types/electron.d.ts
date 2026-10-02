@@ -65,6 +65,7 @@ export interface ElectronAPI {
   setActiveNoteSource: (sourceId: string) => Promise<{ success: boolean; activeSource?: NoteSource; error?: string }>
   saveNoteSources: (params: { sources: NoteSource[]; activeSourceId?: string }) => Promise<{ success: boolean; data?: NoteSourceSettings; error?: string }>
   showNoteSourceMenu: () => void
+  showAIExportMenu?: () => void
   onNoteSourceChanged: (callback: (data: { activeSourceId: string; activeSource: NoteSource }) => void) => () => void
   onOpenNoteSourceModal: (callback: () => void) => () => void
 
@@ -127,6 +128,9 @@ export interface ElectronAPI {
   reportActiveDirectory?: (params: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) => void
   executeAction?: (payload: any) => Promise<{ success: boolean; action?: string; message: string; createdPath?: string; error?: string; details?: any }>
   setActionMode?: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) => Promise<{ success: boolean; enabled: boolean; error?: string; alreadyPrimed?: boolean }>
+  getChatPrimeStatus?: () => Promise<{ isPrimed: boolean }>
+  onChatPrimeStatusChanged?: (callback: (data: { isPrimed: boolean }) => void) => () => void
+  onActionModeChanged?: (callback: (data: { enabled: boolean }) => void) => () => void
   setAutoFeedbackLoop?: (enabled: boolean) => Promise<{ success: boolean; enabled: boolean }>
   getAutoFeedbackLoop?: () => Promise<boolean>
   getActionPrompt?: (params?: { targetPane?: 'book' | 'note'; customInstructions?: string } | 'book' | 'note') => Promise<string>
