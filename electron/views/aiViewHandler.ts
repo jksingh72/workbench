@@ -22,6 +22,7 @@ export class AIViewHandler {
   private actionModeEnabled: boolean = true
   private feedbackTurnCount: number = 0
   private lastFeedbackTimestamp: number = 0
+  private executedActionHashes: Set<string> = new Set()
 
   constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
@@ -93,6 +94,7 @@ export class AIViewHandler {
     })
 
     const wc = newView.webContents
+    wc.setMaxListeners(50)
     wc.setWindowOpenHandler((details) =>
       authCoordinator.handleWindowOpen(details, newView, this.mainWindow)
     )
@@ -1315,8 +1317,57 @@ export class AIViewHandler {
               return true;
             }
 
-            // 1. Scan code and pre containers across all AI platforms (Gemini, ChatGPT, Claude, Grok, etc.)
-            var codeBlocks = document.querySelectorAll('pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]');
+            // Helper: Find only the newest assistant message container
+            function getLatestAssistantContainer() {
+              var selectors = [
+                '[data-message-author-role="assistant"]',
+                'div.font-claude-message',
+                '.font-claude-message',
+                'div[data-is-streaming]',
+                '[data-is-streaming]',
+                'model-response',
+                '.model-response-text',
+                'div[data-testid*="assistant-message"]',
+                'div[data-testid="chat-message-assistant"]',
+                'article[data-testid*="conversation-turn"]:has([data-message-author-role="assistant"])',
+                'div[class*="chat-message"][class*="assistant"]',
+                'div[class*="response-message"]',
+                'div[class*="ChatMessage"][data-role="assistant"]'
+              ];
+              for (var s = 0; s < selectors.length; s++) {
+                try {
+                  var nodes = document.querySelectorAll(selectors[s]);
+                  if (nodes && nodes.length > 0) {
+                    return nodes[nodes.length - 1];
+                  }
+                } catch (_) {}
+              }
+              try {
+                var turns = document.querySelectorAll('article, div[data-testid*="conversation-turn"], div[class*="conversation-item"]');
+                if (turns && turns.length > 0) {
+                  var lastTurn = turns[turns.length - 1];
+                  if (
+                    !lastTurn.querySelector('[data-message-author-role="user"]') &&
+                    !lastTurn.querySelector('.font-user-message') &&
+                    !lastTurn.querySelector('[data-user-message="true"]') &&
+                    !lastTurn.classList.contains('font-user-message')
+                  ) {
+                    return lastTurn;
+                  }
+                }
+              } catch (_) {}
+              return null;
+            }
+
+            var targetContainer = getLatestAssistantContainer();
+            if (!targetContainer) {
+              return [];
+            }
+
+            window.__wbExecutedActionHashes = window.__wbExecutedActionHashes || new Set();
+
+            // 1. Scan code and pre containers ONLY inside the newest assistant message container
+            var codeBlocks = targetContainer.querySelectorAll('pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]');
             for (var c = 0; c < codeBlocks.length; c++) {
               var el = codeBlocks[c];
 
@@ -1343,6 +1394,12 @@ export class AIViewHandler {
                     targetBox.style.display = 'none';
 
                     for (var e = 0; e < extracted.length; e++) {
+                      var payloadHash = JSON.stringify(extracted[e].payload);
+                      if (window.__wbExecutedActionHashes.has(payloadHash)) {
+                        continue;
+                      }
+                      window.__wbExecutedActionHashes.add(payloadHash);
+
                       results.push(extracted[e].payload);
                       var actionType = extracted[e].payload.action || extracted[e].payload.type || 'action';
                       var actionParam = extracted[e].payload.path || extracted[e].payload.folderName || extracted[e].payload.filePath || extracted[e].payload.targetDirectory || '.';
@@ -1393,11 +1450,21 @@ export class AIViewHandler {
       const executionResults = []
 
       for (const payload of candidates) {
+        const payloadHash = JSON.stringify(payload)
+        if (this.executedActionHashes.has(payloadHash)) {
+          continue
+        }
+        this.executedActionHashes.add(payloadHash)
+
         const res = await dispatcher.dispatch(payload)
         executionResults.push(res)
 
         // Close the execution feedback loop so the AI can observe the outcome
-        if (dispatcher.isAutoFeedbackLoopEnabled()) {
+        // BUT NEVER send feedback if the action was suppressed as a duplicate!
+        if (
+          dispatcher.isAutoFeedbackLoopEnabled() &&
+          !res.message?.includes('Duplicate action suppressed')
+        ) {
           await this.handleActionExecutionFeedback(payload, res)
         }
       }
@@ -1424,7 +1491,11 @@ export class AIViewHandler {
   public formatActionFeedback(payload: any, result: any): string {
     const actionType = (payload.action || payload.type || result.action || 'action').toLowerCase()
 
-    if (result.message && result.message.includes('Ignored documentation schema template')) {
+    if (
+      result.message &&
+      (result.message.includes('Ignored documentation schema template') ||
+       result.message.includes('Duplicate action suppressed'))
+    ) {
       return ''
     }
 
@@ -1628,14 +1699,14 @@ export class AIViewHandler {
    * Automatically primes the active AI Chat with the Workbench Action System Prompt,
    * submits it in the background, and hides the prompt bubble from the DOM so the screen remains clean.
    */
-  public async enableActionMode(promptText: string): Promise<{ success: boolean; error?: string }> {
+  public async enableActionMode(promptText: string, force: boolean = false): Promise<{ success: boolean; error?: string }> {
     if (!this.view || this.view.webContents.isDestroyed()) {
       return { success: false, error: 'AI view is not ready' }
     }
 
     try {
       const injected = await this.view.webContents.executeJavaScript(`
-        (async function(textToInsert) {
+        (async function(textToInsert, forceInject) {
           try {
             // 1. Ensure CSS rule is installed to hide the action prompt bubble
             if (!document.getElementById('wb-action-mode-styles')) {
@@ -1685,11 +1756,13 @@ export class AIViewHandler {
               window.__wb_hide_observer.observe(document.body, { childList: true, subtree: true });
             }
 
-            // Check if current conversation is already primed
-            const bodyText = document.body ? document.body.innerText || '' : '';
-            if (bodyText.includes('You are integrated with Workbench Desktop') || bodyText.includes('Available Workbench Actions')) {
-              console.log('[AIView] Active chat is already primed with Workbench actions. Skipping duplicate injection.');
-              return { success: true, alreadyPrimed: true };
+            // Check if current conversation is already primed (skip if already primed unless forced)
+            if (!forceInject) {
+              const bodyText = document.body ? document.body.innerText || '' : '';
+              if (bodyText.includes('You are integrated with Workbench Desktop') || bodyText.includes('Available Workbench Actions')) {
+                console.log('[AIView] Active chat is already primed with Workbench actions. Skipping duplicate injection.');
+                return { success: true, alreadyPrimed: true };
+              }
             }
 
             // 2. Find the chat input across all supported platforms
@@ -1757,7 +1830,7 @@ export class AIViewHandler {
           } catch (e) {
             return { success: false, error: String(e) };
           }
-        })(${JSON.stringify(promptText)})
+        })(${JSON.stringify(promptText)}, ${force})
       `)
 
       setTimeout(() => this.notifyChatPrimeStatus(), 800)

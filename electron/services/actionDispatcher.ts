@@ -36,6 +36,7 @@ export class ActionDispatcher {
   private autoFeedbackLoopEnabled: boolean = true
   private activeTarget: 'book' | 'note' | 'custom' = 'book'
   private customDirectory: string = ''
+  private recentDispatchedHashes: Map<string, number> = new Map()
 
   private activeDirectories: {
     book: string
@@ -302,6 +303,25 @@ export class ActionDispatcher {
             message: `Invalid action JSON: ${parseErr.message}`,
             error: parseErr.message,
           }
+        }
+      }
+
+      // Deduplication Guard: Ignore identical payloads dispatched within 30 seconds to prevent feedback loops
+      const payloadHash = typeof rawPayload === 'string' ? rawPayload.trim() : JSON.stringify(payload)
+      const now = Date.now()
+      const lastDispatched = this.recentDispatchedHashes.get(payloadHash)
+      if (lastDispatched && now - lastDispatched < 30000) {
+        console.log(`[ActionDispatcher] Suppressed duplicate action execution (dispatched ${now - lastDispatched}ms ago)`)
+        return {
+          success: false,
+          message: 'Duplicate action suppressed (already executed in current turn)',
+          error: 'Duplicate action suppressed',
+        }
+      }
+      this.recentDispatchedHashes.set(payloadHash, now)
+      if (this.recentDispatchedHashes.size > 100) {
+        for (const [k, v] of this.recentDispatchedHashes.entries()) {
+          if (now - v > 60000) this.recentDispatchedHashes.delete(k)
         }
       }
 

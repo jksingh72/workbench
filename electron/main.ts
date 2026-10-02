@@ -447,6 +447,9 @@ function registerIpcHandlers() {
   ipcMain.on('workbench:action-triggered', async (_, payload) => {
     try {
       const result = await ActionDispatcher.getInstance().dispatch(payload)
+      if (result.message && result.message.includes('Duplicate action suppressed')) {
+        return
+      }
       if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
         await aiHandler.handleActionExecutionFeedback(payload, result)
       }
@@ -464,7 +467,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('workbench:execute-action', async (_, payload) => {
     const result = await ActionDispatcher.getInstance().dispatch(payload)
-    if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
+    if (!result.message?.includes('Duplicate action suppressed') && aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
       await aiHandler.handleActionExecutionFeedback(payload, result)
     }
     return result
@@ -509,7 +512,7 @@ function registerIpcHandlers() {
       // NEVER auto-prime on app launch, component mount, toggle, or settings save!
       if (enabled && params?.primeAI === true) {
         const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, params?.customInstructions)
-        const primeResult = await aiHandler.enableActionMode(prompt)
+        const primeResult = await aiHandler.enableActionMode(prompt, true)
         aiHandler.notifyChatPrimeStatus()
         return { enabled: true, ...primeResult }
       } else {
@@ -549,7 +552,7 @@ function registerIpcHandlers() {
       ActionDispatcher.getInstance().setActionMode(true)
       aiHandler.setActionMode(true)
       const prompt = ActionDispatcher.getInstance().getPromptGuide()
-      await aiHandler.enableActionMode(prompt)
+      await aiHandler.enableActionMode(prompt, true)
       aiHandler.notifyChatPrimeStatus()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('workbench:action-mode-changed', { enabled: true })

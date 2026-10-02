@@ -8,8 +8,14 @@ import { openFileAction } from './openFileAction'
 import { batchAction } from './batchAction'
 import { listDirectoryAction } from './listDirectoryAction'
 import { readFileAction } from './readFileAction'
+import { readDocxAction } from './readDocxAction'
+import { readPdfAction } from './readPdfAction'
+import { listActionsAction } from './listActionsAction'
 import { getWorkspaceFoldersAction, setActiveDirectoryAction } from './workspaceActions'
+import { createActionAction } from './createActionAction'
 
+import { summarizeFileAction } from './summarizeFileAction'
+import { updateActionAction } from './updateActionAction'
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -21,7 +27,13 @@ export * from './openFileAction'
 export * from './batchAction'
 export * from './listDirectoryAction'
 export * from './readFileAction'
+export * from './readDocxAction'
+export * from './readPdfAction'
+export * from './listActionsAction'
 export * from './workspaceActions'
+export * from './createActionAction'
+export * from './summarizeFileAction'
+export * from './updateActionAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -40,8 +52,14 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(batchAction)
   registry.register(listDirectoryAction)
   registry.register(readFileAction)
+  registry.register(readDocxAction)
+  registry.register(readPdfAction)
+  registry.register(listActionsAction)
   registry.register(getWorkspaceFoldersAction)
   registry.register(setActiveDirectoryAction)
+  registry.register(createActionAction)
 
+    registry.register(summarizeFileAction)
+    registry.register(updateActionAction)
   return registry
 }

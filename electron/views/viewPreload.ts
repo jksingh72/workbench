@@ -362,6 +362,53 @@ try {
     }
 
     const executedElements = new WeakSet<HTMLElement>()
+    const executedActionHashes: Set<string> =
+      (window as any).__wbExecutedActionHashes ||
+      ((window as any).__wbExecutedActionHashes = new Set<string>())
+
+    function getLatestAssistantContainer(): HTMLElement | null {
+      const selectors = [
+        '[data-message-author-role="assistant"]',
+        'div.font-claude-message',
+        '.font-claude-message',
+        'div[data-is-streaming]',
+        '[data-is-streaming]',
+        'model-response',
+        '.model-response-text',
+        'div[data-testid*="assistant-message"]',
+        'div[data-testid="chat-message-assistant"]',
+        'article[data-testid*="conversation-turn"]:has([data-message-author-role="assistant"])',
+        'div[class*="chat-message"][class*="assistant"]',
+        'div[class*="response-message"]',
+        'div[class*="ChatMessage"][data-role="assistant"]'
+      ]
+      for (const sel of selectors) {
+        try {
+          const nodes = document.querySelectorAll(sel)
+          if (nodes && nodes.length > 0) {
+            return nodes[nodes.length - 1] as HTMLElement
+          }
+        } catch (_) {}
+      }
+
+      // Check articles / conversation turns
+      try {
+        const turns = document.querySelectorAll('article, div[data-testid*="conversation-turn"], div[class*="conversation-item"]')
+        if (turns && turns.length > 0) {
+          const lastTurn = turns[turns.length - 1] as HTMLElement
+          if (
+            !lastTurn.querySelector('[data-message-author-role="user"]') &&
+            !lastTurn.querySelector('.font-user-message') &&
+            !lastTurn.querySelector('[data-user-message="true"]') &&
+            !lastTurn.classList.contains('font-user-message')
+          ) {
+            return lastTurn
+          }
+        }
+      } catch (_) {}
+
+      return null
+    }
 
     function extractActionsFromText(fullText: string): Array<{ payload: any; raw: string }> {
       const actions: Array<{ payload: any; raw: string }> = []
@@ -559,6 +606,12 @@ try {
       }
 
       for (const item of extracted) {
+        const payloadHash = JSON.stringify(item.payload)
+        if (executedActionHashes.has(payloadHash)) {
+          continue
+        }
+        executedActionHashes.add(payloadHash)
+
         // Send to main process
         ipcRenderer.send('workbench:action-triggered', item.payload)
 
@@ -604,8 +657,10 @@ try {
       if (!isChatSite()) return
       if (scanTimeout) clearTimeout(scanTimeout)
       scanTimeout = setTimeout(() => {
+        const targetContainer = getLatestAssistantContainer()
+        if (!targetContainer) return
         const codeElements: HTMLElement[] = []
-        document.querySelectorAll(
+        targetContainer.querySelectorAll(
           'pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
         ).forEach((el) => {
           codeElements.push(el as HTMLElement)
@@ -660,15 +715,43 @@ try {
       hideFeedbackBubbles()
     })
 
+    function markHistoricalActions() {
+      try {
+        const blocks = document.querySelectorAll(
+          'pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
+        )
+        blocks.forEach((el) => {
+          const htmlEl = el as HTMLElement
+          const rawText = (htmlEl.innerText || htmlEl.textContent || '').trim()
+          if (
+            rawText.includes('workbench:action') ||
+            rawText.includes('create_folder') ||
+            rawText.includes('write_file') ||
+            rawText.includes('"action"')
+          ) {
+            const extracted = extractActionsFromText(rawText)
+            for (const item of extracted) {
+              const hash = JSON.stringify(item.payload)
+              executedActionHashes.add(hash)
+            }
+            htmlEl.setAttribute('data-workbench-executed', 'true')
+            executedElements.add(htmlEl)
+          }
+        })
+      } catch (_) {}
+    }
+
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true, characterData: true })
       checkPrimedStatus()
       hideFeedbackBubbles()
+      setTimeout(markHistoricalActions, 400)
     } else {
       document.addEventListener('DOMContentLoaded', () => {
         observer.observe(document.body, { childList: true, subtree: true, characterData: true })
         checkPrimedStatus()
         hideFeedbackBubbles()
+        setTimeout(markHistoricalActions, 400)
       })
     }
 

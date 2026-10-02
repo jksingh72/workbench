@@ -43,6 +43,30 @@ export const readFileAction: ActionDefinition = {
       throw new Error(`Path is a directory, not a file: "${filePath}". Use list_directory instead.`)
     }
 
+    // Transparently handle Microsoft Word documents via read_docx
+    if (resolvedPath.toLowerCase().endsWith('.docx')) {
+      return await ctx.dispatch(
+        {
+          action: 'read_docx',
+          path: resolvedPath,
+          maxLines,
+        },
+        targetPane
+      )
+    }
+
+    // Transparently handle PDF documents via read_pdf
+    if (resolvedPath.toLowerCase().endsWith('.pdf')) {
+      return await ctx.dispatch(
+        {
+          action: 'read_pdf',
+          path: resolvedPath,
+          maxLines,
+        },
+        targetPane
+      )
+    }
+
     // Limit maximum size to prevent memory overload (max 1MB)
     if (stats.size > 1024 * 1024) {
       throw new Error(`File is too large to read directly (${Math.round(stats.size / 1024)} KB). Maximum readable size is 1 MB.`)

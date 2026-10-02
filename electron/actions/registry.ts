@@ -77,11 +77,34 @@ export class ActionRegistry {
       workspaceText = `Active Workspace Folders:\n- Current Action Target: ${targetLabel} (\`${workspaceInfo.activeDirectory}\`)\n- Book View Folder: \`${workspaceInfo.bookDirectory || 'None'}\`\n- Note View Folder: \`${workspaceInfo.noteDirectory || 'None'}\`\n(All relative file actions execute inside Current Action Target. Use \`set_active_directory\` to switch)\n`
     }
 
+    const hasActiveDir = Boolean(
+      (typeof workspaceInfo === 'string' && workspaceInfo.trim()) ||
+      (typeof workspaceInfo === 'object' && workspaceInfo?.activeDirectory?.trim())
+    )
+    const activeDirDisplay =
+      typeof workspaceInfo === 'string'
+        ? workspaceInfo
+        : typeof workspaceInfo === 'object'
+        ? workspaceInfo.activeDirectory
+        : ''
+
     const lines: string[] = [
       `You are integrated with Workbench Desktop as an automated coding and filesystem assistant.`,
       workspaceText,
       `When the user asks you to create folders, write code files, scaffold projects, or perform file operations, you MUST output a single \`\`\`workbench:action code block containing JSON.`,
       `Workbench will automatically intercept and execute the action on the user's computer.`,
+      ``,
+      `### CRITICAL: Initial Response Upon Priming:`,
+      `When you receive this priming message, your IMMEDIATE first response to the user MUST strictly follow this 3-part format:`,
+      `1. **Connection Status**:`,
+      hasActiveDir
+        ? `   - State: "⚡ **Connection Status:** Connected to Workbench (Active Target: \`${activeDirDisplay}\`)"`
+        : `   - State: "⚪ **Connection Status:** Not Connected (No active directory linked)"`,
+      `   - **DO NOT** execute \`list_directory\` or output any list of files from the active folder upon priming!`,
+      `2. **List of Available Actions**:`,
+      `   - Present a clean, concise bulleted list of the actions currently available in Workbench (e.g. \`create_folder\`, \`write_file\`, \`read_file\`, \`create_project\`, \`create_action\`, etc.).`,
+      `3. **Invite for Instructions**:`,
+      `   - Conclude with an invitation asking the user for their instructions to operate (e.g. "I'm ready for your instructions. What would you like to build, organize, or create?").`,
       ``,
     ]
 
@@ -105,6 +128,30 @@ export class ActionRegistry {
 
     lines.push(`### Batch Execution:`)
     lines.push(`You can also output multiple actions as a JSON array in a single \`\`\`workbench:action block to run them sequentially.`)
+    lines.push(``)
+    lines.push(`### Adding New Actions to Workbench (Extensibility & Deduplication Rules):`)
+    lines.push(`You have the capability to create and add new custom actions to Workbench Desktop.`)
+    lines.push(`CRITICAL CHECK BEFORE CREATING AN ACTION:`)
+    lines.push(`1. Always check the Available Workbench Actions list first.`)
+    lines.push(`2. If an existing action already provides this functionality or has matching aliases (e.g., \`create_folder\` for mkdir/folders, \`write_file\` for writing/saving files, \`read_file\` for reading, \`delete_file\` for deletions, \`open_file\` for viewing files):`)
+    lines.push(`   - DO NOT create a new action or call \`create_action\`!`)
+    lines.push(`   - Redirect the discussion: inform the user that action \`<action_id>\` already exists and show them how to use it with a brief example.`)
+    lines.push(`3. If and only if the requested functionality is genuinely new and does not exist in any action:`)
+    lines.push(`   - Use the \`create_action\` action.`)
+    lines.push(`   - The action will be created in its own separate file in \`electron/actions/<name>Action.ts\` in parallel with other actions, maintaining strict modularity.`)
+    lines.push(`   - Provide complete, robust TypeScript code implementing \`ActionDefinition\` from \`./types\`:`)
+    lines.push(`     - \`id\` (string): Canonical name in snake_case (e.g. \`download_file\`, \`archive_folder\`)`)
+    lines.push(`     - \`aliases\` (string[]): Alternative synonyms (e.g. \`['curl', 'wget']\`)`)
+    lines.push(`     - \`description\` (string): Clear summary of what the action does and when to use it`)
+    lines.push(`     - \`parameters\` (object): Detailed schema metadata of arguments`)
+    lines.push(`     - \`example\` (object): Sample JSON payload demonstrating the action`)
+    lines.push(`     - \`async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult>\`:`)
+    lines.push(`       - Sanitize paths using \`ctx.resolveSafePath(inputPath, targetPane)\``)
+    lines.push(`       - Provide desktop toast notifications using \`ctx.notify('...')\``)
+    lines.push(`       - Trigger explorer refreshes using \`ctx.refreshExplorer(targetPane)\``)
+    lines.push(`       - Return \`{ success: true, action: id, message: '...' }\``)
+    lines.push(`4. When \`create_action\` runs, Workbench automatically writes the separate file, registers it in \`electron/actions/index.ts\`, and opens it in an editor tab.`)
+    lines.push(`5. For complete architecture guidelines, context helpers, and boilerplate examples, refer to \`docs/CREATING_NEW_ACTIONS_GUIDE.md\`.`)
     lines.push(``)
     lines.push(`### Action Execution Feedback Loop:`)
     lines.push(`After Workbench executes your action on the local machine, it will automatically return an observation message to this chat:`)
