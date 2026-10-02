@@ -16,6 +16,7 @@ import { createActionAction } from './createActionAction'
 
 import { summarizeFileAction } from './summarizeFileAction'
 import { updateActionAction } from './updateActionAction'
+import { createDocxAction } from './createDocxAction'
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -34,6 +35,7 @@ export * from './workspaceActions'
 export * from './createActionAction'
 export * from './summarizeFileAction'
 export * from './updateActionAction'
+export * from './createDocxAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -61,5 +63,6 @@ export function registerBuiltinActions(): ActionRegistry {
 
     registry.register(summarizeFileAction)
     registry.register(updateActionAction)
+    registry.register(createDocxAction)
   return registry
 }
