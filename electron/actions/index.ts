@@ -17,6 +17,7 @@ import { createActionAction } from './createActionAction'
 import { summarizeFileAction } from './summarizeFileAction'
 import { updateActionAction } from './updateActionAction'
 import { createDocxAction } from './createDocxAction'
+import { attachFileAction } from './attachFileAction'
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -30,6 +31,7 @@ export * from './listDirectoryAction'
 export * from './readFileAction'
 export * from './readDocxAction'
 export * from './readPdfAction'
+export * from './attachFileAction'
 export * from './listActionsAction'
 export * from './workspaceActions'
 export * from './createActionAction'
@@ -56,13 +58,14 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(readFileAction)
   registry.register(readDocxAction)
   registry.register(readPdfAction)
+  registry.register(attachFileAction)
   registry.register(listActionsAction)
   registry.register(getWorkspaceFoldersAction)
   registry.register(setActiveDirectoryAction)
   registry.register(createActionAction)
 
-    registry.register(summarizeFileAction)
-    registry.register(updateActionAction)
-    registry.register(createDocxAction)
+  registry.register(summarizeFileAction)
+  registry.register(updateActionAction)
+  registry.register(createDocxAction)
   return registry
 }

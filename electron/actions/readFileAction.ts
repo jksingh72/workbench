@@ -43,8 +43,20 @@ export const readFileAction: ActionDefinition = {
       throw new Error(`Path is a directory, not a file: "${filePath}". Use list_directory instead.`)
     }
 
-    // Transparently handle Microsoft Word documents via read_docx
+    // Transparently handle Microsoft Word documents via native attachment or read_docx
     if (resolvedPath.toLowerCase().endsWith('.docx')) {
+      if (typeof ctx.attachToChat === 'function') {
+        ctx.notify(`📎 Attaching "${path.basename(resolvedPath)}" to chat...`)
+        const attachRes = await ctx.attachToChat(resolvedPath)
+        if (attachRes.success) {
+          return {
+            success: true,
+            action: 'read_file',
+            createdPath: resolvedPath,
+            message: `Attached "${path.basename(resolvedPath)}" directly to the chat session for native processing.`,
+          }
+        }
+      }
       return await ctx.dispatch(
         {
           action: 'read_docx',
@@ -55,8 +67,20 @@ export const readFileAction: ActionDefinition = {
       )
     }
 
-    // Transparently handle PDF documents via read_pdf
+    // Transparently handle PDF documents via native attachment or read_pdf
     if (resolvedPath.toLowerCase().endsWith('.pdf')) {
+      if (typeof ctx.attachToChat === 'function') {
+        ctx.notify(`📎 Attaching "${path.basename(resolvedPath)}" to chat...`)
+        const attachRes = await ctx.attachToChat(resolvedPath)
+        if (attachRes.success) {
+          return {
+            success: true,
+            action: 'read_file',
+            createdPath: resolvedPath,
+            message: `Attached "${path.basename(resolvedPath)}" directly to the chat session for native processing.`,
+          }
+        }
+      }
       return await ctx.dispatch(
         {
           action: 'read_pdf',
@@ -67,7 +91,21 @@ export const readFileAction: ActionDefinition = {
       )
     }
 
-    // Limit maximum size to prevent memory overload (max 1MB)
+    // For any file larger than 500 KB, attach directly to avoid chat freezes
+    if (stats.size > 500 * 1024 && typeof ctx.attachToChat === 'function') {
+      ctx.notify(`📎 Attaching "${path.basename(resolvedPath)}" to chat...`)
+      const attachRes = await ctx.attachToChat(resolvedPath)
+      if (attachRes.success) {
+        return {
+          success: true,
+          action: 'read_file',
+          createdPath: resolvedPath,
+          message: `Attached "${path.basename(resolvedPath)}" (${(stats.size / (1024 * 1024)).toFixed(2)} MB) directly to the chat session.`,
+        }
+      }
+    }
+
+    // Limit maximum size for raw text dumping (max 1MB)
     if (stats.size > 1024 * 1024) {
       throw new Error(`File is too large to read directly (${Math.round(stats.size / 1024)} KB). Maximum readable size is 1 MB.`)
     }

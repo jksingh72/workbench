@@ -22,7 +22,9 @@ export class AIViewHandler {
   private actionModeEnabled: boolean = true
   private feedbackTurnCount: number = 0
   private lastFeedbackTimestamp: number = 0
-  private executedActionHashes: Set<string> = new Set()
+  private executedActionTimestamps: Map<string, number> = new Map()
+  private lastUploadKey: string = ''
+  private lastUploadTime: number = 0
 
   constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
@@ -398,6 +400,8 @@ export class AIViewHandler {
     }
 
     this.currentSourceId = source.id
+    this.executedActionTimestamps.clear()
+    ActionDispatcher.getInstance().clearRecentDispatched()
     const isExisting = this.views.has(source.id)
     this.view = this.getOrCreateView(source)
 
@@ -470,46 +474,18 @@ export class AIViewHandler {
       // Put into system clipboard as backup
       clipboard.writeText(prompt)
 
-      // Inject into prompt input field
-      const injected = await this.view.webContents.executeJavaScript(`
-        (function(textToInsert) {
-          try {
-            const input = document.querySelector('#prompt-textarea') || 
-                          document.querySelector('div[contenteditable="true"]') || 
-                          document.querySelector('textarea');
-            if (!input) return false;
-
-            input.focus();
-
-            if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-              input.value = textToInsert;
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              return true;
-            }
-
-            const selection = window.getSelection();
-            const range = document.createRange();
-            range.selectNodeContents(input);
-            selection.removeAllRanges();
-            selection.addRange(range);
-
-            document.execCommand('insertText', false, textToInsert);
-            input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
-            return true;
-          } catch (e) {
-            console.error('Injection error:', e);
-            return false;
-          }
-        })(${JSON.stringify(prompt)})
-      `)
-
-      this.view.webContents.focus()
+      // Inject into prompt input field using native input pipeline
+      const injectionResult = await this.injectAndSubmitChatText(prompt, {
+        autoSubmit: false,
+        waitForStreaming: false,
+      })
 
       return {
-        success: true,
+        success: injectionResult.success,
         text,
         prompt,
-        injected: Boolean(injected),
+        injected: Boolean(injectionResult.success),
+        error: injectionResult.error,
       }
     } catch (err: any) {
       console.error('[AIView] doAskAI error:', err)
@@ -720,7 +696,20 @@ export class AIViewHandler {
               }
             }
 
-            // 3. Generic fallback
+            // 3. Gemini selectors
+            if (!assistantText) {
+              var geminiResponses = document.querySelectorAll('model-response, .model-response-text');
+              if (geminiResponses && geminiResponses.length > 0) {
+                var lastGemini = geminiResponses[geminiResponses.length - 1];
+                assistantText = (lastGemini.innerText || lastGemini.textContent || '').trim();
+              }
+              var geminiUser = document.querySelectorAll('user-query');
+              if (geminiUser && geminiUser.length > 0) {
+                promptText = (geminiUser[geminiUser.length - 1].innerText || '').trim();
+              }
+            }
+
+            // 4. Generic fallback
             if (!assistantText) {
               var articles = document.querySelectorAll('article');
               if (articles && articles.length > 0) {
@@ -907,6 +896,15 @@ export class AIViewHandler {
         return { success: false, error: 'No valid files selected' }
       }
 
+      const uploadKey = validPaths.slice().sort().join('|')
+      const now = Date.now()
+      if (uploadKey === this.lastUploadKey && now - this.lastUploadTime < 2500) {
+        console.log('[AIView] Duplicate sendFilesToAI suppressed within debounce window')
+        return { success: true, count: validPaths.length, uploaded: true }
+      }
+      this.lastUploadKey = uploadKey
+      this.lastUploadTime = now
+
       const textExtensions = [
         'txt', 'md', 'markdown', 'js', 'ts', 'jsx', 'tsx', 'py', 'json', 'html', 'htm',
         'css', 'scss', 'csv', 'xml', 'yaml', 'yml', 'sql', 'sh', 'bat', 'ps1',
@@ -945,7 +943,7 @@ export class AIViewHandler {
       for (const fp of validPaths) {
         const stat = await fs.promises.stat(fp)
         if (stat.isDirectory()) continue
-        if (stat.size > 25 * 1024 * 1024) continue
+        if (stat.size > 100 * 1024 * 1024) continue
 
         const fileName = path.basename(fp)
         const ext = path.extname(fileName).toLowerCase().replace('.', '')
@@ -972,7 +970,7 @@ export class AIViewHandler {
       }
 
       if (filesData.length === 0) {
-        return { success: false, error: 'No files eligible for upload (folders or files >25MB skipped)' }
+        return { success: false, error: 'No files eligible for upload (folders or files >100MB skipped)' }
       }
 
       const userInstruction = (customInstruction || '').trim()
@@ -981,24 +979,42 @@ export class AIViewHandler {
         (async function(filesList, userInstruction) {
           let fileUploaded = false;
           try {
-            const fileInput = document.querySelector('input[type="file"]');
-            if (fileInput) {
-              const dt = new DataTransfer();
-              for (const item of filesList) {
-                const byteCharacters = atob(item.base64Data);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray], { type: item.mimeType });
-                const file = new File([blob], item.fileName, { type: item.mimeType, lastModified: Date.now() });
-                dt.items.add(file);
+            const dt = new DataTransfer();
+            for (const item of filesList) {
+              const byteCharacters = atob(item.base64Data);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
               }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: item.mimeType });
+              const file = new File([blob], item.fileName, { type: item.mimeType, lastModified: Date.now() });
+              dt.items.add(file);
+            }
+
+            // Strategy A: input[type="file"] (primary native upload for Claude, ChatGPT, Gemini)
+            const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+            const fileInput = fileInputs.find(function(i) { return !i.disabled; }) || fileInputs[0];
+            if (fileInput) {
               fileInput.files = dt.files;
-              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-              fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+              fileInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+              fileInput.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
               fileUploaded = true;
+            } else {
+              // Strategy B: Drag-and-Drop fallback ONLY if no file input exists (on a single target)
+              const dropTarget = 
+                document.querySelector('#prompt-textarea') || 
+                document.querySelector('div[contenteditable="true"]') || 
+                document.querySelector('textarea') || 
+                document.querySelector('form');
+              if (dropTarget) {
+                try {
+                  dropTarget.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }));
+                  dropTarget.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+                  dropTarget.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+                  fileUploaded = true;
+                } catch (_) {}
+              }
             }
           } catch (e) {
             console.warn('[AIView] Batch file upload injection failed:', e);
@@ -1232,7 +1248,13 @@ export class AIViewHandler {
                     if (depth === 0 && startIdx !== -1) {
                       var candidate = fullText.substring(startIdx, i + 1).trim();
                       try {
-                        var parsed = JSON.parse(candidate);
+                        var parsed = null;
+                        try {
+                          parsed = JSON.parse(candidate);
+                        } catch (_) {
+                          var sanitized = candidate.replace(/\\\\(?!["\\\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\\\\\');
+                          parsed = JSON.parse(sanitized);
+                        }
                         if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
                           actions.push({ payload: parsed, raw: candidate });
                         }
@@ -1253,8 +1275,10 @@ export class AIViewHandler {
               if (el.classList.contains('wb-hidden-action-prompt') || (el.closest && el.closest('.wb-hidden-action-prompt'))) {
                 return false;
               }
-              if (el.offsetParent === null && el.tagName !== 'BODY') {
-                return false;
+              var isShadowChild = Boolean(el.getRootNode && el.getRootNode() !== document);
+              if (!isShadowChild && el.offsetParent === null && el.tagName !== 'BODY') {
+                var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 0, height: 0 };
+                if (rect.width === 0 && rect.height === 0) return false;
               }
               try {
                 if (window.getComputedStyle(el).display === 'none') return false;
@@ -1302,8 +1326,6 @@ export class AIViewHandler {
               if (
                 text.includes('You are integrated with Workbench Desktop') ||
                 text.includes('Available Workbench Actions') ||
-                text.includes('Available actions:') ||
-                text.includes('Available Actions:') ||
                 text.includes('### Available Workbench Actions') ||
                 text.includes('workbench:action code block') ||
                 text.includes('Custom User Instructions') ||
@@ -1364,10 +1386,23 @@ export class AIViewHandler {
               return [];
             }
 
-            window.__wbExecutedActionHashes = window.__wbExecutedActionHashes || new Set();
+            window.__wbExecutedActionTimestamps = window.__wbExecutedActionTimestamps || new Map();
+            var now = Date.now();
+            for (var [h, t] of window.__wbExecutedActionTimestamps.entries()) {
+              if (now - t > 30000) window.__wbExecutedActionTimestamps.delete(h);
+            }
 
-            // 1. Scan code and pre containers ONLY inside the newest assistant message container
-            var codeBlocks = targetContainer.querySelectorAll('pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]');
+            // 1. Scan code and pre containers inside the newest assistant message container
+            var searchScope = (targetContainer.closest && targetContainer.closest('article, [data-testid*="conversation-turn"]')) || targetContainer;
+            var codeBlocks = [];
+            searchScope.querySelectorAll('code-block, pre, code, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]').forEach(function(node) {
+              codeBlocks.push(node);
+              if (node.shadowRoot) {
+                try {
+                  node.shadowRoot.querySelectorAll('pre, code, div').forEach(function(s) { codeBlocks.push(s); });
+                } catch (_) {}
+              }
+            });
             for (var c = 0; c < codeBlocks.length; c++) {
               var el = codeBlocks[c];
 
@@ -1395,10 +1430,11 @@ export class AIViewHandler {
 
                     for (var e = 0; e < extracted.length; e++) {
                       var payloadHash = JSON.stringify(extracted[e].payload);
-                      if (window.__wbExecutedActionHashes.has(payloadHash)) {
+                      var lastRan = window.__wbExecutedActionTimestamps.get(payloadHash);
+                      if (lastRan && (now - lastRan < 15000)) {
                         continue;
                       }
-                      window.__wbExecutedActionHashes.add(payloadHash);
+                      window.__wbExecutedActionTimestamps.set(payloadHash, now);
 
                       results.push(extracted[e].payload);
                       var actionType = extracted[e].payload.action || extracted[e].payload.type || 'action';
@@ -1449,12 +1485,18 @@ export class AIViewHandler {
       const dispatcher = ActionDispatcher.getInstance()
       const executionResults = []
 
+      const now = Date.now()
+      for (const [h, t] of this.executedActionTimestamps.entries()) {
+        if (now - t > 30000) this.executedActionTimestamps.delete(h)
+      }
+
       for (const payload of candidates) {
         const payloadHash = JSON.stringify(payload)
-        if (this.executedActionHashes.has(payloadHash)) {
+        const lastRan = this.executedActionTimestamps.get(payloadHash)
+        if (lastRan && now - lastRan < 15000) {
           continue
         }
-        this.executedActionHashes.add(payloadHash)
+        this.executedActionTimestamps.set(payloadHash, now)
 
         const res = await dispatcher.dispatch(payload)
         executionResults.push(res)
@@ -1516,7 +1558,14 @@ export class AIViewHandler {
       }
 
       if (result.details?.content) {
-        body += `\nFile Content:\n\`\`\`\n${result.details.content}\n\`\`\``
+        let content = String(result.details.content)
+        const MAX_CONTENT_LEN = 32000
+        if (content.length > MAX_CONTENT_LEN) {
+          content =
+            content.slice(0, MAX_CONTENT_LEN) +
+            `\n\n... [Content truncated: showing first ${MAX_CONTENT_LEN.toLocaleString()} characters of ${content.length.toLocaleString()}]`
+        }
+        body += `\nFile Content:\n\`\`\`\n${content}\n\`\`\``
       }
     } else {
       body = `[Workbench Action Result: ❌ Action "${actionType}" failed: ${result.error || result.message}]`
@@ -1536,6 +1585,8 @@ export class AIViewHandler {
 
     const feedbackText = this.formatActionFeedback(payload, result)
     if (!feedbackText) return
+
+    const actionType = (payload.action || payload.type || result.action || 'action').toLowerCase()
 
     // Loop Guard: Reset count if idle for more than 20 seconds
     const now = Date.now()
@@ -1558,125 +1609,347 @@ export class AIViewHandler {
       }
     } else {
       this.feedbackTurnCount++
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+    }
+
+    console.log(`[AIView] Feedback Loop [Turn ${this.feedbackTurnCount}]: Delivering result for ${actionType}`)
+    const delivery = await this.sendActionFeedbackToAI(feedbackText, autoSubmit)
+
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      if (delivery.submitted) {
         this.mainWindow.webContents.send('workbench:toast', {
-          message: `🔄 Action Feedback Loop (turn ${this.feedbackTurnCount}/${MAX_AUTONOMOUS_TURNS}): Sent result to AI`,
+          message: `✅ Action result delivered to AI: ${actionType} (turn ${this.feedbackTurnCount}/${MAX_AUTONOMOUS_TURNS})`,
           type: result.success ? 'success' : 'warning',
+        })
+      } else if (delivery.success) {
+        this.mainWindow.webContents.send('workbench:toast', {
+          message: `⚠️ Action result ready in chat. Press Enter or click Send to submit.`,
+          type: 'info',
+        })
+      } else {
+        console.warn(`[AIView] Failed to deliver action feedback to AI:`, delivery.error)
+        this.mainWindow.webContents.send('workbench:toast', {
+          message: `❌ Failed to deliver action result to AI: ${delivery.error}`,
+          type: 'error',
         })
       }
     }
+  }
 
-    console.log(`[AIView] Feedback Loop [Turn ${this.feedbackTurnCount}]: ${feedbackText.split('\n')[0]}`)
-    await this.sendActionFeedbackToAI(feedbackText, autoSubmit)
+  /**
+   * Universal, resilient chat input text injection & auto-submission engine.
+   * Leverages Chromium native WebContents input pipeline (insertText & sendInputEvent)
+   * to guarantee that ProseMirror (Claude), React (ChatGPT), and Angular (Gemini)
+   * state stores receive trusted events and enable their Send buttons.
+   */
+  public async injectAndSubmitChatText(
+    textToInsert: string,
+    options: {
+      autoSubmit?: boolean
+      waitForStreaming?: boolean
+      maxWaitMs?: number
+      isPriming?: boolean
+    } = {}
+  ): Promise<{ success: boolean; submitted?: boolean; error?: string }> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { success: false, error: 'AI view is not ready' }
+    }
+
+    const {
+      autoSubmit = true,
+      waitForStreaming = true,
+      maxWaitMs = 45000,
+      isPriming = false,
+    } = options
+
+    try {
+      // Step 1: Wait for AI streaming / response generation to complete
+      if (waitForStreaming) {
+        const streamWaitStart = Date.now()
+        let streaming = true
+        while (streaming && Date.now() - streamWaitStart < maxWaitMs) {
+          if (!this.view || this.view.webContents.isDestroyed()) {
+            return { success: false, error: 'AI view closed while waiting' }
+          }
+
+          const isStreaming: boolean = await this.view.webContents.executeJavaScript(`
+            (function() {
+              const stopSelectors = [
+                'button[data-testid="stop-button"]',
+                'button[aria-label*="Stop generating" i]',
+                'button[aria-label*="Stop Response" i]',
+                'button[aria-label*="Stop streaming" i]',
+                'button[aria-label="Stop" i]'
+              ];
+              for (const sel of stopSelectors) {
+                const btn = document.querySelector(sel);
+                if (btn && btn.offsetParent !== null && !btn.disabled) {
+                  const rect = btn.getBoundingClientRect();
+                  if (rect.width > 0 && rect.height > 0) {
+                    const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    if (ariaLabel.includes('read') || ariaLabel.includes('voice') || ariaLabel.includes('speech') || ariaLabel.includes('audio')) {
+                      continue;
+                    }
+                    return true;
+                  }
+                }
+              }
+              if (document.querySelector('.result-streaming, [data-is-streaming="true"], .cursor-blinking')) {
+                return true;
+              }
+              return false;
+            })()
+          `).catch(() => false)
+
+          if (isStreaming) {
+            await new Promise((r) => setTimeout(r, 300))
+          } else {
+            streaming = false
+          }
+        }
+
+        // Give the UI 200ms to settle after streaming finishes
+        await new Promise((r) => setTimeout(r, 200))
+      }
+
+      // Step 2: Locate and focus the chat input in DOM across Claude, ChatGPT, Gemini, etc.
+      const focusResult: { success: boolean; error?: string; isContentEditable?: boolean; tagName?: string } =
+        await this.view.webContents.executeJavaScript(`
+        (function() {
+          const inputSelectors = [
+            '#prompt-textarea',
+            'div.ProseMirror[contenteditable="true"]',
+            'div[contenteditable="true"].ProseMirror',
+            'div[contenteditable="true"][role="textbox"]',
+            'rich-textarea div[contenteditable="true"]',
+            'div.ql-editor[contenteditable="true"]',
+            '#chat-input',
+            'div[contenteditable="true"]',
+            'textarea[data-id="root"]',
+            'textarea[placeholder*="Ask" i]',
+            'textarea[placeholder*="Message" i]',
+            'textarea'
+          ];
+
+          let input = null;
+          for (const sel of inputSelectors) {
+            const el = document.querySelector(sel);
+            if (el && el.offsetParent !== null && !el.disabled) {
+              input = el;
+              break;
+            }
+          }
+
+          if (!input) {
+            return { success: false, error: 'Chat input field not found' };
+          }
+
+          input.focus();
+
+          // Select all existing content so native insertText cleanly replaces any draft
+          if (input.isContentEditable) {
+            const range = document.createRange();
+            range.selectNodeContents(input);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          } else if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+            input.select();
+          }
+
+          return {
+            success: true,
+            isContentEditable: Boolean(input.isContentEditable),
+            tagName: input.tagName ? input.tagName.toLowerCase() : 'unknown'
+          };
+        })()
+      `)
+
+      if (!focusResult.success) {
+        return { success: false, error: focusResult.error || 'Failed to focus chat input' }
+      }
+
+      // Step 3: Native Chromium text insertion via Electron's WebContents
+      this.view.webContents.focus()
+      try {
+        await this.view.webContents.insertText(textToInsert)
+      } catch (insertErr) {
+        console.warn('[AIView] webContents.insertText failed, using fallback:', insertErr)
+        await this.view.webContents.executeJavaScript(`
+          (function(t) {
+            const input = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('div[contenteditable="true"]');
+            if (input) {
+              if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+                input.value = t;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+              } else {
+                document.execCommand('insertText', false, t);
+              }
+            }
+          })(${JSON.stringify(textToInsert)})
+        `)
+      }
+
+      // Step 3.5: Dispatch input and change events on activeElement so React (ChatGPT) and Angular (Gemini) enable their Send buttons
+      await this.view.webContents.executeJavaScript(`
+        (function() {
+          const el = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('rich-textarea div[contenteditable="true"]') || document.querySelector('div[contenteditable="true"]');
+          if (el) {
+            try {
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText' }));
+            } catch (_) {}
+            el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          }
+        })()
+      `).catch(() => {})
+
+      // Step 4: Allow 200ms for React/ProseMirror DOM reconciliation & send button enabling
+      await new Promise((r) => setTimeout(r, 200))
+
+      if (!autoSubmit) {
+        return { success: true, submitted: false }
+      }
+
+      // Step 5: Multi-layered Submission
+      // Layer A: Attempt DOM click on the now-enabled Send button
+      const clickResult: { clicked: boolean; sendBtnFound: boolean } =
+        await this.view.webContents.executeJavaScript(`
+        (function() {
+          const sendSelectors = [
+            'button[data-testid="send-button"]',
+            'button[data-testid="fruitjuice-send-button"]',
+            'button[aria-label*="Send message" i]',
+            'button[aria-label*="Send prompt" i]',
+            'button[aria-label="Send" i]',
+            'button[aria-label*="Send" i]',
+            'button[aria-label*="Submit query" i]',
+            'button[aria-label*="Submit" i]',
+            'button[type="submit"]',
+            'button.send-button',
+            '.send-button-container button',
+            'div[role="button"][aria-label*="Send" i]',
+            'div[role="button"][aria-label*="Submit" i]'
+          ];
+
+          for (const sel of sendSelectors) {
+            const btn = document.querySelector(sel);
+            if (btn && btn.offsetParent !== null && !btn.disabled) {
+              btn.click();
+              return { clicked: true, sendBtnFound: true };
+            }
+          }
+          return { clicked: false, sendBtnFound: false };
+        })()
+      `).catch(() => ({ clicked: false, sendBtnFound: false }))
+
+      // Layer B: Hardware-level Enter key via Electron sendInputEvent if button wasn't clicked
+      if (!clickResult.clicked) {
+        this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+        this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+      }
+
+      // Step 6: Post-submission verification
+      await new Promise((r) => setTimeout(r, 500))
+
+      const verification: { submitted: boolean } = await this.view.webContents.executeJavaScript(`
+        (function() {
+          const inputSelectors = [
+            '#prompt-textarea',
+            'div.ProseMirror[contenteditable="true"]',
+            'div[contenteditable="true"].ProseMirror',
+            'div[contenteditable="true"][role="textbox"]',
+            'rich-textarea div[contenteditable="true"]',
+            'div.ql-editor[contenteditable="true"]',
+            '#chat-input',
+            'div[contenteditable="true"]',
+            'textarea'
+          ];
+          for (const sel of inputSelectors) {
+            const el = document.querySelector(sel);
+            if (el && el.offsetParent !== null) {
+              const val = (el.value || el.innerText || el.textContent || '').trim();
+              if (val.length === 0) return { submitted: true };
+            }
+          }
+
+          const stopBtn = document.querySelector('button[data-testid="stop-button"], button[aria-label*="Stop" i]');
+          if (stopBtn && stopBtn.offsetParent !== null && !stopBtn.disabled) {
+            return { submitted: true };
+          }
+
+          return { submitted: false };
+        })()
+      `).catch(() => ({ submitted: clickResult.clicked }))
+
+      // If still not submitted, try one more hardware Enter fallback
+      if (!verification.submitted && !clickResult.clicked) {
+        this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+        this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+        await new Promise((r) => setTimeout(r, 300))
+      }
+
+      if (isPriming) {
+        // Run prompt-bubble hiding passes for priming - ONLY targeting user query containers
+        await this.view.webContents.executeJavaScript(`
+          (function() {
+            function hidePromptElement() {
+              const keywords = [
+                'You are integrated with Workbench Desktop',
+                'Available Workbench Actions'
+              ];
+              const selectors = [
+                'user-query',
+                '[data-message-author-role="user"]',
+                'div[data-testid="user-message"]',
+                'div.font-user-message',
+                '[class*="user-message"]'
+              ];
+              const elements = document.querySelectorAll(selectors.join(', '));
+              elements.forEach(function(el) {
+                const text = el.innerText || '';
+                if (keywords.some(function(k) { return text.includes(k); })) {
+                  el.classList.add('wb-hidden-action-prompt');
+                  el.style.display = 'none';
+                }
+              });
+            }
+            setTimeout(hidePromptElement, 150);
+            setTimeout(hidePromptElement, 500);
+            setTimeout(hidePromptElement, 1200);
+          })()
+        `).catch(() => {})
+      }
+
+      return {
+        success: true,
+        submitted: verification.submitted || clickResult.clicked,
+      }
+    } catch (err: any) {
+      console.warn('[AIView] injectAndSubmitChatText error:', err)
+      return { success: false, error: err.message || 'Injection failed' }
+    }
   }
 
   /**
    * Injects an action execution result back into the AI chat input and submits it
    * after verifying the AI has finished generating its previous response.
    */
-  public async sendActionFeedbackToAI(feedbackText: string, autoSubmit: boolean = true) {
-    if (!this.view || this.view.webContents.isDestroyed()) return
-    try {
-      await this.view.webContents.executeJavaScript(`
-        (function(textToInsert, shouldSubmit) {
-          return new Promise(function(resolve) {
-            const startTime = Date.now();
-            const maxWaitMs = 45000; // Wait up to 45 seconds for streaming to finish
-
-            function checkAndSubmit() {
-              // 1. Check if AI is currently streaming/generating (Stop button is active)
-              const stopBtn = document.querySelector('button[data-testid="stop-button"]') ||
-                              document.querySelector('button[aria-label*="Stop"]') ||
-                              document.querySelector('button[aria-label*="stop"]');
-
-              if (stopBtn && (Date.now() - startTime < maxWaitMs)) {
-                setTimeout(checkAndSubmit, 350);
-                return;
-              }
-
-              // 2. Find prompt input field across all supported chat sites
-              const input = document.querySelector('#prompt-textarea') || 
-                            document.querySelector('div[contenteditable="true"].ProseMirror') ||
-                            document.querySelector('rich-textarea div[contenteditable="true"]') ||
-                            document.querySelector('.ql-editor') ||
-                            document.querySelector('#chat-input') ||
-                            document.querySelector('div[contenteditable="true"]') || 
-                            document.querySelector('textarea');
-
-              if (!input) {
-                if (Date.now() - startTime < maxWaitMs) {
-                  setTimeout(checkAndSubmit, 350);
-                  return;
-                }
-                resolve({ success: false, error: 'Input field not found' });
-                return;
-              }
-
-              input.focus();
-
-              // 3. Insert feedback text
-              if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                if (nativeSetter) {
-                  nativeSetter.call(input, textToInsert);
-                } else {
-                  input.value = textToInsert;
-                }
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-              } else {
-                const selection = window.getSelection();
-                const range = document.createRange();
-                range.selectNodeContents(input);
-                selection.removeAllRanges();
-                selection.addRange(range);
-                const success = document.execCommand('insertText', false, textToInsert);
-                if (!success || !input.textContent) {
-                  input.textContent = textToInsert;
-                }
-                input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-
-              if (!shouldSubmit) {
-                resolve({ success: true, submitted: false });
-                return;
-              }
-
-              // 4. Click send button after brief stabilization delay
-              setTimeout(function() {
-                const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
-                                document.querySelector('button[data-testid="fruitjuice-send-button"]') ||
-                                document.querySelector('button[aria-label*="Send prompt"]') ||
-                                document.querySelector('button[aria-label*="Send message"]') ||
-                                document.querySelector('button[aria-label*="send message"]') ||
-                                document.querySelector('button[aria-label*="Send"]') ||
-                                document.querySelector('button[aria-label*="send"]') ||
-                                document.querySelector('button[aria-label*="Submit query"]') ||
-                                document.querySelector('button[aria-label*="Submit"]') ||
-                                document.querySelector('button[aria-label*="submit"]') ||
-                                document.querySelector('button[type="submit"]') ||
-                                document.querySelector('button.send-button') ||
-                                document.querySelector('div[role="button"][aria-label*="Send"]');
-
-                if (sendBtn && !sendBtn.disabled) {
-                  sendBtn.click();
-                  resolve({ success: true, submitted: true });
-                } else {
-                  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-                  resolve({ success: true, submitted: true });
-                }
-              }, 400);
-            }
-
-            checkAndSubmit();
-          });
-        })(${JSON.stringify(feedbackText)}, ${autoSubmit})
-      `)
-    } catch (err) {
-      console.warn('[AIView] sendActionFeedbackToAI error:', err)
+  public async sendActionFeedbackToAI(
+    feedbackText: string,
+    autoSubmit: boolean = true
+  ): Promise<{ success: boolean; submitted?: boolean; error?: string }> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return { success: false, error: 'AI view is not ready' }
     }
+
+    return await this.injectAndSubmitChatText(feedbackText, {
+      autoSubmit,
+      waitForStreaming: true,
+      maxWaitMs: 45000,
+      isPriming: false,
+    })
   }
 
   public setActionMode(enabled: boolean) {
@@ -1705,138 +1978,69 @@ export class AIViewHandler {
     }
 
     try {
-      const injected = await this.view.webContents.executeJavaScript(`
-        (async function(textToInsert, forceInject) {
-          try {
-            // 1. Ensure CSS rule is installed to hide the action prompt bubble
-            if (!document.getElementById('wb-action-mode-styles')) {
-              const style = document.createElement('style');
-              style.id = 'wb-action-mode-styles';
-              style.textContent = \`
-                .wb-hidden-action-prompt {
-                  display: none !important;
-                }
-              \`;
-              document.head.appendChild(style);
-            }
-
-            // Function to tag and hide the prompt bubble across all AI chat platforms
-            function hidePromptElement() {
-              const keywords = [
-                'You are integrated with Workbench Desktop',
-                'Available Workbench Actions',
-                'workbench:action',
-                '[Workbench Action Result:'
-              ];
-              const selectors = [
-                'article',
-                'user-query',
-                'model-response',
-                '[data-message-author-role="user"]',
-                'div[data-testid="user-message"]',
-                'div.font-user-message',
-                '[class*="user-message"]',
-                '[class*="chat-message"]',
-                'div[class*="message-row"]',
-                'div[class*="message-bubble"]'
-              ];
-              const elements = document.querySelectorAll(selectors.join(', '));
-              elements.forEach(function(el) {
-                const text = el.innerText || '';
-                if (keywords.some(function(k) { return text.includes(k); })) {
-                  el.classList.add('wb-hidden-action-prompt');
-                  el.style.display = 'none';
-                }
-              });
-            }
-
-            // Install persistent MutationObserver to keep the prompt hidden across re-renders
-            if (!window.__wb_hide_observer) {
-              window.__wb_hide_observer = new MutationObserver(hidePromptElement);
-              window.__wb_hide_observer.observe(document.body, { childList: true, subtree: true });
-            }
-
-            // Check if current conversation is already primed (skip if already primed unless forced)
-            if (!forceInject) {
-              const bodyText = document.body ? document.body.innerText || '' : '';
-              if (bodyText.includes('You are integrated with Workbench Desktop') || bodyText.includes('Available Workbench Actions')) {
-                console.log('[AIView] Active chat is already primed with Workbench actions. Skipping duplicate injection.');
-                return { success: true, alreadyPrimed: true };
+      // 1. Ensure CSS rule is installed to hide the action prompt bubble
+      await this.view.webContents.executeJavaScript(`
+        (function() {
+          if (!document.getElementById('wb-action-mode-styles')) {
+            const style = document.createElement('style');
+            style.id = 'wb-action-mode-styles';
+            style.textContent = \`
+              .wb-hidden-action-prompt {
+                display: none !important;
               }
-            }
-
-            // 2. Find the chat input across all supported platforms
-            const input = document.querySelector('#prompt-textarea') || 
-                          document.querySelector('div[contenteditable="true"].ProseMirror') ||
-                          document.querySelector('rich-textarea div[contenteditable="true"]') ||
-                          document.querySelector('.ql-editor') ||
-                          document.querySelector('#chat-input') ||
-                          document.querySelector('div[contenteditable="true"]') || 
-                          document.querySelector('textarea');
-            if (!input) return { success: false, error: 'Chat input field not found' };
-
-            input.focus();
-            if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-              if (nativeSetter) {
-                nativeSetter.call(input, textToInsert);
-              } else {
-                input.value = textToInsert;
-              }
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            } else {
-              const selection = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(input);
-              selection.removeAllRanges();
-              selection.addRange(range);
-              const success = document.execCommand('insertText', false, textToInsert);
-              if (!success || !input.textContent) {
-                input.textContent = textToInsert;
-              }
-              input.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToInsert }));
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-
-            // 3. Auto-submit after short delay
-            setTimeout(function() {
-              const sendBtn = document.querySelector('button[data-testid="send-button"]') ||
-                              document.querySelector('button[data-testid="fruitjuice-send-button"]') ||
-                              document.querySelector('button[aria-label*="Send prompt"]') ||
-                              document.querySelector('button[aria-label*="Send message"]') ||
-                              document.querySelector('button[aria-label*="send message"]') ||
-                              document.querySelector('button[aria-label*="Send"]') ||
-                              document.querySelector('button[aria-label*="send"]') ||
-                              document.querySelector('button[aria-label*="Submit query"]') ||
-                              document.querySelector('button[aria-label*="Submit"]') ||
-                              document.querySelector('button[aria-label*="submit"]') ||
-                              document.querySelector('button[type="submit"]') ||
-                              document.querySelector('button.send-button') ||
-                              document.querySelector('div[role="button"][aria-label*="Send"]');
-              if (sendBtn && !sendBtn.disabled) {
-                sendBtn.click();
-              } else {
-                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-              }
-              // Immediate hide passes
-              setTimeout(hidePromptElement, 150);
-              setTimeout(hidePromptElement, 500);
-              setTimeout(hidePromptElement, 1200);
-            }, 400);
-
-            return { success: true };
-          } catch (e) {
-            return { success: false, error: String(e) };
+            \`;
+            document.head.appendChild(style);
           }
-        })(${JSON.stringify(promptText)}, ${force})
-      `)
+
+          function hidePromptElement() {
+            const keywords = [
+              'You are integrated with Workbench Desktop',
+              'Available Workbench Actions'
+            ];
+            const selectors = [
+              'user-query',
+              '[data-message-author-role="user"]',
+              'div[data-testid="user-message"]',
+              'div.font-user-message',
+              '[class*="user-message"]'
+            ];
+            const elements = document.querySelectorAll(selectors.join(', '));
+            elements.forEach(function(el) {
+              const text = el.innerText || '';
+              if (keywords.some(function(k) { return text.includes(k); })) {
+                el.classList.add('wb-hidden-action-prompt');
+                el.style.display = 'none';
+              }
+            });
+          }
+
+          if (!window.__wb_hide_observer) {
+            window.__wb_hide_observer = new MutationObserver(hidePromptElement);
+            window.__wb_hide_observer.observe(document.body, { childList: true, subtree: true });
+          }
+        })()
+      `).catch(() => {})
+
+      // 2. Check if current conversation is already primed (skip if already primed unless forced)
+      if (!force) {
+        const isPrimed = await this.isChatPrimed()
+        if (isPrimed) {
+          console.log('[AIView] Active chat is already primed with Workbench actions. Skipping duplicate injection.')
+          return { success: true }
+        }
+      }
+
+      // 3. Inject and auto-submit the system priming prompt using the hardened pipeline
+      const res = await this.injectAndSubmitChatText(promptText, {
+        autoSubmit: true,
+        waitForStreaming: false,
+        isPriming: true,
+      })
 
       setTimeout(() => this.notifyChatPrimeStatus(), 800)
       setTimeout(() => this.notifyChatPrimeStatus(), 2000)
 
-      return injected || { success: true }
+      return res
     } catch (err: any) {
       console.error('[AIView] enableActionMode error:', err)
       return { success: false, error: err.message || 'Failed to enable Action Mode' }

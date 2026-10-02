@@ -31,12 +31,17 @@ export type { ActionResult }
 export class ActionDispatcher {
   private static instance: ActionDispatcher | null = null
   private mainWindow: BrowserWindow | null = null
+  private aiHandler: any = null
   private registry: ActionRegistry
   private actionModeEnabled: boolean = true
   private autoFeedbackLoopEnabled: boolean = true
   private activeTarget: 'book' | 'note' | 'custom' = 'book'
   private customDirectory: string = ''
   private recentDispatchedHashes: Map<string, number> = new Map()
+
+  public setAIHandler(handler: any) {
+    this.aiHandler = handler
+  }
 
   private activeDirectories: {
     book: string
@@ -270,6 +275,12 @@ export class ActionDispatcher {
       getWorkspaceFolders: () => this.getWorkspaceFolders(),
       setActiveTarget: (target: 'book' | 'note' | 'custom', customPath?: string) =>
         this.setActiveTarget(target, customPath),
+      attachToChat: async (filePath: string, customInstruction?: string) => {
+        if (this.aiHandler && typeof this.aiHandler.sendFileToAI === 'function') {
+          return await this.aiHandler.sendFileToAI(filePath, customInstruction)
+        }
+        return { success: false, error: 'AI View handler is not connected' }
+      },
     }
   }
 
@@ -306,11 +317,11 @@ export class ActionDispatcher {
         }
       }
 
-      // Deduplication Guard: Ignore identical payloads dispatched within 30 seconds to prevent feedback loops
+      // Deduplication Guard: Ignore identical payloads dispatched within 10 seconds to prevent feedback loops
       const payloadHash = typeof rawPayload === 'string' ? rawPayload.trim() : JSON.stringify(payload)
       const now = Date.now()
       const lastDispatched = this.recentDispatchedHashes.get(payloadHash)
-      if (lastDispatched && now - lastDispatched < 30000) {
+      if (lastDispatched && now - lastDispatched < 10000) {
         console.log(`[ActionDispatcher] Suppressed duplicate action execution (dispatched ${now - lastDispatched}ms ago)`)
         return {
           success: false,
@@ -321,7 +332,7 @@ export class ActionDispatcher {
       this.recentDispatchedHashes.set(payloadHash, now)
       if (this.recentDispatchedHashes.size > 100) {
         for (const [k, v] of this.recentDispatchedHashes.entries()) {
-          if (now - v > 60000) this.recentDispatchedHashes.delete(k)
+          if (now - v > 30000) this.recentDispatchedHashes.delete(k)
         }
       }
 
@@ -418,5 +429,9 @@ export class ActionDispatcher {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send('workbench:action-open-tab', { filePath })
     }
+  }
+
+  public clearRecentDispatched(): void {
+    this.recentDispatchedHashes.clear()
   }
 }

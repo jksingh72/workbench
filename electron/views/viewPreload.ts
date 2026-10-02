@@ -362,9 +362,9 @@ try {
     }
 
     const executedElements = new WeakSet<HTMLElement>()
-    const executedActionHashes: Set<string> =
-      (window as any).__wbExecutedActionHashes ||
-      ((window as any).__wbExecutedActionHashes = new Set<string>())
+    const executedActionTimestamps: Map<string, number> =
+      (window as any).__wbExecutedActionTimestamps ||
+      ((window as any).__wbExecutedActionTimestamps = new Map<string, number>())
 
     function getLatestAssistantContainer(): HTMLElement | null {
       const selectors = [
@@ -440,7 +440,14 @@ try {
             if (depth === 0 && startIdx !== -1) {
               const candidate = fullText.substring(startIdx, i + 1).trim()
               try {
-                const parsed = JSON.parse(candidate)
+                let parsed: any = null
+                try {
+                  parsed = JSON.parse(candidate)
+                } catch (_) {
+                  // Fallback: fix unescaped backslashes in Windows paths (e.g. \O, \D, \0)
+                  const sanitized = candidate.replace(/\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\')
+                  parsed = JSON.parse(sanitized)
+                }
                 if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
                   actions.push({ payload: parsed, raw: candidate })
                 }
@@ -459,8 +466,10 @@ try {
       if (el.classList.contains('wb-hidden-action-prompt') || el.closest('.wb-hidden-action-prompt')) {
         return false
       }
-      if (el.offsetParent === null && el.tagName !== 'BODY') {
-        return false
+      const isShadowChild = Boolean(el.getRootNode && el.getRootNode() !== document)
+      if (!isShadowChild && el.offsetParent === null && el.tagName !== 'BODY') {
+        const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 0, height: 0 }
+        if (rect.width === 0 && rect.height === 0) return false
       }
       try {
         if (window.getComputedStyle(el).display === 'none') return false
@@ -501,8 +510,6 @@ try {
       if (
         text.includes('You are integrated with Workbench Desktop') ||
         text.includes('Available Workbench Actions') ||
-        text.includes('Available actions:') ||
-        text.includes('Available Actions:') ||
         text.includes('### Available Workbench Actions') ||
         text.includes('workbench:action code block') ||
         text.includes('Custom User Instructions') ||
@@ -527,21 +534,25 @@ try {
           'You are integrated with Workbench Desktop',
           'Available Workbench Actions'
         ]
-        const turnSelectors = [
-          'article',
+        const userTurnSelectors = [
           'user-query',
-          'model-response',
           '[data-message-author-role="user"]',
           'div[data-testid="user-message"]',
           'div.font-user-message',
-          '[class*="user-message"]',
-          '[class*="chat-message"]',
-          'div[class*="message-row"]',
-          'div[class*="message-bubble"]'
+          '[data-user-message="true"]',
+          '[class*="user-message"]'
         ]
-        const candidateElements = document.querySelectorAll(turnSelectors.join(', '))
+        const candidateElements = document.querySelectorAll(userTurnSelectors.join(', '))
         candidateElements.forEach((el) => {
           const htmlEl = el as HTMLElement
+          // Never hide assistant messages or responses!
+          if (
+            htmlEl.closest('[data-message-author-role="assistant"]') ||
+            htmlEl.closest('model-response') ||
+            htmlEl.closest('.font-claude-message')
+          ) {
+            return
+          }
           if (htmlEl.getAttribute('data-wb-hidden') === 'true') return
           const text = htmlEl.innerText || ''
           if (keywords.some((k) => text.includes(k))) {
@@ -605,12 +616,18 @@ try {
         })
       }
 
+      const now = Date.now()
+      for (const [h, t] of executedActionTimestamps.entries()) {
+        if (now - t > 30000) executedActionTimestamps.delete(h)
+      }
+
       for (const item of extracted) {
         const payloadHash = JSON.stringify(item.payload)
-        if (executedActionHashes.has(payloadHash)) {
+        const lastRan = executedActionTimestamps.get(payloadHash)
+        if (lastRan && now - lastRan < 15000) {
           continue
         }
-        executedActionHashes.add(payloadHash)
+        executedActionTimestamps.set(payloadHash, now)
 
         // Send to main process
         ipcRenderer.send('workbench:action-triggered', item.payload)
@@ -651,22 +668,58 @@ try {
       }
     }
 
+    function isStreamingActive(): boolean {
+      try {
+        const stopSelectors = [
+          'button[data-testid="stop-button"]',
+          'button[aria-label*="Stop generating" i]',
+          'button[aria-label*="Stop Response" i]',
+          'button[aria-label*="Stop streaming" i]',
+          'button[aria-label="Stop" i]'
+        ]
+        for (const sel of stopSelectors) {
+          const btn = document.querySelector(sel)
+          if (btn && (btn as HTMLElement).offsetParent !== null && !(btn as HTMLButtonElement).disabled) {
+            const rect = btn.getBoundingClientRect()
+            if (rect.width > 0 && rect.height > 0) {
+              const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
+              if (ariaLabel.includes('read') || ariaLabel.includes('voice') || ariaLabel.includes('speech') || ariaLabel.includes('audio')) {
+                continue
+              }
+              return true
+            }
+          }
+        }
+        if (document.querySelector('.result-streaming, [data-is-streaming="true"], .cursor-blinking')) {
+          return true
+        }
+      } catch (_) {}
+      return false
+    }
+
     let scanTimeout: any = null
     function scanForActions() {
       if (!actionModeEnabled) return
       if (!isChatSite()) return
       if (scanTimeout) clearTimeout(scanTimeout)
       scanTimeout = setTimeout(() => {
+        // Defer action execution if AI is actively streaming response tokens
+        if (isStreamingActive()) {
+          scanTimeout = setTimeout(scanForActions, 300)
+          return
+        }
+
         const targetContainer = getLatestAssistantContainer()
         if (!targetContainer) return
+        const searchScope = targetContainer.closest('article, [data-testid*="conversation-turn"]') || targetContainer
         const codeElements: HTMLElement[] = []
-        targetContainer.querySelectorAll(
-          'pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
+        searchScope.querySelectorAll(
+          'code-block, pre, code, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
         ).forEach((el) => {
           codeElements.push(el as HTMLElement)
           if ((el as any).shadowRoot) {
             try {
-              (el as any).shadowRoot.querySelectorAll('pre, code').forEach((s: any) => codeElements.push(s))
+              (el as any).shadowRoot.querySelectorAll('pre, code, div').forEach((s: any) => codeElements.push(s))
             } catch (_) {}
           }
         })
@@ -718,8 +771,9 @@ try {
     function markHistoricalActions() {
       try {
         const blocks = document.querySelectorAll(
-          'pre, code, code-block, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
+          'code-block, pre, code, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
         )
+        const now = Date.now()
         blocks.forEach((el) => {
           const htmlEl = el as HTMLElement
           const rawText = (htmlEl.innerText || htmlEl.textContent || '').trim()
@@ -732,7 +786,7 @@ try {
             const extracted = extractActionsFromText(rawText)
             for (const item of extracted) {
               const hash = JSON.stringify(item.payload)
-              executedActionHashes.add(hash)
+              executedActionTimestamps.set(hash, now)
             }
             htmlEl.setAttribute('data-workbench-executed', 'true')
             executedElements.add(htmlEl)

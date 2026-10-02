@@ -65,6 +65,34 @@ export const readPdfAction: ActionDefinition = {
       throw new Error(`Path is a directory, not a PDF file: "${filePath}". Use list_directory instead.`)
     }
 
+    // Automatic Native Attachment Optimization for Chat Context:
+    // If no specific small page limit was explicitly requested and chat attachment is available,
+    // attach the document directly into the chat session instead of dumping massive raw text!
+    if (maxPages === 0 && typeof ctx.attachToChat === 'function') {
+      const attachRes = await ctx.attachToChat(resolvedPath)
+      if (attachRes.success) {
+        const sizeMb = (stats.size / (1024 * 1024)).toFixed(2)
+        const fileName = path.basename(resolvedPath)
+        ctx.notify(`📎 Attached PDF to Chat: ${fileName} (${sizeMb} MB)`)
+        if (shouldOpen) {
+          ctx.openInTab(resolvedPath)
+        }
+        return {
+          success: true,
+          action: 'read_pdf',
+          createdPath: resolvedPath,
+          message: `Attached "${fileName}" (${sizeMb} MB) directly to the active chat session. The AI can now process and analyze the entire document natively.`,
+          details: {
+            fileName,
+            filePath: resolvedPath,
+            sizeBytes: stats.size,
+            sizeMb,
+            attached: true,
+          },
+        }
+      }
+    }
+
     const buffer = await fs.promises.readFile(resolvedPath)
 
     // Dynamic import to handle both pdf-parse v2 (class-based) and v1 (function-based)
@@ -76,7 +104,7 @@ export const readPdfAction: ActionDefinition = {
     if (pdfParseModule.PDFParse) {
       // pdf-parse v2+
       const parser = new pdfParseModule.PDFParse({ data: buffer })
-      const textResult = await parser.getText(maxPages > 0 ? { first: maxPages } : {})
+      const textResult = await parser.getText(maxPages > 0 ? { first: maxPages } : { first: 20 })
       rawText = textResult.text || ''
       totalPages = textResult.total || 1
       pagesRead = maxPages > 0 ? Math.min(maxPages, totalPages) : totalPages
@@ -88,7 +116,7 @@ export const readPdfAction: ActionDefinition = {
     } else {
       // pdf-parse v1 fallback
       const parseFn = typeof pdfParseModule.default === 'function' ? pdfParseModule.default : pdfParseModule
-      const data = await parseFn(buffer, maxPages > 0 ? { max: maxPages } : {})
+      const data = await parseFn(buffer, maxPages > 0 ? { max: maxPages } : { max: 20 })
       rawText = data.text || ''
       totalPages = data.numpages || 1
       pagesRead = maxPages > 0 ? Math.min(maxPages, totalPages) : totalPages

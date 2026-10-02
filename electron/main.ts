@@ -125,6 +125,7 @@ function createWindow() {
   sessionManager = new SessionManager(bookHandler, aiHandler, noteHandler)
   layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler, noteHandler)
   ActionDispatcher.getInstance().setMainWindow(mainWindow)
+  ActionDispatcher.getInstance().setAIHandler(aiHandler)
 
   // Set initial bounds (handlers manage attaching their own views)
   layoutManager.applyBounds()

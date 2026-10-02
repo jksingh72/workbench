@@ -108,6 +108,13 @@ export class ActionRegistry {
       ``,
     ]
 
+    lines.push(`### 📎 CRITICAL: Reading, Summarizing, or Inspecting Documents & Files:`)
+    lines.push(`Whenever the user asks you to read, summarize, analyze, inspect, or explain ANY document, book, PDF, office file (.docx, .xlsx, .pptx), or file:`)
+    lines.push(`- **ALWAYS use \`attach_file\`** (\`{"action": "attach_file", "path": "<file_path>"}\`) as your DEFAULT action!`)
+    lines.push(`- Attaching the file automatically uploads the full document directly into our chat session without text truncation, token limits, or timeouts.`)
+    lines.push(`- DO NOT use \`read_file\` or \`summarize_file\` for documents, books, or PDFs. Only use \`read_file\` if the user explicitly asks to view a few lines of a specific small code or configuration file (e.g. .json, .ts).`)
+    lines.push(``)
+
     if (customInstructions && customInstructions.trim()) {
       lines.push(`### Custom User Instructions & Rules:`)
       lines.push(customInstructions.trim())

@@ -22,6 +22,7 @@ export interface ActionContext {
     noteDirectory: string
   }
   setActiveTarget(target: 'book' | 'note' | 'custom', customPath?: string): void
+  attachToChat?(filePath: string, customInstruction?: string): Promise<{ success: boolean; uploaded?: boolean; error?: string }>
 }
 
 export interface ActionDefinition {

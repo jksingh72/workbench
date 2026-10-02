@@ -29,7 +29,7 @@ export const updateActionAction: ActionDefinition = {
     file: { type: 'string', required: false, description: 'Module file name, only if it does not follow <camelName>Action.ts' }
   },
   example: { action: 'update_action', name: 'summarize_file', code: '<full module code>' },
-  async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult> {
+  async execute(ctx: ActionContext, payload: any, _targetPane = 'book'): Promise<ActionResult> {
     const params = payload.params || {}
     const name = params.name || payload.name
     const code = params.code || payload.code

@@ -15,14 +15,14 @@ async function loadModule(name: string): Promise<any> {
   }
 }
 
-async function readPdf(filePath: string): Promise<string> {
+async function readPdf(filePath: string, maxPages = 15): Promise<string> {
   const mod: any = await loadModule('pdf-parse')
   const buffer = await fs.promises.readFile(filePath)
   const PDFParse = mod.PDFParse || mod.default?.PDFParse
   if (PDFParse) {
     const parser = new PDFParse({ data: buffer })
     try {
-      const result = await parser.getText()
+      const result = await parser.getText(maxPages > 0 ? { first: maxPages } : {})
       return result.text || ''
     } finally {
       if (typeof parser.destroy === 'function') await parser.destroy()
@@ -30,7 +30,7 @@ async function readPdf(filePath: string): Promise<string> {
   }
   const fn = typeof mod === 'function' ? mod : mod.default
   if (typeof fn !== 'function') throw new Error('Unsupported pdf-parse version installed')
-  const result = await fn(buffer)
+  const result = await fn(buffer, maxPages > 0 ? { max: maxPages } : {})
   return result.text || ''
 }
 
@@ -122,6 +122,30 @@ export const summarizeFileAction: ActionDefinition = {
     const filePath = path.isAbsolute(full) ? path.normalize(full) : ctx.resolveSafePath(full, targetPane)
     if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`)
     const fileName = path.basename(filePath)
+
+    // SMART AUTO-ATTACHMENT: For chat-based AI, attach the document natively!
+    // This allows the AI model (ChatGPT, Claude, Gemini) to natively inspect the entire document
+    // regardless of size (e.g. 1000-page manuals) without freezing Node or hitting text token limits.
+    if (typeof ctx.attachToChat === 'function') {
+      ctx.notify(`📎 Attaching "${fileName}" to chat for native summarization...`)
+      const attachRes = await ctx.attachToChat(
+        filePath,
+        `Please summarize this document ('${fileName}'): provide context, key points, and action items.`
+      )
+      if (attachRes.success) {
+        return {
+          success: true,
+          action: 'summarize_file',
+          createdPath: filePath,
+          message: `Attached "${fileName}" directly to the chat session. The AI can now process and summarize the entire document natively.`,
+          details: {
+            fileName,
+            filePath,
+            method: 'native_attachment',
+          },
+        }
+      }
+    }
 
     const raw = (await extractText(filePath)).trim()
     if (!raw) throw new Error('No text found. The file may be empty or a scanned PDF without an OCR layer.')
