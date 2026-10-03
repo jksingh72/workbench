@@ -21,23 +21,33 @@ export const batchAction: ActionDefinition = {
   async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult> {
     const actions = payload.actions || payload.params?.actions || (Array.isArray(payload) ? payload : [])
     if (!Array.isArray(actions) || actions.length === 0) {
+      console.error('[batch:ERROR] No actions provided for batch execution:', payload)
       throw new Error('No actions provided for batch execution')
     }
 
+    console.log(`[batch:START] Beginning execution of ${actions.length} batched actions (targetPane: ${targetPane})`)
     const results: ActionResult[] = []
+    let stepIndex = 0
+
     for (const act of actions) {
+      stepIndex++
+      const actType = act?.action || act?.type || 'unknown'
+      console.log(`[batch:STEP ${stepIndex}/${actions.length}] Dispatching sub-action: "${actType}"`)
       const res = await ctx.dispatch(act, targetPane)
       results.push(res)
       if (!res.success) {
+        console.error(`[batch:FAILED] Step ${stepIndex} ("${actType}") failed:`, res.message || res.error)
         return {
           success: false,
           action: 'batch',
-          message: `Batch failed at step "${act.action || act.type}": ${res.message || res.error}`,
+          message: `Batch failed at step ${stepIndex} ("${actType}"): ${res.message || res.error}`,
           details: results,
         }
       }
+      console.log(`[batch:STEP ${stepIndex}/${actions.length}] Sub-action "${actType}" succeeded`)
     }
 
+    console.log(`[batch:SUCCESS] All ${actions.length} batched actions executed successfully`)
     return {
       success: true,
       action: 'batch',

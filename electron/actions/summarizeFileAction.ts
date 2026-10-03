@@ -119,20 +119,26 @@ export const summarizeFileAction: ActionDefinition = {
     const file = params.file || payload.file
     const full = params.path || payload.path || (folder && file ? path.join(folder, file) : '')
     if (!full) throw new Error('Provide folder + file, or a full path')
+    console.log(`[summarize_file:STEP 1] Target request: folder="${folder || ''}", file="${file || ''}", path="${full}" (targetPane: ${targetPane})`)
     const filePath = path.isAbsolute(full) ? path.normalize(full) : ctx.resolveSafePath(full, targetPane)
-    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`)
+    console.log(`[summarize_file:STEP 2] Resolved file path: "${filePath}"`)
+
+    if (!fs.existsSync(filePath)) {
+      console.error(`[summarize_file:ERROR] File not found: "${filePath}"`)
+      throw new Error(`File not found: ${filePath}`)
+    }
     const fileName = path.basename(filePath)
 
     // SMART AUTO-ATTACHMENT: For chat-based AI, attach the document natively!
-    // This allows the AI model (ChatGPT, Claude, Gemini) to natively inspect the entire document
-    // regardless of size (e.g. 1000-page manuals) without freezing Node or hitting text token limits.
     if (typeof ctx.attachToChat === 'function') {
+      console.log(`[summarize_file:STEP 3:ATTACH] Attempting native chat document attachment for "${fileName}"...`)
       ctx.notify(`📎 Attaching "${fileName}" to chat for native summarization...`)
       const attachRes = await ctx.attachToChat(
         filePath,
         `Please summarize this document ('${fileName}'): provide context, key points, and action items.`
       )
       if (attachRes.success) {
+        console.log(`[summarize_file:STEP 3:ATTACH] Successfully attached "${fileName}" to chat for native summarization`)
         return {
           success: true,
           action: 'summarize_file',
@@ -144,17 +150,25 @@ export const summarizeFileAction: ActionDefinition = {
             method: 'native_attachment',
           },
         }
+      } else {
+        console.warn(`[summarize_file:STEP 3:ATTACH] Native attachment did not complete, falling back to local text extraction:`, attachRes.error)
       }
     }
 
+    console.log(`[summarize_file:STEP 4:EXTRACT] Extracting text locally from "${fileName}"...`)
     const raw = (await extractText(filePath)).trim()
-    if (!raw) throw new Error('No text found. The file may be empty or a scanned PDF without an OCR layer.')
+    if (!raw) {
+      console.error(`[summarize_file:ERROR] No extractable text found in "${filePath}"`)
+      throw new Error('No text found. The file may be empty or a scanned PDF without an OCR layer.')
+    }
+    console.log(`[summarize_file:STEP 4:EXTRACT] Extracted ${raw.length} characters from "${fileName}"`)
 
     const truncated = raw.length > MAX_INPUT_CHARS
     const text = truncated ? raw.slice(0, MAX_INPUT_CHARS) : raw
     const apiKey = process.env.ANTHROPIC_API_KEY
 
     if (!apiKey) {
+      console.log(`[summarize_file:STEP 5:FALLBACK] ANTHROPIC_API_KEY not set. Returning extracted text excerpt to chat.`)
       ctx.notify(`📄 Extracted ${fileName} (no API key; summary in chat)`)
       const excerpt = raw.slice(0, MAX_FALLBACK_CHARS)
       const note = raw.length > MAX_FALLBACK_CHARS ? ', truncated' : ''
@@ -165,8 +179,10 @@ export const summarizeFileAction: ActionDefinition = {
       }
     }
 
+    console.log(`[summarize_file:STEP 5:API] Summarizing "${fileName}" via Claude API...`)
     ctx.notify(`🧠 Summarizing ${fileName}...`)
     const summary = clampLines(await summarizeWithClaude(buildPrompt(fileName, text, truncated), apiKey))
+    console.log(`[summarize_file:STEP 5:API] Summary generated successfully for "${fileName}"`)
     ctx.notify(`✅ Summarized ${fileName}`)
     return { success: true, action: 'summarize_file', message: `Summary of ${fileName}:\n${summary}` }
   }

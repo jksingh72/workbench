@@ -42,24 +42,29 @@ export const writeFileAction: ActionDefinition = {
       throw new Error('Missing file name or path for write_file')
     }
 
+    console.log(`[write_file:STEP 1] Target input: "${fileTarget}" | Content: ${content.length} chars (TargetPane: "${targetPane}")`)
     let targetFile = ''
     if (name && subPath && !path.isAbsolute(name)) {
       targetFile = ctx.resolveSafePath(path.join(subPath, name), targetPane)
     } else {
       targetFile = ctx.resolveSafePath(fileTarget, targetPane)
     }
+    console.log(`[write_file:STEP 2] Resolved file destination: "${targetFile}"`)
 
     // Ensure parent directory exists
     const parentDir = path.dirname(targetFile)
     await fs.promises.mkdir(parentDir, { recursive: true })
+    console.log(`[write_file:STEP 3] Parent directory ready: "${parentDir}"`)
 
     await fs.promises.writeFile(targetFile, content, 'utf-8')
+    console.log(`[write_file:STEP 4] Successfully wrote ${content.length} characters to: "${targetFile}"`)
 
     const displayFile = path.basename(targetFile) || fileTarget
     ctx.notify(`📄 Created file: ${displayFile}`)
     ctx.refreshExplorer(targetPane)
 
     if (openInTab) {
+      console.log(`[write_file:STEP 5] Opening file in Workbench tab: "${targetFile}"`)
       ctx.openInTab(targetFile)
     }
 

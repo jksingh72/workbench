@@ -45,21 +45,30 @@ export const readDocxAction: ActionDefinition = {
     const shouldOpen = Boolean(params.openInTab ?? payload.openInTab ?? false)
 
     if (!filePath) {
+      console.error('[read_docx:ERROR] File path is required for read_docx')
       throw new Error('File path is required for read_docx')
     }
 
+    console.log(`[read_docx:STEP 1] Requested Word document read: "${filePath}" (format: ${format}, maxLines: ${maxLines}, targetPane: ${targetPane})`)
     const resolvedPath = ctx.resolveSafePath(filePath, targetPane)
+    console.log(`[read_docx:STEP 2] Resolved safe path: "${resolvedPath}"`)
 
     if (!fs.existsSync(resolvedPath)) {
+      console.error(`[read_docx:ERROR] Word document does not exist: "${resolvedPath}"`)
       throw new Error(`Word document does not exist: "${filePath}"`)
     }
 
     const stats = await fs.promises.stat(resolvedPath)
     if (stats.isDirectory()) {
+      console.error(`[read_docx:ERROR] Path is a directory: "${resolvedPath}"`)
       throw new Error(`Path is a directory, not a Word document: "${filePath}". Use list_directory instead.`)
     }
 
+    const fileName = path.basename(resolvedPath)
+    console.log(`[read_docx:STEP 2] File verified: "${fileName}" (${Math.round(stats.size / 1024)} KB)`)
+
     // Dynamic import mammoth to convert the docx buffer into readable text / markdown
+    console.log(`[read_docx:STEP 3:PARSE] Converting docx buffer using mammoth (${format})...`)
     const mammoth: any = await import('mammoth')
     const buffer = await fs.promises.readFile(resolvedPath)
 
@@ -90,11 +99,12 @@ export const readDocxAction: ActionDefinition = {
       finalContent += `\n\n... [Truncated: showing first ${maxLines} of ${allLines.length} lines] ...`
     }
 
-    const fileName = path.basename(resolvedPath)
+    console.log(`[read_docx:STEP 4] Document converted. Total lines: ${allLines.length}, Showing: ${lines.length}, Truncated: ${truncated}`)
     const summary = `Read Word document "${fileName}" (${lines.length} lines, ${Math.round(stats.size / 1024)} KB)`
     ctx.notify(`📄 ${summary}`)
 
     if (shouldOpen) {
+      console.log(`[read_docx:STEP 5] Opening Word document in tab: "${resolvedPath}"`)
       ctx.openInTab(resolvedPath)
     }
 

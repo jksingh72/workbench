@@ -32,13 +32,16 @@ export const readFileAction: ActionDefinition = {
       throw new Error('File path is required for read_file')
     }
 
+    console.log(`[read_file:STEP 1] Resolving path: "${filePath}" (maxLines: ${maxLines}, TargetPane: "${targetPane}")`)
     const resolvedPath = ctx.resolveSafePath(filePath, targetPane)
+    console.log(`[read_file:STEP 2] Resolved file path: "${resolvedPath}"`)
 
     if (!fs.existsSync(resolvedPath)) {
       throw new Error(`File does not exist: "${filePath}"`)
     }
 
     const stats = await fs.promises.stat(resolvedPath)
+    console.log(`[read_file:STEP 3] File size: ${stats.size} bytes (${(stats.size / 1024).toFixed(1)} KB)`)
     if (stats.isDirectory()) {
       throw new Error(`Path is a directory, not a file: "${filePath}". Use list_directory instead.`)
     }
@@ -110,6 +113,7 @@ export const readFileAction: ActionDefinition = {
       throw new Error(`File is too large to read directly (${Math.round(stats.size / 1024)} KB). Maximum readable size is 1 MB.`)
     }
 
+    console.log(`[read_file:STEP 4] Reading text content from disk...`)
     const rawContent = await fs.promises.readFile(resolvedPath, 'utf-8')
     const allLines = rawContent.split(/\r?\n/)
     const truncated = allLines.length > maxLines
@@ -121,6 +125,7 @@ export const readFileAction: ActionDefinition = {
     }
 
     const summary = `Read ${lines.length} lines (${stats.size} bytes) from "${path.basename(resolvedPath)}"`
+    console.log(`[read_file:STEP 5] Successfully read ${allLines.length} lines (Truncated: ${truncated}, returning: ${lines.length} lines)`)
     ctx.notify(`📖 ${summary}`)
 
     return {

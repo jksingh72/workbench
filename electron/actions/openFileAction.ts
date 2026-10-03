@@ -29,20 +29,28 @@ export const openFileAction: ActionDefinition = {
 
     const targetInput = name || subPath || target
     if (!targetInput) {
+      console.error('[open_file:ERROR] Missing file path for open_file')
       throw new Error('Missing file path for open_file')
     }
 
+    console.log(`[open_file:STEP 1] Request to open file: "${targetInput}" (reveal: ${reveal}, targetPane: ${targetPane})`)
     const targetPath = ctx.resolveSafePath(targetInput, targetPane)
+    console.log(`[open_file:STEP 2] Resolved safe path: "${targetPath}"`)
+
     if (!fs.existsSync(targetPath)) {
+      console.error(`[open_file:ERROR] File does not exist on disk: "${targetPath}"`)
       throw new Error(`File does not exist: "${targetInput}"`)
     }
 
     if (reveal) {
+      console.log(`[open_file:STEP 3] Revealing file in system file explorer: "${targetPath}"`)
       shell.showItemInFolder(targetPath)
     } else {
+      console.log(`[open_file:STEP 3] Opening file in Workbench editor tab: "${targetPath}"`)
       ctx.openInTab(targetPath)
     }
 
+    console.log(`[open_file:STEP 4] Successfully opened: "${path.basename(targetPath)}"`)
     ctx.notify(`📂 Opened: ${path.basename(targetPath)}`)
 
     return {

@@ -30,13 +30,6 @@ export class AIViewHandler {
     this.mainWindow = mainWindow
     this.aiSourceManager = aiSourceManager
     this.initView()
-
-    // Periodically scan the active chat view for unexecuted action code blocks (only if Action Mode is enabled)
-    setInterval(() => {
-      if (this.actionModeEnabled && this.isVisible && this.view && !this.view.webContents.isDestroyed()) {
-        this.scanAndExecutePendingActions().catch(() => {})
-      }
-    }, 2000)
   }
 
   private attachView(v: WebContentsView) {
@@ -970,10 +963,12 @@ export class AIViewHandler {
       }
 
       if (filesData.length === 0) {
+        console.warn('[AIView:Upload:ERROR] No files eligible for upload (folders or files >100MB skipped)')
         return { success: false, error: 'No files eligible for upload (folders or files >100MB skipped)' }
       }
 
       const userInstruction = (customInstruction || '').trim()
+      console.log(`[AIView:Upload:STEP 1] Preparing upload of ${filesData.length} file(s) into AI chat:`, filesData.map(f => f.fileName).join(', '))
 
       const result = await this.view.webContents.executeJavaScript(`
         (async function(filesList, userInstruction) {
@@ -1066,6 +1061,7 @@ export class AIViewHandler {
       `)
 
       this.view.webContents.focus()
+      console.log(`[AIView:Upload:STEP 2] File injection completed. Native upload status: ${result?.fileUploaded ? 'SUCCESS' : 'TEXT_FALLBACK'}`)
       return {
         success: true,
         count: filesData.length,
@@ -1073,7 +1069,7 @@ export class AIViewHandler {
         fileNames: filesData.map((f) => f.fileName),
       }
     } catch (err: any) {
-      console.error('[AIView] sendFilesToAI error:', err)
+      console.error('[AIView:Upload:ERROR] sendFilesToAI failed:', err)
       return { success: false, error: err.message || 'Failed to send files to AI' }
     }
   }
@@ -1549,12 +1545,19 @@ export class AIViewHandler {
         body += `\nTarget: ${result.createdPath}`
       }
 
-      if (result.details?.folderCount !== undefined || result.details?.fileCount !== undefined) {
+      if (
+        (result.details?.folderCount !== undefined || result.details?.fileCount !== undefined) &&
+        !result.message?.includes('Directory Listing')
+      ) {
         const folders = result.details.folders || []
         const files = result.details.files || []
+        const MAX_FILES = 80
+        const MAX_FOLDERS = 40
+        const shownFolders = folders.slice(0, MAX_FOLDERS).join(', ') + (folders.length > MAX_FOLDERS ? ` ... (+${folders.length - MAX_FOLDERS} more)` : '')
+        const shownFiles = files.slice(0, MAX_FILES).join(', ') + (files.length > MAX_FILES ? ` ... (+${files.length - MAX_FILES} more)` : '')
         body += `\nContents:\n`
-        body += `- Folders (${folders.length}): ${folders.join(', ') || 'none'}\n`
-        body += `- Files (${files.length}): ${files.join(', ') || 'none'}`
+        body += `- Folders (${folders.length}): ${shownFolders || 'none'}\n`
+        body += `- Files (${files.length}): ${shownFiles || 'none'}`
       }
 
       if (result.details?.content) {
@@ -1583,10 +1586,13 @@ export class AIViewHandler {
     if (!this.view || this.view.webContents.isDestroyed()) return
     if (!this.actionModeEnabled) return
 
-    const feedbackText = this.formatActionFeedback(payload, result)
-    if (!feedbackText) return
-
     const actionType = (payload.action || payload.type || result.action || 'action').toLowerCase()
+    console.log(`[AIView:Feedback:STEP 1] Formatting action execution feedback for: "${actionType}"`)
+    const feedbackText = this.formatActionFeedback(payload, result)
+    if (!feedbackText) {
+      console.log(`[AIView:Feedback:STEP 1] No feedback required for "${actionType}" (suppressed or template)`)
+      return
+    }
 
     // Loop Guard: Reset count if idle for more than 20 seconds
     const now = Date.now()
@@ -1601,6 +1607,7 @@ export class AIViewHandler {
 
     if (this.feedbackTurnCount >= MAX_AUTONOMOUS_TURNS) {
       autoSubmit = false
+      console.warn(`[AIView:Feedback:STEP 2] Autonomous turn limit reached (${MAX_AUTONOMOUS_TURNS}). Pausing auto-submit.`)
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send('workbench:toast', {
           message: '⚠️ Action loop paused after 8 consecutive turns. Click Send in chat to continue.',
@@ -1611,8 +1618,9 @@ export class AIViewHandler {
       this.feedbackTurnCount++
     }
 
-    console.log(`[AIView] Feedback Loop [Turn ${this.feedbackTurnCount}]: Delivering result for ${actionType}`)
+    console.log(`[AIView:Feedback:STEP 2] Feedback Loop [Turn ${this.feedbackTurnCount}/${MAX_AUTONOMOUS_TURNS}]: Delivering result for ${actionType} (autoSubmit: ${autoSubmit})`)
     const delivery = await this.sendActionFeedbackToAI(feedbackText, autoSubmit)
+    console.log(`[AIView:Feedback:STEP 3] Delivery result for ${actionType}:`, delivery)
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       if (delivery.submitted) {
@@ -1626,7 +1634,7 @@ export class AIViewHandler {
           type: 'info',
         })
       } else {
-        console.warn(`[AIView] Failed to deliver action feedback to AI:`, delivery.error)
+        console.warn(`[AIView:Feedback:ERROR] Failed to deliver action feedback to AI:`, delivery.error)
         this.mainWindow.webContents.send('workbench:toast', {
           message: `❌ Failed to deliver action result to AI: ${delivery.error}`,
           type: 'error',
@@ -1664,6 +1672,7 @@ export class AIViewHandler {
     try {
       // Step 1: Wait for AI streaming / response generation to complete
       if (waitForStreaming) {
+        console.log(`[AIView:Inject:STEP 1] Checking/waiting for AI streaming completion (max: ${maxWaitMs}ms)...`)
         const streamWaitStart = Date.now()
         let streaming = true
         while (streaming && Date.now() - streamWaitStart < maxWaitMs) {
@@ -1712,6 +1721,7 @@ export class AIViewHandler {
       }
 
       // Step 2: Locate and focus the chat input in DOM across Claude, ChatGPT, Gemini, etc.
+      console.log(`[AIView:Inject:STEP 2] Locating & focusing chat input in DOM...`)
       const focusResult: { success: boolean; error?: string; isContentEditable?: boolean; tagName?: string } =
         await this.view.webContents.executeJavaScript(`
         (function() {
@@ -1767,15 +1777,18 @@ export class AIViewHandler {
       `)
 
       if (!focusResult.success) {
+        console.error(`[AIView:Inject:ERROR] Failed to focus chat input:`, focusResult.error)
         return { success: false, error: focusResult.error || 'Failed to focus chat input' }
       }
+      console.log(`[AIView:Inject:STEP 2] Input focused: tagName="${focusResult.tagName}", contentEditable=${focusResult.isContentEditable}`)
 
       // Step 3: Native Chromium text insertion via Electron's WebContents
+      console.log(`[AIView:Inject:STEP 3] Inserting text (${textToInsert.length} chars) via Chromium WebContents...`)
       this.view.webContents.focus()
       try {
         await this.view.webContents.insertText(textToInsert)
       } catch (insertErr) {
-        console.warn('[AIView] webContents.insertText failed, using fallback:', insertErr)
+        console.warn('[AIView:Inject:STEP 3] webContents.insertText failed, using script fallback:', insertErr)
         await this.view.webContents.executeJavaScript(`
           (function(t) {
             const input = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('div[contenteditable="true"]');
@@ -1792,6 +1805,7 @@ export class AIViewHandler {
       }
 
       // Step 3.5: Dispatch input and change events on activeElement so React (ChatGPT) and Angular (Gemini) enable their Send buttons
+      console.log(`[AIView:Inject:STEP 4] Dispatching input events & waiting for DOM reconciliation...`)
       await this.view.webContents.executeJavaScript(`
         (function() {
           const el = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('rich-textarea div[contenteditable="true"]') || document.querySelector('div[contenteditable="true"]');
@@ -1809,11 +1823,13 @@ export class AIViewHandler {
       await new Promise((r) => setTimeout(r, 200))
 
       if (!autoSubmit) {
+        console.log(`[AIView:Inject:STEP 5] autoSubmit is false. Leaving text ready in input.`)
         return { success: true, submitted: false }
       }
 
       // Step 5: Multi-layered Submission
       // Layer A: Attempt DOM click on the now-enabled Send button
+      console.log(`[AIView:Inject:STEP 5] Submitting prompt: attempting Send button click...`)
       const clickResult: { clicked: boolean; sendBtnFound: boolean } =
         await this.view.webContents.executeJavaScript(`
         (function() {
@@ -1846,8 +1862,11 @@ export class AIViewHandler {
 
       // Layer B: Hardware-level Enter key via Electron sendInputEvent if button wasn't clicked
       if (!clickResult.clicked) {
+        console.log(`[AIView:Inject:STEP 5] Send button click not triggered (found: ${clickResult.sendBtnFound}). Falling back to Enter key...`)
         this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
         this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+      } else {
+        console.log(`[AIView:Inject:STEP 5] Successfully clicked Send button`)
       }
 
       // Step 6: Post-submission verification
@@ -1882,6 +1901,7 @@ export class AIViewHandler {
           return { submitted: false };
         })()
       `).catch(() => ({ submitted: clickResult.clicked }))
+      console.log(`[AIView:Inject:STEP 6] Post-submission verification: submitted = ${verification.submitted}`)
 
       // If still not submitted, try one more hardware Enter fallback
       if (!verification.submitted && !clickResult.clicked) {

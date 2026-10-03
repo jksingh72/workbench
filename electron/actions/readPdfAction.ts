@@ -51,28 +51,35 @@ export const readPdfAction: ActionDefinition = {
     const shouldOpen = Boolean(params.openInTab ?? payload.openInTab ?? false)
 
     if (!filePath) {
+      console.error('[read_pdf:ERROR] File path is required for read_pdf')
       throw new Error('File path is required for read_pdf')
     }
 
+    console.log(`[read_pdf:STEP 1] Requested PDF read: "${filePath}" (maxPages: ${maxPages}, maxLines: ${maxLines}, targetPane: ${targetPane})`)
     const resolvedPath = ctx.resolveSafePath(filePath, targetPane)
+    console.log(`[read_pdf:STEP 2] Resolved safe path: "${resolvedPath}"`)
 
     if (!fs.existsSync(resolvedPath)) {
+      console.error(`[read_pdf:ERROR] PDF file does not exist: "${resolvedPath}"`)
       throw new Error(`PDF file does not exist: "${filePath}"`)
     }
 
     const stats = await fs.promises.stat(resolvedPath)
     if (stats.isDirectory()) {
+      console.error(`[read_pdf:ERROR] Path is a directory, not a PDF: "${resolvedPath}"`)
       throw new Error(`Path is a directory, not a PDF file: "${filePath}". Use list_directory instead.`)
     }
 
+    const sizeMb = (stats.size / (1024 * 1024)).toFixed(2)
+    const fileName = path.basename(resolvedPath)
+    console.log(`[read_pdf:STEP 2] File verified: "${fileName}" (${sizeMb} MB)`)
+
     // Automatic Native Attachment Optimization for Chat Context:
-    // If no specific small page limit was explicitly requested and chat attachment is available,
-    // attach the document directly into the chat session instead of dumping massive raw text!
     if (maxPages === 0 && typeof ctx.attachToChat === 'function') {
+      console.log(`[read_pdf:STEP 3:ATTACH] Optimizing: attaching PDF natively to chat session...`)
       const attachRes = await ctx.attachToChat(resolvedPath)
       if (attachRes.success) {
-        const sizeMb = (stats.size / (1024 * 1024)).toFixed(2)
-        const fileName = path.basename(resolvedPath)
+        console.log(`[read_pdf:STEP 3:ATTACH] PDF successfully attached to chat session`)
         ctx.notify(`📎 Attached PDF to Chat: ${fileName} (${sizeMb} MB)`)
         if (shouldOpen) {
           ctx.openInTab(resolvedPath)
@@ -90,9 +97,12 @@ export const readPdfAction: ActionDefinition = {
             attached: true,
           },
         }
+      } else {
+        console.warn(`[read_pdf:STEP 3:ATTACH] Native attachment did not succeed, falling back to local text extraction:`, attachRes.error)
       }
     }
 
+    console.log(`[read_pdf:STEP 4:PARSE] Reading buffer and parsing PDF pages locally...`)
     const buffer = await fs.promises.readFile(resolvedPath)
 
     // Dynamic import to handle both pdf-parse v2 (class-based) and v1 (function-based)
@@ -122,6 +132,7 @@ export const readPdfAction: ActionDefinition = {
       pagesRead = maxPages > 0 ? Math.min(maxPages, totalPages) : totalPages
     }
 
+    console.log(`[read_pdf:STEP 4:PARSE] Parsed ${pagesRead}/${totalPages} pages (${rawText.length} raw characters)`)
     let text = (rawText || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 
     // Character truncation
@@ -141,8 +152,8 @@ export const readPdfAction: ActionDefinition = {
       finalContent += `\n\n... [Truncated: showing ${lines.length} lines (${text.length} chars)] ...`
     }
 
-    const fileName = path.basename(resolvedPath)
     const charCount = text.length
+    console.log(`[read_pdf:STEP 5] Extraction complete. Lines: ${lines.length}, Chars: ${charCount}, Truncated: ${isTruncated}`)
     const header = `Read PDF "${fileName}" (${pagesRead}/${totalPages} pages, ${charCount} chars)`
     const note =
       charCount === 0
@@ -153,6 +164,7 @@ export const readPdfAction: ActionDefinition = {
     ctx.notify(`📄 Read PDF: ${fileName}`)
 
     if (shouldOpen) {
+      console.log(`[read_pdf:STEP 6] Opening PDF in viewer tab: "${resolvedPath}"`)
       ctx.openInTab(resolvedPath)
     }
 

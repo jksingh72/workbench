@@ -629,6 +629,9 @@ try {
         }
         executedActionTimestamps.set(payloadHash, now)
 
+        const actionName = item.payload.action || item.payload.type || 'unknown'
+        console.log(`[Workbench Bridge:DOM] Action detected in chat DOM: "${actionName}" -> Dispatching to main process:`, item.payload)
+
         // Send to main process
         ipcRenderer.send('workbench:action-triggered', item.payload)
 

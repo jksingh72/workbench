@@ -29,14 +29,17 @@ export const createFolderAction: ActionDefinition = {
       throw new Error('Missing folder name or path for create_folder')
     }
 
+    console.log(`[create_folder:STEP 1] Resolving path for input: "${targetInput}" (TargetPane: "${targetPane}")`)
     let targetDir = ''
     if (name && subPath && !path.isAbsolute(name)) {
       targetDir = ctx.resolveSafePath(path.join(subPath, name), targetPane)
     } else {
       targetDir = ctx.resolveSafePath(targetInput, targetPane)
     }
+    console.log(`[create_folder:STEP 2] Target directory resolved to: "${targetDir}"`)
 
     await fs.promises.mkdir(targetDir, { recursive: true })
+    console.log(`[create_folder:STEP 3] Successfully created directory: "${targetDir}"`)
 
     const displayFolder = path.basename(targetDir) || targetInput
     ctx.notify(`📁 Created folder: ${displayFolder}`)

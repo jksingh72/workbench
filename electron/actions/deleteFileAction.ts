@@ -21,11 +21,16 @@ export const deleteFileAction: ActionDefinition = {
 
     const targetInput = name || subPath || target
     if (!targetInput) {
+      console.error(`[delete_file:ERROR] Missing target path in payload:`, payload)
       throw new Error('Missing file or folder path for delete_file')
     }
 
+    console.log(`[delete_file:STEP 1] Target requested for deletion: "${targetInput}" (targetPane: ${targetPane})`)
     const targetPath = ctx.resolveSafePath(targetInput, targetPane)
+    console.log(`[delete_file:STEP 2] Resolved safe path: "${targetPath}"`)
+
     if (!fs.existsSync(targetPath)) {
+      console.log(`[delete_file:STEP 2] Path does not exist on disk (already clean): "${targetPath}"`)
       return {
         success: true,
         action: 'delete_file',
@@ -34,6 +39,7 @@ export const deleteFileAction: ActionDefinition = {
     }
 
     // Security Guardrail: Prompt user before deleting any file or folder across all chat sites
+    console.log(`[delete_file:STEP 3] Prompting user security confirmation dialog for "${targetPath}"...`)
     const confirmed = await ctx.confirm({
       title: 'Security Warning: Confirm Deletion',
       message: `An AI action requested to delete:\n\n${targetPath}`,
@@ -41,6 +47,7 @@ export const deleteFileAction: ActionDefinition = {
     })
 
     if (!confirmed) {
+      console.warn(`[delete_file:STEP 3] Deletion rejected or cancelled by user for "${targetPath}"`)
       ctx.notify(`🛡️ Deletion cancelled: ${path.basename(targetPath)}`)
       return {
         success: false,
@@ -49,8 +56,10 @@ export const deleteFileAction: ActionDefinition = {
       }
     }
 
+    console.log(`[delete_file:STEP 4] Deletion confirmed by user. Removing "${targetPath}"...`)
     await fs.promises.rm(targetPath, { recursive: true, force: true })
 
+    console.log(`[delete_file:STEP 5] Removed "${targetPath}". Refreshing explorer...`)
     ctx.notify(`🗑️ Deleted: ${path.basename(targetPath)}`)
     ctx.refreshExplorer(targetPane)
 

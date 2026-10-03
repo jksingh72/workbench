@@ -23,6 +23,7 @@ export const listActionsAction: ActionDefinition = {
 
     const registry = ActionRegistry.getInstance()
     const actions = registry.getAll()
+    console.log(`[list_actions:STEP 1] Retrieved ${actions.length} registered actions (verbose: ${verbose})`)
 
     const summaryList = actions.map((a) => {
       const aliasStr = a.aliases && a.aliases.length > 0 ? ` (Aliases: ${a.aliases.map((al) => `\`${al}\``).join(', ')})` : ''

@@ -32,10 +32,13 @@ export const createProjectAction: ActionDefinition = {
     const files = params.files ?? payload.files
 
     const projectFolderName = folder || name || 'new-project'
+    console.log(`[create_project:STEP 1] Scaffolding project: folder="${projectFolderName}" (targetPane: ${targetPane})`)
     const projectDir = ctx.resolveSafePath(projectFolderName, targetPane)
+    console.log(`[create_project:STEP 2] Creating project root directory: "${projectDir}"`)
     await fs.promises.mkdir(projectDir, { recursive: true })
 
     const fileList = Array.isArray(files) ? files : []
+    console.log(`[create_project:STEP 3] Writing ${fileList.length} project file(s)...`)
     let createdCount = 0
     let primaryFileToOpen = ''
 
@@ -46,6 +49,7 @@ export const createProjectAction: ActionDefinition = {
         await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
         await fs.promises.writeFile(filePath, f.content || '', 'utf-8')
         createdCount++
+        console.log(`[create_project:STEP 3] Wrote file ${createdCount}/${fileList.length}: "${fSubPath}" (${(f.content || '').length} chars)`)
 
         const base = f.name.toLowerCase()
         if (
@@ -57,10 +61,12 @@ export const createProjectAction: ActionDefinition = {
       }
     }
 
+    console.log(`[create_project:STEP 4] Project scaffold complete. Total files written: ${createdCount}. Refreshing explorer...`)
     ctx.notify(`🚀 Project created: ${projectFolderName} (${createdCount} files)`)
     ctx.refreshExplorer(targetPane)
 
     if (primaryFileToOpen && Boolean(payload.openInTab || params.openInTab)) {
+      console.log(`[create_project:STEP 5] Opening primary project file in tab: "${primaryFileToOpen}"`)
       ctx.openInTab(primaryFileToOpen)
     }
 

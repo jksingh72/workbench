@@ -446,16 +446,21 @@ function registerIpcHandlers() {
 
   // Workbench Action Model Handlers
   ipcMain.on('workbench:action-triggered', async (_, payload) => {
+    const actName = payload?.action || payload?.type || 'unknown'
+    console.log(`[Main:IPC] Received "workbench:action-triggered" for action: "${actName}"`)
     try {
       const result = await ActionDispatcher.getInstance().dispatch(payload)
       if (result.message && result.message.includes('Duplicate action suppressed')) {
+        console.log(`[Main:IPC] Action "${actName}" suppressed as duplicate`)
         return
       }
+      console.log(`[Main:IPC] Action "${actName}" execution finished with status: ${result.success ? 'SUCCESS' : 'FAILED'}`)
       if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
+        console.log(`[Main:IPC] Forwarding result of "${actName}" to AI feedback loop`)
         await aiHandler.handleActionExecutionFeedback(payload, result)
       }
     } catch (err: any) {
-      console.error('[Main] action-triggered error:', err)
+      console.error(`[Main:IPC] Error executing triggered action "${actName}":`, err)
       if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
         await aiHandler.handleActionExecutionFeedback(payload, {
           success: false,
@@ -467,6 +472,8 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('workbench:execute-action', async (_, payload) => {
+    const actName = payload?.action || payload?.type || 'unknown'
+    console.log(`[Main:IPC] Invoking "workbench:execute-action" for action: "${actName}"`)
     const result = await ActionDispatcher.getInstance().dispatch(payload)
     if (!result.message?.includes('Duplicate action suppressed') && aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
       await aiHandler.handleActionExecutionFeedback(payload, result)

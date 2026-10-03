@@ -245,13 +245,25 @@ export const createDocxAction: ActionDefinition = {
     const author: string = String(params.author ?? payload.author ?? 'Workbench')
     const overwrite = (params.overwrite ?? payload.overwrite) === true
     const open = (params.open ?? payload.open) !== false
-    if (!rawPath) throw new Error('create_docx requires a "path"')
+    if (!rawPath) {
+      console.error('[create_docx:ERROR] Missing "path" parameter in payload:', payload)
+      throw new Error('create_docx requires a "path"')
+    }
+
+    console.log(`[create_docx:STEP 1] Generating Word docx: path="${rawPath}", title="${title || ''}" (targetPane: ${targetPane})`)
     const relPath = rawPath.toLowerCase().endsWith('.docx') ? rawPath : rawPath + '.docx'
     const targetPath = ctx.resolveSafePath(relPath, targetPane)
+    console.log(`[create_docx:STEP 2] Resolved safe path: "${targetPath}"`)
+
     if (fs.existsSync(targetPath) && !overwrite) {
+      console.error(`[create_docx:ERROR] File already exists and overwrite is false: "${targetPath}"`)
       throw new Error(`File already exists: ${relPath}. Pass "overwrite": true to replace it.`)
     }
+
+    console.log(`[create_docx:STEP 3] Ensuring parent directory exists: "${path.dirname(targetPath)}"`)
     await fs.promises.mkdir(path.dirname(targetPath), { recursive: true })
+
+    console.log(`[create_docx:STEP 4] Assembling OpenXML package (body: ${content.length} chars, author: "${author}")...`)
     const { body, numberedLists } = buildBody(content, title)
     const docTitle = title || path.basename(targetPath, '.docx')
     const zip = buildZip([
@@ -263,10 +275,19 @@ export const createDocxAction: ActionDefinition = {
       { name: 'word/styles.xml', data: stylesXml() },
       { name: 'word/numbering.xml', data: numberingXml(numberedLists) }
     ])
+
+    console.log(`[create_docx:STEP 5] Writing .docx package (${zip.length} bytes) to disk...`)
     await fs.promises.writeFile(targetPath, zip)
+
+    console.log(`[create_docx:STEP 6] DOCX created successfully. Refreshing explorer...`)
     ctx.notify(`📝 Created: ${path.basename(targetPath)}`)
     ctx.refreshExplorer(targetPane)
-    if (open) ctx.openInTab(targetPath)
+
+    if (open) {
+      console.log(`[create_docx:STEP 7] Opening created DOCX in tab: "${targetPath}"`)
+      ctx.openInTab(targetPath)
+    }
+
     return { success: true, action: 'create_docx', message: `Created ${relPath}`, createdPath: targetPath }
   }
 }

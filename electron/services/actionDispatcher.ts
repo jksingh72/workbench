@@ -366,6 +366,7 @@ export class ActionDispatcher {
 
       const actionType = (payload.type || payload.action || '').trim().toLowerCase()
       if (!actionType) {
+        console.warn('[ActionDispatcher] Missing "action" or "type" in payload:', payload)
         return {
           success: false,
           message: 'Missing "action" or "type" in action block payload',
@@ -376,7 +377,7 @@ export class ActionDispatcher {
       const handler = this.registry.get(actionType)
       if (!handler) {
         const available = this.registry.getAll().map((a) => a.id).join(', ')
-        console.warn(`[ActionDispatcher] Unknown action "${actionType}". Available: ${available}`)
+        console.warn(`[Action:UNKNOWN] Action "${actionType}" not registered. Available: ${available}`)
         return {
           success: false,
           action: actionType,
@@ -385,12 +386,22 @@ export class ActionDispatcher {
         }
       }
 
-      console.log(`[ActionDispatcher] Executing modular action: ${handler.id} (${actionType}) on target "${effectivePane}"`)
+      const startTime = performance.now()
+      console.log(`[Action:START] [${actionType}] (Handler: ${handler.id}) Target: "${effectivePane}" | Payload:`, JSON.stringify(payload))
+
       const ctx = this.createContext()
       const result = await handler.execute(ctx, payload, effectivePane)
+      const durationMs = Math.round(performance.now() - startTime)
+
+      if (result.success) {
+        console.log(`[Action:SUCCESS] [${actionType}] Completed in ${durationMs}ms | Message: ${result.message}`)
+      } else {
+        console.warn(`[Action:FAILED] [${actionType}] Finished with failure in ${durationMs}ms | Error: ${result.error || result.message}`)
+      }
+
       return result
     } catch (err: any) {
-      console.error('[ActionDispatcher] Execution error:', err)
+      console.error(`[Action:EXCEPTION] Execution error: ${err.message}`, err)
       this.notify(`❌ Action failed: ${err.message}`)
       return {
         success: false,

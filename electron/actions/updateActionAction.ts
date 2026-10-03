@@ -34,23 +34,40 @@ export const updateActionAction: ActionDefinition = {
     const name = params.name || payload.name
     const code = params.code || payload.code
     const fileOverride = params.file || payload.file
-    if (!name || !code) throw new Error('update_action requires name and code')
+    if (!name || !code) {
+      console.error('[update_action:ERROR] Missing name or code in payload:', payload)
+      throw new Error('update_action requires name and code')
+    }
 
+    console.log(`[update_action:STEP 1] Validating update request for action: "${name}"`)
     const fileName = fileOverride || toFileName(name)
     if (fileName.includes('/') || fileName.includes('\\') || !fileName.endsWith('.ts')) {
+      console.error(`[update_action:ERROR] Invalid file name: "${fileName}"`)
       throw new Error('file must be a plain .ts file name')
     }
-    if (fileName === 'index.ts' || fileName === 'types.ts') throw new Error(`Refusing to overwrite ${fileName}`)
-    if (!code.includes(`'${name}'`)) throw new Error(`New code does not declare id '${name}'`)
+    if (fileName === 'index.ts' || fileName === 'types.ts') {
+      console.error(`[update_action:ERROR] Refusing to overwrite protected core file: ${fileName}`)
+      throw new Error(`Refusing to overwrite ${fileName}`)
+    }
+    if (!code.includes(`'${name}'`)) {
+      console.error(`[update_action:ERROR] Code does not declare action id '${name}'`)
+      throw new Error(`New code does not declare id '${name}'`)
+    }
 
     const dir = findActionsDir()
     const target = path.join(dir, fileName)
+    console.log(`[update_action:STEP 2] Target module path: "${target}"`)
+
     if (!fs.existsSync(target)) {
+      console.error(`[update_action:ERROR] Target module does not exist at "${target}"`)
       throw new Error(`No existing action module at ${target}. Use create_action for new actions.`)
     }
 
+    console.log(`[update_action:STEP 3] Creating backup at "${target}.bak" and writing new code (${code.length} chars)...`)
     await fs.promises.copyFile(target, `${target}.bak`)
     await fs.promises.writeFile(target, code, 'utf8')
+
+    console.log(`[update_action:STEP 4] Action updated successfully. Opening in tab...`)
     ctx.notify(`♻️ Updated action: ${name}`)
     ctx.openInTab(target)
     return {

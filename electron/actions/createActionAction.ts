@@ -77,14 +77,17 @@ export const createActionAction: ActionDefinition = {
     const actionExample = params.example ?? payload.example ?? { action: rawName }
 
     if (!rawName) {
+      console.error('[create_action:ERROR] Missing action "name" in payload:', payload)
       throw new Error('Missing action "name" for create_action. Must be in snake_case (e.g. "download_file").')
     }
 
     const cleanId = rawName.replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
     if (!cleanId) {
+      console.error(`[create_action:ERROR] Invalid action name "${rawName}"`)
       throw new Error(`Invalid action name "${rawName}". Use alphanumeric snake_case.`)
     }
 
+    console.log(`[create_action:STEP 1] Validating action name uniqueness for "${cleanId}"...`)
     // 1. Check if an action with identical ID or aliases already exists in registry
     const registry = ActionRegistry.getInstance()
     const existingDirect = registry.get(cleanId)
@@ -93,6 +96,7 @@ export const createActionAction: ActionDefinition = {
         existingDirect.aliases && existingDirect.aliases.length > 0
           ? ` (aliases: ${existingDirect.aliases.join(', ')})`
           : ''
+      console.warn(`[create_action:STEP 1] Action "${cleanId}" already exists as "${existingDirect.id}"`)
       ctx.notify(`ℹ️ Action already exists: "${existingDirect.id}"`)
       return {
         success: false,

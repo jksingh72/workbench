@@ -100,9 +100,9 @@ export class ActionRegistry {
       hasActiveDir
         ? `   - State: "⚡ **Connection Status:** Connected to Workbench (Active Target: \`${activeDirDisplay}\`)"`
         : `   - State: "⚪ **Connection Status:** Not Connected (No active directory linked)"`,
-      `   - **DO NOT** execute \`list_directory\` or output any list of files from the active folder upon priming!`,
+      `   - **DO NOT** automatically execute \`list_directory\` upon greeting. Only execute \`list_directory\` when the user explicitly asks to list, see, or explore directory contents.`,
       `2. **List of Available Actions**:`,
-      `   - Present a clean, concise bulleted list of the actions currently available in Workbench (e.g. \`create_folder\`, \`write_file\`, \`read_file\`, \`create_project\`, \`create_action\`, etc.).`,
+      `   - Present a clean, concise bulleted list of the actions currently available in Workbench (e.g. \`create_folder\`, \`write_file\`, \`read_file\`, \`list_directory\`, \`attach_file\`, \`create_project\`, etc.).`,
       `3. **Invite for Instructions**:`,
       `   - Conclude with an invitation asking the user for their instructions to operate (e.g. "I'm ready for your instructions. What would you like to build, organize, or create?").`,
       ``,

@@ -19,6 +19,9 @@ export const getWorkspaceFoldersAction: ActionDefinition = {
         ? 'Custom Directory'
         : 'Book View'
 
+    console.log(`[get_workspace_folders:STEP 1] Current target: ${targetLabel} -> "${folders.activeDirectory}"`)
+    console.log(`[get_workspace_folders:STEP 1] Book folder: "${folders.bookDirectory || 'None'}", Note folder: "${folders.noteDirectory || 'None'}"`)
+
     const summary = `Current Target: ${targetLabel} (${folders.activeDirectory})\n- Book View Folder: ${folders.bookDirectory || 'None'}\n- Note View Folder: ${folders.noteDirectory || 'None'}`
 
     ctx.notify(`📁 Active Target: ${targetLabel}`)
@@ -58,6 +61,8 @@ export const setActiveDirectoryAction: ActionDefinition = {
     let target = (params.target ?? payload.target ?? '').trim().toLowerCase()
     const customPath = (params.path ?? payload.path ?? params.folder ?? payload.folder ?? '').trim()
 
+    console.log(`[set_active_directory:STEP 1] Switch requested: target="${target}", customPath="${customPath}"`)
+
     if (!target && customPath) {
       target = 'custom'
     }
@@ -77,11 +82,14 @@ export const setActiveDirectoryAction: ActionDefinition = {
         resolvedCustom = ctx.resolveSafePath(customPath)
       }
 
+      console.log(`[set_active_directory:STEP 2] Validating custom directory: "${resolvedCustom}"`)
       if (!fs.existsSync(resolvedCustom)) {
+        console.error(`[set_active_directory:ERROR] Directory does not exist: "${resolvedCustom}"`)
         throw new Error(`Directory does not exist: "${customPath}"`)
       }
     }
 
+    console.log(`[set_active_directory:STEP 3] Setting active target to "${target}" (customPath: "${resolvedCustom || 'none'}")`)
     ctx.setActiveTarget(target as 'book' | 'note' | 'custom', resolvedCustom || undefined)
 
     const updated = ctx.getWorkspaceFolders()
@@ -93,6 +101,7 @@ export const setActiveDirectoryAction: ActionDefinition = {
         : 'Book View'
 
     const msg = `Switched Action Mode target to ${targetLabel}: "${updated.activeDirectory}"`
+    console.log(`[set_active_directory:STEP 4] Successfully switched: ${msg}`)
     ctx.notify(`🎯 ${msg}`)
 
     return {
