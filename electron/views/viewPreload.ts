@@ -316,6 +316,9 @@ try {
         actionModeEnabled = enabled
         userExplicitlyDisabled = !enabled
         checkPrimedStatus()
+        if (enabled) {
+          scanForActions()
+        }
       })
     } catch (_) {}
 
@@ -371,6 +374,9 @@ try {
         '[data-message-author-role="assistant"]',
         'div.font-claude-message',
         '.font-claude-message',
+        '.standard-markdown',
+        'div[class*="font-claude"]',
+        'div[class*="message"][class*="assistant"]',
         'div[data-is-streaming]',
         '[data-is-streaming]',
         'model-response',
@@ -403,6 +409,25 @@ try {
             !lastTurn.classList.contains('font-user-message')
           ) {
             return lastTurn
+          }
+        }
+      } catch (_) {}
+
+      // Claude fallback: find the last container holding code/pre blocks that is not a user message
+      try {
+        const allCode = document.querySelectorAll('pre, code-block, [class*="code-block"]')
+        if (allCode && allCode.length > 0) {
+          for (let i = allCode.length - 1; i >= 0; i--) {
+            const el = allCode[i] as HTMLElement
+            if (
+              !el.closest('[data-message-author-role="user"]') &&
+              !el.closest('.font-user-message') &&
+              !el.closest('[data-user-message="true"]') &&
+              !el.closest('#prompt-textarea') &&
+              !el.closest('form')
+            ) {
+              return el.closest('div.grid, [class*="message"], article') || el
+            }
           }
         }
       } catch (_) {}
@@ -713,8 +738,11 @@ try {
         }
 
         const targetContainer = getLatestAssistantContainer()
-        if (!targetContainer) return
-        const searchScope = targetContainer.closest('article, [data-testid*="conversation-turn"]') || targetContainer
+        const searchScope =
+          (targetContainer &&
+            ((targetContainer.closest && targetContainer.closest('article, [data-testid*="conversation-turn"]')) ||
+              targetContainer)) ||
+          document
         const codeElements: HTMLElement[] = []
         searchScope.querySelectorAll(
           'code-block, pre, code, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
