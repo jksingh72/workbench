@@ -143,6 +143,30 @@ export interface ElectronAPI {
   onActiveDirectoryChanged?: (callback: (data: { target: 'book' | 'note'; currentPath: string; rootPath?: string }) => void) => () => void
   onActionTargetChanged?: (callback: (data: { activeTarget: 'book' | 'note' | 'custom'; activeDirectory: string; bookDirectory: string; noteDirectory: string; customDirectory?: string }) => void) => () => void
   onNavigateToFolder?: (callback: (data: { target: 'book' | 'note'; path: string }) => void) => () => void
+
+  // MCP (Model Context Protocol) APIs
+  mcpGetConfig?: () => Promise<{ path: string; config: { mcpServers: Record<string, any> } }>
+  mcpSaveConfig?: (config: any) => Promise<{ success: boolean; status: McpServerInfo[] }>
+  mcpGetStatus?: () => Promise<McpServerInfo[]>
+  mcpReload?: () => Promise<{ success: boolean; status: McpServerInfo[] }>
+  mcpOpenConfig?: () => Promise<{ success: boolean; path?: string; error?: string }>
+  mcpRemoveServer?: (serverName: string) => Promise<{ success: boolean; status: McpServerInfo[] }>
+  mcpConfigureServer?: (serverName: string, updates: any) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
+}
+
+export interface McpServerInfo {
+  name: string
+  command: string
+  args: string[]
+  connected: boolean
+  disabled?: boolean
+  error?: string
+  toolCount: number
+  tools: Array<{
+    name: string
+    actionId: string
+    description?: string
+  }>
 }
 
 export interface SystemRootItem {

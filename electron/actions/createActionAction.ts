@@ -112,6 +112,22 @@ export const createActionAction: ActionDefinition = {
       }
     }
 
+    // Guard: Prevent writing source files for MCP servers - redirect to add_mcp_server
+    if (cleanId.includes('mcp') || actionDesc.toLowerCase().includes('mcp') || cleanId.includes('playwright')) {
+      const mcpAction = registry.get('add_mcp_server')
+      if (mcpAction) {
+        ctx.notify('ℹ️ Use "add_mcp_server" to connect MCP tools dynamically')
+        return {
+          success: false,
+          action: 'create_action',
+          message: `Do not create TypeScript source code for MCP servers. Use the built-in "add_mcp_server" action instead to connect external tools (like Playwright, databases, APIs) dynamically at runtime without restarting Workbench. Example: {"action": "add_mcp_server", "parameters": {"name": "${cleanId.replace(/^mcp_/, '')}", "command": "npx", "args": ["-y", "@playwright/mcp@latest"]}}`,
+          details: {
+            redirectToAction: 'add_mcp_server',
+          },
+        }
+      }
+    }
+
     // 2. Semantic and common synonym matching against existing built-in actions
     const semanticEquivalents: Array<{ triggers: string[]; existingId: string }> = [
       {

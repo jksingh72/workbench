@@ -18,6 +18,9 @@ import { summarizeFileAction } from './summarizeFileAction'
 import { updateActionAction } from './updateActionAction'
 import { createDocxAction } from './createDocxAction'
 import { attachFileAction } from './attachFileAction'
+import { addMcpServerAction } from './addMcpServerAction'
+import { removeMcpServerAction } from './removeMcpServerAction'
+import { configureMcpServerAction } from './configureMcpServerAction'
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -38,6 +41,9 @@ export * from './createActionAction'
 export * from './summarizeFileAction'
 export * from './updateActionAction'
 export * from './createDocxAction'
+export * from './addMcpServerAction'
+export * from './removeMcpServerAction'
+export * from './configureMcpServerAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -67,5 +73,8 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(summarizeFileAction)
   registry.register(updateActionAction)
   registry.register(createDocxAction)
+  registry.register(addMcpServerAction)
+  registry.register(removeMcpServerAction)
+  registry.register(configureMcpServerAction)
   return registry
 }

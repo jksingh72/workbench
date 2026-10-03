@@ -25,6 +25,13 @@ export interface ActionContext {
   attachToChat?(filePath: string, customInstruction?: string): Promise<{ success: boolean; uploaded?: boolean; error?: string }>
 }
 
+export interface ActionParameter {
+  type: string
+  required?: boolean
+  description: string
+  default?: any
+}
+
 export interface ActionDefinition {
   /** Primary action name, e.g. 'create_folder' */
   id: string
@@ -33,15 +40,7 @@ export interface ActionDefinition {
   /** Human & LLM readable description of what this action does */
   description: string
   /** Expected parameters for LLM documentation */
-  parameters: Record<
-    string,
-    {
-      type: string
-      required?: boolean
-      description: string
-      default?: any
-    }
-  >
+  parameters: Record<string, ActionParameter>
   /** Example JSON for this action */
   example: Record<string, any>
   /** Execution logic for this action */

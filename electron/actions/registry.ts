@@ -30,6 +30,30 @@ export class ActionRegistry {
   }
 
   /**
+   * Unregister an action by primary ID or alias.
+   */
+  public unregister(nameOrAlias: string): boolean {
+    if (!nameOrAlias) return false
+    const clean = nameOrAlias.toLowerCase().trim()
+    const primaryId = this.aliasMap.get(clean)
+    if (!primaryId) return false
+
+    const action = this.actions.get(primaryId)
+    this.actions.delete(primaryId)
+    this.aliasMap.delete(primaryId)
+
+    if (action?.aliases) {
+      for (const alias of action.aliases) {
+        const aClean = alias.toLowerCase().trim()
+        if (this.aliasMap.get(aClean) === primaryId) {
+          this.aliasMap.delete(aClean)
+        }
+      }
+    }
+    return true
+  }
+
+  /**
    * Find an action definition by primary name or alias.
    */
   public get(nameOrAlias: string): ActionDefinition | undefined {
@@ -120,6 +144,12 @@ export class ActionRegistry {
       lines.push(customInstructions.trim())
       lines.push(``)
     }
+
+    lines.push(`### 🔌 External Tools & MCP Servers (Model Context Protocol):`)
+    lines.push(`Whenever the user asks you to add, connect, install, or use an MCP server (e.g. Playwright browser automation, databases, GitHub, web search, etc.):`)
+    lines.push(`- **ALWAYS use \`add_mcp_server\`** (\`{"action": "add_mcp_server", "parameters": {"name": "<server_name>", "command": "npx|uvx", "args": ["..."]}}\`).`)
+    lines.push(`- **NEVER use \`create_action\`** or attempt to write TypeScript files for external tools or MCP servers. \`add_mcp_server\` connects the server dynamically in memory without restarting Workbench, and immediately exposes all of its tools.`)
+    lines.push(``)
 
     lines.push(`### Available Workbench Actions:`)
 

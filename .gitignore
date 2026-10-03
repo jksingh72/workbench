@@ -36,3 +36,7 @@ pnpm-debug.log*
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# MCP temporary runtime data
+.playwright-mcp/
+*.db

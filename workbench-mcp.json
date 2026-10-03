@@ -1,0 +1,66 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "disabled": false,
+      "description": "Web Fetch & HTML Scraper: Allows Claude/ChatGPT to fetch URLs and inspect live web documentation."
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "./workspace.db"
+      ],
+      "disabled": false,
+      "description": "Local SQLite Database: Allows Claude/ChatGPT to query, create tables, and manage SQLite databases."
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--headless"
+      ],
+      "disabled": false,
+      "description": "Playwright browser automation MCP server"
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+      },
+      "disabled": true,
+      "description": "GitHub Integration: Set your GITHUB_PERSONAL_ACCESS_TOKEN and change disabled to false to activate."
+    },
+    "brave_search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
+      },
+      "disabled": true,
+      "description": "Brave Web Search: Set your BRAVE_API_KEY and change disabled to false to activate."
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\"
+      ],
+      "disabled": false,
+      "description": "Filesystem MCP server with access to the C drive"
+    }
+  }
+}

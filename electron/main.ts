@@ -13,6 +13,7 @@ import { BookSourceManager, BookSource } from './services/bookSourceManager'
 import { AISourceManager, AISource } from './services/aiSourceManager'
 import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
 import { ActionDispatcher } from './services/actionDispatcher'
+import { McpManager } from './services/mcpManager'
 
 const BINARY_EXTENSIONS = new Set([
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
@@ -126,6 +127,11 @@ function createWindow() {
   layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler, noteHandler)
   ActionDispatcher.getInstance().setMainWindow(mainWindow)
   ActionDispatcher.getInstance().setAIHandler(aiHandler)
+
+  // Initialize MCP (Model Context Protocol) Manager in the background
+  McpManager.getInstance().initialize().catch((err) => {
+    console.error('[Main] Failed to initialize McpManager:', err)
+  })
 
   // Set initial bounds (handlers manage attaching their own views)
   layoutManager.applyBounds()
@@ -585,6 +591,61 @@ function registerIpcHandlers() {
         })
       }
     }
+  })
+
+  // MCP (Model Context Protocol) Server Management
+  ipcMain.handle('workbench:mcp-get-config', () => {
+    const manager = McpManager.getInstance()
+    return {
+      path: manager.getConfigPath(),
+      config: manager.readConfig(),
+    }
+  })
+
+  ipcMain.handle('workbench:mcp-save-config', async (_, config) => {
+    const manager = McpManager.getInstance()
+    const saved = manager.saveConfig(config)
+    if (saved) {
+      await manager.reload()
+      ActionDispatcher.getInstance().reprimeActiveChat(false).catch(() => {})
+    }
+    return { success: saved, status: manager.getStatus() }
+  })
+
+  ipcMain.handle('workbench:mcp-get-status', () => {
+    return McpManager.getInstance().getStatus()
+  })
+
+  ipcMain.handle('workbench:mcp-reload', async () => {
+    const manager = McpManager.getInstance()
+    const status = await manager.reload()
+    ActionDispatcher.getInstance().reprimeActiveChat(false).catch(() => {})
+    return { success: true, status }
+  })
+
+  ipcMain.handle('workbench:mcp-open-config', async () => {
+    const configPath = McpManager.getInstance().getConfigPath()
+    if (fs.existsSync(configPath)) {
+      shell.showItemInFolder(configPath)
+      return { success: true, path: configPath }
+    }
+    return { success: false, error: 'Config file does not exist' }
+  })
+
+  ipcMain.handle('workbench:mcp-remove-server', async (_, serverName: string) => {
+    const manager = McpManager.getInstance()
+    const removed = await manager.removeServer(serverName)
+    if (removed) {
+      ActionDispatcher.getInstance().reprimeActiveChat(false).catch(() => {})
+    }
+    return { success: removed, status: manager.getStatus() }
+  })
+
+  ipcMain.handle('workbench:mcp-configure-server', async (_, { serverName, updates }: { serverName: string; updates: any }) => {
+    const manager = McpManager.getInstance()
+    const result = await manager.configureServer(serverName, updates)
+    ActionDispatcher.getInstance().reprimeActiveChat(false).catch(() => {})
+    return { ...result, status: manager.getStatus() }
   })
 
   // Cross-Pane: Native File Drag & Drop (OS-level drag to external apps, AI view, or folders)
@@ -1710,6 +1771,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', async () => {
+  McpManager.getInstance().shutdown().catch(() => {})
   const storeNotes = sessionManager?.getSettings().storeNoteCredentials ?? true
   if (!storeNotes && noteHandler) {
     const p = noteHandler.getNotesPath()

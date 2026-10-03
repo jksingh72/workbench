@@ -88,6 +88,21 @@ export class ActionDispatcher {
     return this.autoFeedbackLoopEnabled && this.actionModeEnabled
   }
 
+  public async reprimeActiveChat(force: boolean = false): Promise<void> {
+    if (this.aiHandler && this.actionModeEnabled) {
+      if (!force) {
+        const isPrimed = await this.aiHandler.isChatPrimed().catch(() => false)
+        if (isPrimed) {
+          console.log('[ActionDispatcher] Active chat is already primed; skipping duplicate prompt injection to prevent conversation interruption.')
+          return
+        }
+      }
+      console.log('[ActionDispatcher] Priming active chat with updated actions/MCP tools...')
+      const prompt = this.getPromptGuide()
+      await this.aiHandler.enableActionMode(prompt, force)
+    }
+  }
+
   public setActiveTarget(target: 'book' | 'note' | 'custom', customPath?: string) {
     this.activeTarget = target
     if (customPath && fs.existsSync(customPath)) {

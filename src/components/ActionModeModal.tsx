@@ -16,6 +16,10 @@ import {
   FolderOpen,
   ExternalLink,
   SendHorizontal,
+  Server,
+  RefreshCw,
+  Trash2,
+  Power,
 } from 'lucide-react'
 
 interface ActionModeModalProps {
@@ -68,6 +72,29 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
   })
   const [customInputPath, setCustomInputPath] = useState<string>('')
   const [pathCopied, setPathCopied] = useState<boolean>(false)
+
+  // MCP Servers state
+  const [mcpServers, setMcpServers] = useState<any[]>([])
+  const [showMcpSection, setShowMcpSection] = useState(false)
+  const [isReloadingMcp, setIsReloadingMcp] = useState(false)
+  const [mcpConfigPath, setMcpConfigPath] = useState<string>('')
+  const [actionLoadingServer, setActionLoadingServer] = useState<string | null>(null)
+
+  // Load MCP status and config path
+  useEffect(() => {
+    if (isOpen) {
+      if (window.electron?.mcpGetStatus) {
+        window.electron.mcpGetStatus().then((statuses) => {
+          if (Array.isArray(statuses)) setMcpServers(statuses)
+        }).catch(() => {})
+      }
+      if (window.electron?.mcpGetConfig) {
+        window.electron.mcpGetConfig().then((res) => {
+          if (res?.path) setMcpConfigPath(res.path)
+        }).catch(() => {})
+      }
+    }
+  }, [isOpen])
 
   // Load initial workspace directories and feedback state
   useEffect(() => {
@@ -300,6 +327,81 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
       onNotify('⚠️ Error priming chat: ' + (err?.message || 'Unknown error'))
     } finally {
       setIsPriming(false)
+    }
+  }
+
+  const handleReloadMcp = async () => {
+    setIsReloadingMcp(true)
+    try {
+      const res = await window.electron?.mcpReload?.()
+      if (res?.status) {
+        setMcpServers(res.status)
+        const totalTools = res.status.reduce((sum: number, s: any) => sum + (s.toolCount || 0), 0)
+        onNotify(`🔄 MCP reloaded: ${res.status.length} server(s), ${totalTools} tool(s) active!`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ MCP reload error: ${err?.message || ''}`)
+    } finally {
+      setIsReloadingMcp(false)
+    }
+  }
+
+  const handleOpenMcpConfig = async () => {
+    try {
+      const res = await window.electron?.mcpOpenConfig?.()
+      if (res?.success) {
+        onNotify('📂 Opened workbench-mcp.json in explorer')
+      } else {
+        onNotify(`⚠️ ${res?.error || 'Could not open config file'}`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ ${err?.message || 'Error opening config'}`)
+    }
+  }
+
+  const handleToggleServer = async (serverName: string, currentlyDisabled: boolean) => {
+    setActionLoadingServer(serverName)
+    try {
+      const newDisabledState = !currentlyDisabled
+      const res = await window.electron?.mcpConfigureServer?.(serverName, { disabled: newDisabledState })
+      if (res?.status) {
+        setMcpServers(res.status)
+      } else if (res?.serverInfo) {
+        setMcpServers((prev) => prev.map((s) => (s.name === serverName ? res.serverInfo : s)))
+      }
+      if (res?.success) {
+        onNotify(newDisabledState ? `⏸️ MCP server "${serverName}" disabled` : `🟢 MCP server "${serverName}" enabled and active!`)
+      } else {
+        onNotify(`⚠️ Failed to toggle "${serverName}": ${res?.error || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ Error toggling MCP server "${serverName}": ${err?.message || ''}`)
+    } finally {
+      setActionLoadingServer(null)
+    }
+  }
+
+  const handleRemoveServer = async (serverName: string) => {
+    if (!window.confirm(`Remove MCP server "${serverName}"? This will disconnect the server and remove it from workbench-mcp.json.`)) {
+      return
+    }
+    setActionLoadingServer(serverName)
+    try {
+      const res = await window.electron?.mcpRemoveServer?.(serverName)
+      if (res?.status) {
+        setMcpServers(res.status)
+      } else {
+        setMcpServers((prev) => prev.filter((s) => s.name !== serverName))
+      }
+      if (res?.success) {
+        onNotify(`🗑️ Removed MCP server "${serverName}"`)
+      } else {
+        onNotify(`⚠️ Could not remove server "${serverName}"`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ Error removing MCP server "${serverName}": ${err?.message || ''}`)
+    } finally {
+      setActionLoadingServer(null)
     }
   }
 
@@ -842,7 +944,263 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
             />
           </div>
 
-          {/* Section 4: Collapsible AI Prompt Preview & Optional Manual Priming */}
+          {/* Section 4: MCP Servers (Model Context Protocol) */}
+          <div
+            style={{
+              border: '1px solid rgba(255, 255, 255, 0.07)',
+              borderRadius: '7px',
+              overflow: 'hidden',
+              background: 'rgba(0, 0, 0, 0.2)',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 10px',
+                background: 'rgba(255, 255, 255, 0.02)',
+                cursor: 'pointer',
+              }}
+              onClick={() => setShowMcpSection(!showMcpSection)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Server size={13} style={{ color: '#c084fc' }} />
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#cbd5e1' }}>
+                  MCP Servers
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    padding: '1px 6px',
+                    borderRadius: '10px',
+                    background: mcpServers.some((s) => s.connected) ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                    color: mcpServers.some((s) => s.connected) ? '#34d399' : '#94a3b8',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  {mcpServers.filter((s) => s.connected).length} active ({mcpServers.reduce((sum, s) => sum + (s.toolCount || 0), 0)} tools)
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleOpenMcpConfig()
+                  }}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: '#94a3b8',
+                    padding: '2px 7px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    cursor: 'pointer',
+                  }}
+                  title={`Open workbench-mcp.json (${mcpConfigPath || 'config'})`}
+                >
+                  <ExternalLink size={10} />
+                  <span>Config</span>
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleReloadMcp()
+                  }}
+                  disabled={isReloadingMcp}
+                  style={{
+                    background: 'rgba(168, 85, 247, 0.12)',
+                    border: '1px solid rgba(168, 85, 247, 0.3)',
+                    color: '#c084fc',
+                    padding: '2px 7px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    cursor: 'pointer',
+                  }}
+                  title="Reload MCP servers from config"
+                >
+                  <RefreshCw size={10} className={isReloadingMcp ? 'animate-spin' : ''} />
+                  <span>{isReloadingMcp ? 'Reloading...' : 'Reload'}</span>
+                </button>
+                {showMcpSection ? <ChevronDown size={13} style={{ color: '#94a3b8' }} /> : <ChevronRight size={13} style={{ color: '#94a3b8' }} />}
+              </div>
+            </div>
+
+            {showMcpSection && (
+              <div style={{ padding: '8px 10px', borderTop: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                {mcpServers.length === 0 ? (
+                  <div style={{ fontSize: '11px', color: '#94a3b8', padding: '6px 0', lineHeight: '1.4' }}>
+                    No MCP servers configured yet. Click <strong>Config</strong> above to open{' '}
+                    <code style={{ color: '#c084fc', fontSize: '10px' }}>workbench-mcp.json</code> and paste servers
+                    (SQLite, GitHub, Web Search, etc.).
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {mcpServers.map((srv) => (
+                      <div
+                        key={srv.name}
+                        style={{
+                          background: 'rgba(0, 0, 0, 0.3)',
+                          border: `1px solid ${
+                            srv.connected
+                              ? 'rgba(52, 211, 153, 0.2)'
+                              : srv.disabled
+                              ? 'rgba(255, 255, 255, 0.05)'
+                              : 'rgba(239, 68, 68, 0.15)'
+                          }`,
+                          borderRadius: '5px',
+                          padding: '6px 8px',
+                          opacity: srv.disabled ? 0.75 : 1,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                            <span
+                              style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                background: srv.connected ? '#34d399' : srv.disabled ? '#64748b' : '#f87171',
+                                flexShrink: 0,
+                              }}
+                            />
+                            <strong style={{ fontSize: '11px', color: srv.disabled ? '#94a3b8' : '#f1f5f9' }}>{srv.name}</strong>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                color: '#64748b',
+                                fontFamily: 'monospace',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={`${srv.command} ${(srv.args || []).join(' ')}`}
+                            >
+                              ({srv.command} {(srv.args || []).slice(0, 2).join(' ')})
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: '8px' }}>
+                            <span
+                              style={{
+                                fontSize: '9.5px',
+                                color: srv.connected ? '#34d399' : srv.disabled ? '#64748b' : '#f87171',
+                                fontWeight: 500,
+                              }}
+                            >
+                              {srv.connected
+                                ? `${srv.toolCount} tool(s)`
+                                : srv.disabled
+                                ? 'Disabled'
+                                : srv.error || 'Disconnected'}
+                            </span>
+
+                            {/* Inline Toggle: Enable / Disable */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleToggleServer(srv.name, !!srv.disabled)
+                              }}
+                              disabled={actionLoadingServer === srv.name}
+                              style={{
+                                background: srv.disabled ? 'rgba(255, 255, 255, 0.05)' : 'rgba(52, 211, 153, 0.12)',
+                                border: `1px solid ${
+                                  srv.disabled ? 'rgba(255, 255, 255, 0.12)' : 'rgba(52, 211, 153, 0.3)'
+                                }`,
+                                borderRadius: '4px',
+                                color: srv.disabled ? '#94a3b8' : '#34d399',
+                                padding: '2px 6px',
+                                fontSize: '9.5px',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                cursor: actionLoadingServer === srv.name ? 'wait' : 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                              title={srv.disabled ? `Enable "${srv.name}"` : `Disable "${srv.name}"`}
+                            >
+                              {actionLoadingServer === srv.name ? (
+                                <RefreshCw size={9} className="animate-spin" />
+                              ) : (
+                                <Power size={9} />
+                              )}
+                              <span>{srv.disabled ? 'Enable' : 'Active'}</span>
+                            </button>
+
+                            {/* Inline Delete: Trash icon */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleRemoveServer(srv.name)
+                              }}
+                              disabled={actionLoadingServer === srv.name}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#64748b',
+                                padding: '2px 4px',
+                                borderRadius: '4px',
+                                cursor: actionLoadingServer === srv.name ? 'wait' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'all 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.color = '#f87171'
+                                e.currentTarget.style.background = 'rgba(248, 113, 113, 0.15)'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.color = '#64748b'
+                                e.currentTarget.style.background = 'transparent'
+                              }}
+                              title={`Remove "${srv.name}" MCP server`}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        </div>
+                        {srv.tools && srv.tools.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                            {srv.tools.map((t: any) => (
+                              <span
+                                key={t.actionId}
+                                style={{
+                                  fontSize: '9.5px',
+                                  fontFamily: 'monospace',
+                                  padding: '1px 5px',
+                                  background: 'rgba(168, 85, 247, 0.1)',
+                                  border: '1px solid rgba(168, 85, 247, 0.2)',
+                                  borderRadius: '3px',
+                                  color: '#d8b4fe',
+                                }}
+                                title={t.description || t.actionId}
+                              >
+                                {t.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Section 5: Collapsible AI Prompt Preview & Optional Manual Priming */}
           <div
             style={{
               border: '1px solid rgba(255, 255, 255, 0.07)',

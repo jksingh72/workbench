@@ -283,4 +283,14 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.removeListener('workbench:navigate-to-folder', listener)
     }
   },
+
+  // MCP (Model Context Protocol) APIs
+  mcpGetConfig: () => ipcRenderer.invoke('workbench:mcp-get-config'),
+  mcpSaveConfig: (config: any) => ipcRenderer.invoke('workbench:mcp-save-config', config),
+  mcpGetStatus: () => ipcRenderer.invoke('workbench:mcp-get-status'),
+  mcpReload: () => ipcRenderer.invoke('workbench:mcp-reload'),
+  mcpOpenConfig: () => ipcRenderer.invoke('workbench:mcp-open-config'),
+  mcpRemoveServer: (serverName: string) => ipcRenderer.invoke('workbench:mcp-remove-server', serverName),
+  mcpConfigureServer: (serverName: string, updates: any) =>
+    ipcRenderer.invoke('workbench:mcp-configure-server', { serverName, updates }),
 })
