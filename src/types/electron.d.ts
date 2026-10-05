@@ -160,6 +160,7 @@ export interface McpServerInfo {
   args: string[]
   connected: boolean
   disabled?: boolean
+  browser?: string
   error?: string
   toolCount: number
   tools: Array<{

@@ -38,12 +38,17 @@ export const configureMcpServerAction: ActionDefinition = {
       required: false,
       description: 'Optional updated description of what the server provides',
     },
+    browser: {
+      type: 'string',
+      required: false,
+      description: 'Browser type or executable path for Playwright (e.g. "comet" [default], "chrome", "msedge", "firefox", "webkit")',
+    },
   },
   example: {
     action: 'configure_mcp_server',
     parameters: {
-      name: 'sqlite',
-      disabled: false,
+      name: 'playwright',
+      browser: 'comet',
     },
   },
   async execute(ctx: ActionContext, payload: any): Promise<ActionResult> {
@@ -65,6 +70,7 @@ export const configureMcpServerAction: ActionDefinition = {
     if (Array.isArray(params.args)) updates.args = params.args
     if (typeof params.env === 'object' && params.env !== null) updates.env = params.env
     if (typeof params.description === 'string') updates.description = params.description
+    if (typeof params.browser === 'string' && params.browser.trim()) updates.browser = params.browser.trim().toLowerCase()
 
     ctx.notify(`⚙️ Configuring MCP server: "${name}"...`)
     const manager = McpManager.getInstance()

@@ -12,6 +12,7 @@ export interface McpServerConfig {
   env?: Record<string, string>
   disabled?: boolean
   description?: string
+  browser?: string
 }
 
 export interface McpConfigFile {
@@ -24,6 +25,7 @@ export interface McpServerInfo {
   args: string[]
   connected: boolean
   disabled?: boolean
+  browser?: string
   error?: string
   toolCount: number
   tools: Array<{
@@ -136,6 +138,7 @@ export class McpManager {
             args: serverCfg.args || [],
             connected: false,
             disabled: true,
+            browser: serverCfg.browser || this.detectBrowser(serverCfg.args || []),
             error: 'Server is disabled in configuration',
             toolCount: 0,
             tools: [],
@@ -160,6 +163,88 @@ export class McpManager {
   }
 
   /**
+   * Returns the absolute path to the Comet browser executable if installed.
+   */
+  public static getCometExecutablePath(): string {
+    const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local')
+    return path.join(localAppData, 'Perplexity', 'Comet', 'Application', 'comet.exe')
+  }
+
+  /**
+   * Resolves browser arguments for Playwright MCP server.
+   * By default, checks if Comet browser exists on the machine and uses it.
+   */
+  public resolvePlaywrightArgs(rawArgs: string[] = [], requestedBrowser?: string): string[] {
+    const cleanArgs = [...rawArgs]
+    const cometPath = McpManager.getCometExecutablePath()
+    const cometExists = fs.existsSync(cometPath)
+
+    const removeFlagPair = (flag: string) => {
+      let idx = cleanArgs.indexOf(flag)
+      while (idx !== -1) {
+        cleanArgs.splice(idx, 2)
+        idx = cleanArgs.indexOf(flag)
+      }
+    }
+
+    const browserToSet = (requestedBrowser || '').trim().toLowerCase()
+
+    if (browserToSet) {
+      removeFlagPair('--browser')
+      removeFlagPair('--executable-path')
+
+      if (browserToSet === 'comet') {
+        if (cometExists) {
+          cleanArgs.push('--executable-path', cometPath)
+        } else {
+          console.warn(`[MCP:Playwright] Comet browser not found at "${cometPath}". Falling back to chrome channel.`)
+          cleanArgs.push('--browser', 'chrome')
+        }
+      } else if (['chrome', 'msedge', 'firefox', 'webkit'].includes(browserToSet)) {
+        cleanArgs.push('--browser', browserToSet)
+      } else if (browserToSet.endsWith('.exe') || browserToSet.includes(path.sep) || browserToSet.includes('/')) {
+        cleanArgs.push('--executable-path', requestedBrowser!.trim())
+      } else {
+        cleanArgs.push('--browser', browserToSet)
+      }
+    } else {
+      // If neither --browser nor --executable-path is set, DEFAULT TO COMET
+      const hasBrowser = cleanArgs.includes('--browser')
+      const hasExecutable = cleanArgs.includes('--executable-path')
+      if (!hasBrowser && !hasExecutable && cometExists) {
+        console.log(`[MCP:Playwright] Defaulting browser to Comet at: ${cometPath}`)
+        cleanArgs.push('--executable-path', cometPath)
+      }
+    }
+
+    // Always ensure --isolated is present to prevent user profile locking
+    if (!cleanArgs.includes('--isolated')) {
+      cleanArgs.push('--isolated')
+    }
+
+    return cleanArgs
+  }
+
+  /**
+   * Detects which browser is configured in the arguments.
+   */
+  public detectBrowser(args: string[] = []): string {
+    const execIdx = args.indexOf('--executable-path')
+    if (execIdx !== -1 && args[execIdx + 1]) {
+      const p = args[execIdx + 1].toLowerCase()
+      if (p.includes('comet')) return 'comet'
+      return 'custom'
+    }
+    const bIdx = args.indexOf('--browser')
+    if (bIdx !== -1 && args[bIdx + 1]) {
+      return args[bIdx + 1].toLowerCase()
+    }
+    const cometPath = McpManager.getCometExecutablePath()
+    if (fs.existsSync(cometPath)) return 'comet'
+    return 'chrome'
+  }
+
+  /**
    * Connects to a single MCP server via Stdio transport and registers its tools into ActionRegistry.
    */
   public async connectServer(serverName: string, cfg: McpServerConfig): Promise<boolean> {
@@ -168,20 +253,15 @@ export class McpManager {
 
     console.log(`[MCP:${serverName}] Connecting via stdio: ${cfg.command} ${(cfg.args || []).join(' ')}...`)
 
+    let resolvedArgs = [...(cfg.args || [])]
+    if (serverName.toLowerCase().includes('playwright') || resolvedArgs.some((a) => a.includes('playwright'))) {
+      resolvedArgs = this.resolvePlaywrightArgs(resolvedArgs, cfg.browser)
+    }
+
     try {
       const mergedEnv: Record<string, string> = {
         ...(process.env as Record<string, string>),
         ...(cfg.env || {}),
-      }
-
-      const resolvedArgs = [...(cfg.args || [])]
-      // Ensure Playwright runs headlessly so it doesn't crash in background Electron processes
-      if (
-        (serverName.toLowerCase().includes('playwright') || resolvedArgs.some((a) => a.includes('playwright'))) &&
-        !resolvedArgs.includes('--headless')
-      ) {
-        console.log(`[MCP:${serverName}] Auto-adding --headless flag for Playwright browser stability in background process.`)
-        resolvedArgs.push('--headless')
       }
 
       const transport = new StdioClientTransport({
@@ -274,9 +354,10 @@ export class McpManager {
       this.serverStatuses.set(serverName, {
         name: serverName,
         command: cfg.command,
-        args: cfg.args || [],
+        args: resolvedArgs,
         connected: true,
         disabled: false,
+        browser: cfg.browser || this.detectBrowser(resolvedArgs),
         toolCount: tools.length,
         tools: tools.map((t) => ({
           name: t.name,
@@ -293,9 +374,10 @@ export class McpManager {
       this.serverStatuses.set(serverName, {
         name: serverName,
         command: cfg.command,
-        args: cfg.args || [],
+        args: resolvedArgs,
         connected: false,
         disabled: !!cfg.disabled,
+        browser: cfg.browser || this.detectBrowser(resolvedArgs),
         error: errMsg,
         toolCount: 0,
         tools: [],
@@ -461,6 +543,11 @@ export class McpManager {
       env: updates.env !== undefined ? { ...existingCfg.env, ...updates.env } : existingCfg.env,
     }
 
+    if (updates.browser && (cleanName.includes('playwright') || (mergedCfg.args || []).some((a) => a.includes('playwright')))) {
+      mergedCfg.args = this.resolvePlaywrightArgs(mergedCfg.args || [], updates.browser)
+      mergedCfg.browser = updates.browser
+    }
+
     config.mcpServers[cleanName] = mergedCfg
     this.saveConfig(config)
 
@@ -472,6 +559,7 @@ export class McpManager {
         args: mergedCfg.args || [],
         connected: false,
         disabled: true,
+        browser: mergedCfg.browser || this.detectBrowser(mergedCfg.args || []),
         error: 'Server is disabled in configuration',
         toolCount: 0,
         tools: [],

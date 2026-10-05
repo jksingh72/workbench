@@ -23,10 +23,13 @@
       "args": [
         "-y",
         "@playwright/mcp@latest",
-        "--headless"
+        "--executable-path",
+        "C:\\Users\\jksingh\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe",
+        "--isolated"
       ],
+      "browser": "comet",
       "disabled": false,
-      "description": "Playwright browser automation MCP server"
+      "description": "Playwright browser automation MCP server (Default browser: Comet)"
     },
     "github": {
       "command": "npx",

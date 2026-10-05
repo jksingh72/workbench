@@ -405,6 +405,28 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
     }
   }
 
+  const handleSetBrowser = async (serverName: string, browser: string) => {
+    setActionLoadingServer(serverName)
+    try {
+      const res = await window.electron?.mcpConfigureServer?.(serverName, { browser })
+      if (res?.status) {
+        setMcpServers(res.status)
+      } else if (res?.serverInfo) {
+        setMcpServers((prev) => prev.map((s) => (s.name === serverName ? res.serverInfo : s)))
+      }
+      if (res?.success) {
+        const browserLabel = browser === 'comet' ? 'Comet' : browser === 'chrome' ? 'Chrome' : browser === 'msedge' ? 'Edge' : browser
+        onNotify(`🌐 Playwright browser set to: ${browserLabel}`)
+      } else {
+        onNotify(`⚠️ Failed to set browser: ${res?.error || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      onNotify(`⚠️ Error configuring browser: ${err?.message || ''}`)
+    } finally {
+      setActionLoadingServer(null)
+    }
+  }
+
   // Determine current active folder display
   const currentTarget = workspaceFolders.activeTarget
   const currentPath =
@@ -1171,6 +1193,48 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
                             </button>
                           </div>
                         </div>
+
+                        {/* Browser Channel Selector for Playwright */}
+                        {srv.name.toLowerCase().includes('playwright') && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '3px 6px',
+                              marginTop: '4px',
+                              marginBottom: '3px',
+                              borderRadius: '4px',
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.06)',
+                            }}
+                          >
+                            <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>Browser Engine:</span>
+                            <select
+                              value={srv.browser || 'comet'}
+                              onChange={(e) => handleSetBrowser(srv.name, e.target.value)}
+                              disabled={actionLoadingServer === srv.name}
+                              style={{
+                                background: 'rgba(0, 0, 0, 0.5)',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                borderRadius: '3px',
+                                color: '#d8b4fe',
+                                fontSize: '9.5px',
+                                fontWeight: 600,
+                                padding: '1px 4px',
+                                cursor: 'pointer',
+                                outline: 'none',
+                              }}
+                              title="Select which browser engine Playwright will launch"
+                            >
+                              <option value="comet">Comet (Default)</option>
+                              <option value="chrome">Google Chrome</option>
+                              <option value="msedge">Microsoft Edge</option>
+                              <option value="firefox">Firefox</option>
+                              <option value="webkit">WebKit (Safari)</option>
+                            </select>
+                          </div>
+                        )}
                         {srv.tools && srv.tools.length > 0 && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
                             {srv.tools.map((t: any) => (
