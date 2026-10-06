@@ -451,9 +451,34 @@ function registerIpcHandlers() {
   })
 
   // Workbench Action Model Handlers
+  ipcMain.on('workbench:user-cancelled-generation', () => {
+    console.log('[Main:IPC] User cancelled generation in chat. Halting autonomous loop.')
+    if (aiHandler) {
+      aiHandler.cancelAutonomousLoop()
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('workbench:toast', {
+        message: '🛑 Action execution cancelled by user.',
+        type: 'info',
+      })
+    }
+  })
+
+  ipcMain.on('workbench:user-started-prompt', () => {
+    if (aiHandler) {
+      aiHandler.resetAutonomousSession()
+    }
+  })
+
   ipcMain.on('workbench:action-triggered', async (_, payload) => {
     const actName = payload?.action || payload?.type || 'unknown'
     console.log(`[Main:IPC] Received "workbench:action-triggered" for action: "${actName}"`)
+
+    if (aiHandler && aiHandler.isLoopCancelledState?.()) {
+      console.log(`[Main:IPC] Action "${actName}" ignored because autonomous loop is cancelled.`)
+      return
+    }
+
     try {
       const result = await ActionDispatcher.getInstance().dispatch(payload)
       if (result.message && result.message.includes('Duplicate action suppressed')) {
@@ -461,12 +486,22 @@ function registerIpcHandlers() {
         return
       }
       console.log(`[Main:IPC] Action "${actName}" execution finished with status: ${result.success ? 'SUCCESS' : 'FAILED'}`)
+      
+      // Guard: Discard result if user clicked cancel during long action execution
+      if (aiHandler && aiHandler.isLoopCancelledState?.()) {
+        console.log(`[Main:IPC] Discarded result for "${actName}" because user cancelled during execution.`)
+        return
+      }
+
       if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
         console.log(`[Main:IPC] Forwarding result of "${actName}" to AI feedback loop`)
         await aiHandler.handleActionExecutionFeedback(payload, result)
       }
     } catch (err: any) {
       console.error(`[Main:IPC] Error executing triggered action "${actName}":`, err)
+      if (aiHandler && aiHandler.isLoopCancelledState?.()) {
+        return
+      }
       if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
         await aiHandler.handleActionExecutionFeedback(payload, {
           success: false,
@@ -474,6 +509,13 @@ function registerIpcHandlers() {
           error: err.message,
         })
       }
+    }
+  })
+
+  ipcMain.on('workbench:submit-action-feedback', async (_, data: { actionId?: string; feedbackText: string }) => {
+    if (aiHandler && data?.feedbackText) {
+      console.log(`[Main:IPC] User clicked "Continue to Next Step" for action ${data.actionId || 'unknown'}. Submitting to AI...`)
+      await aiHandler.submitActionStep(data.feedbackText, data.actionId)
     }
   })
 

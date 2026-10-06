@@ -21,6 +21,7 @@ import { attachFileAction } from './attachFileAction'
 import { addMcpServerAction } from './addMcpServerAction'
 import { removeMcpServerAction } from './removeMcpServerAction'
 import { configureMcpServerAction } from './configureMcpServerAction'
+import { downloadFileAction } from './downloadFileAction'
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -44,6 +45,7 @@ export * from './createDocxAction'
 export * from './addMcpServerAction'
 export * from './removeMcpServerAction'
 export * from './configureMcpServerAction'
+export * from './downloadFileAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -76,5 +78,6 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(addMcpServerAction)
   registry.register(removeMcpServerAction)
   registry.register(configureMcpServerAction)
+    registry.register(downloadFileAction)
   return registry
 }

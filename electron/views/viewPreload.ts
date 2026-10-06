@@ -339,7 +339,263 @@ try {
           checkPrimedStatus()
         }
       })
+
+      ipcRenderer.on('workbench:action-result-ready', (_e, data) => {
+        renderActionResultCard(data)
+      })
+
+      ipcRenderer.on('workbench:action-feedback-submitted', (_e, data) => {
+        handleActionFeedbackSubmitted(data)
+      })
     } catch (_) {}
+
+    function escapeHtml(str: any): string {
+      if (!str) return ''
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
+    }
+
+    function renderActionResultCard(data: {
+      actionId?: string
+      actionType: string
+      payload: any
+      result: any
+      feedbackText: string
+      turnCount?: number
+      canContinue?: boolean
+      stagnationReason?: string
+    }) {
+      try {
+        const actionId = data.actionId
+        if (actionId && document.querySelector(`.workbench-action-result-card[data-action-id="${actionId}"]`)) {
+          return
+        }
+
+        // Find corresponding badge
+        let badge: HTMLElement | null = null
+        if (actionId) {
+          badge = document.querySelector(`.workbench-action-badge[data-action-id="${actionId}"]`)
+        }
+        if (!badge) {
+          const badges = document.querySelectorAll('.workbench-action-badge')
+          if (badges.length > 0) {
+            badge = badges[badges.length - 1] as HTMLElement
+          }
+        }
+
+        const isSuccess = Boolean(data.result?.success)
+        const actionType = data.actionType || data.payload?.action || 'action'
+        const targetParam =
+          data.payload?.path ||
+          data.payload?.folderName ||
+          data.payload?.filePath ||
+          data.payload?.targetDirectory ||
+          data.result?.createdPath ||
+          ''
+
+        // Update badge appearance & status label
+        if (badge) {
+          const statusSpan = badge.querySelector('.wb-badge-status')
+          if (statusSpan) {
+            statusSpan.textContent = isSuccess ? 'Executed' : 'Failed'
+          }
+          if (isSuccess) {
+            badge.style.background = 'rgba(16,185,129,0.12)'
+            badge.style.borderColor = 'rgba(16,185,129,0.3)'
+            badge.style.color = '#34d399'
+            const nameSpan = badge.querySelector('span[style*="font-weight:600"]') as HTMLElement
+            if (nameSpan) nameSpan.style.color = '#10b981'
+          } else {
+            badge.style.background = 'rgba(239,68,68,0.12)'
+            badge.style.borderColor = 'rgba(239,68,68,0.3)'
+            badge.style.color = '#f87171'
+            const nameSpan = badge.querySelector('span[style*="font-weight:600"]') as HTMLElement
+            if (nameSpan) nameSpan.style.color = '#ef4444'
+          }
+        }
+
+        // Prepare human-readable result text
+        let outputPreview = ''
+        if (data.result?.message) {
+          outputPreview += data.result.message
+        }
+        if (data.result?.createdPath) {
+          outputPreview += `\nTarget: ${data.result.createdPath}`
+        }
+        if (data.result?.details?.folders || data.result?.details?.files) {
+          const folders = data.result.details.folders || []
+          const files = data.result.details.files || []
+          outputPreview += `\n\nFolders (${folders.length}):\n${folders.map((f: string) => '  📁 ' + f).join('\n') || '  (none)'}`
+          outputPreview += `\n\nFiles (${files.length}):\n${files.map((f: string) => '  📄 ' + f).join('\n') || '  (none)'}`
+        }
+        if (data.result?.details?.content) {
+          let c = String(data.result.details.content)
+          if (c.length > 5000) c = c.slice(0, 5000) + `\n... [truncated ${c.length} chars]`
+          outputPreview += `\n\nContent:\n${c}`
+        }
+        if (!isSuccess && data.result?.error) {
+          outputPreview += `\nError Details: ${data.result.error}`
+        }
+        if (!outputPreview.trim()) {
+          outputPreview = data.feedbackText || (isSuccess ? 'Action completed successfully.' : 'Action failed.')
+        }
+
+        // Build the in-chat Result Card
+        const card = document.createElement('div')
+        card.className = 'workbench-action-result-card'
+        if (actionId) card.setAttribute('data-action-id', actionId)
+        card.style.cssText = `
+          display: flex;
+          flex-direction: column;
+          margin: 6px 0 14px 0;
+          padding: 12px 14px;
+          background: rgba(15, 23, 42, 0.85);
+          border: 1px solid ${isSuccess ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'};
+          border-radius: 8px;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          backdrop-filter: blur(8px);
+          transition: all 0.2s ease;
+        `
+
+        // Header
+        const header = document.createElement('div')
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;'
+        header.innerHTML = `
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:13px;">${isSuccess ? '✅' : '❌'}</span>
+            <span style="font-weight:600;font-size:12px;color:${isSuccess ? '#34d399' : '#f87171'};">
+              ${escapeHtml(actionType)} Result
+            </span>
+            ${targetParam ? `<span style="color:#94a3b8;font-size:11px;font-family:monospace;">(${escapeHtml(targetParam)})</span>` : ''}
+          </div>
+          <span style="font-size:10px;font-weight:600;text-transform:uppercase;padding:2px 8px;border-radius:12px;background:${isSuccess ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'};color:${isSuccess ? '#10b981' : '#ef4444'};border:1px solid ${isSuccess ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
+            ${isSuccess ? 'Success' : 'Failed'}
+          </span>
+        `
+        card.appendChild(header)
+
+        // Body (scrollable preview)
+        const bodyBox = document.createElement('div')
+        bodyBox.style.cssText = `
+          background: rgba(0, 0, 0, 0.45);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 6px;
+          padding: 10px 12px;
+          margin-bottom: 10px;
+          max-height: 220px;
+          overflow-y: auto;
+          font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+          font-size: 11.5px;
+          line-height: 1.5;
+          color: #e2e8f0;
+          white-space: pre-wrap;
+          word-break: break-word;
+        `
+        bodyBox.textContent = outputPreview
+        card.appendChild(bodyBox)
+
+        // Footer with action button
+        const footer = document.createElement('div')
+        footer.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;'
+
+        const hintText = document.createElement('div')
+        hintText.style.cssText = 'font-size:11px;color:#94a3b8;'
+        if (data.canContinue === false) {
+          hintText.style.color = '#fbbf24'
+          hintText.innerHTML = `⚠️ ${escapeHtml(data.stagnationReason || 'Action cycle detected. Check before continuing.')}`
+        } else {
+          hintText.textContent = isSuccess ? 'Output ready. Click to proceed.' : 'Error recorded. Click to submit error to AI.'
+        }
+        footer.appendChild(hintText)
+
+        const continueBtn = document.createElement('button')
+        continueBtn.className = 'wb-continue-step-btn'
+        continueBtn.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 16px;
+          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+          color: #ffffff;
+          border: none;
+          border-radius: 6px;
+          font-weight: 600;
+          font-size: 12px;
+          cursor: pointer;
+          box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+          transition: all 0.15s ease;
+          user-select: none;
+          white-space: nowrap;
+        `
+        continueBtn.innerHTML = `<span>▶</span><span>Continue to Next Step</span>`
+
+        continueBtn.addEventListener('mouseenter', () => {
+          if (!continueBtn.disabled) {
+            continueBtn.style.filter = 'brightness(1.1)'
+            continueBtn.style.transform = 'translateY(-1px)'
+          }
+        })
+        continueBtn.addEventListener('mouseleave', () => {
+          continueBtn.style.filter = 'none'
+          continueBtn.style.transform = 'none'
+        })
+
+        continueBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          if (continueBtn.disabled) return
+
+          continueBtn.disabled = true
+          continueBtn.style.cursor = 'default'
+          continueBtn.style.opacity = '0.75'
+          continueBtn.innerHTML = `<span>⏳</span><span>Submitting to AI...</span>`
+
+          ipcRenderer.send('workbench:submit-action-feedback', {
+            actionId,
+            feedbackText: data.feedbackText,
+          })
+        })
+
+        footer.appendChild(continueBtn)
+        card.appendChild(footer)
+
+        // Insert card into DOM right after badge
+        if (badge && badge.parentNode) {
+          if (badge.nextSibling) {
+            badge.parentNode.insertBefore(card, badge.nextSibling)
+          } else {
+            badge.parentNode.appendChild(card)
+          }
+        }
+      } catch (err) {
+        console.warn('[AIView:ResultCard] Error rendering action result card:', err)
+      }
+    }
+
+    function handleActionFeedbackSubmitted(data: { actionId?: string; submitted?: boolean }) {
+      try {
+        const card = data.actionId
+          ? document.querySelector(`.workbench-action-result-card[data-action-id="${data.actionId}"]`)
+          : null
+        const btn = card
+          ? (card.querySelector('.wb-continue-step-btn') as HTMLButtonElement)
+          : (document.querySelector('.wb-continue-step-btn:last-of-type') as HTMLButtonElement)
+        if (btn) {
+          btn.disabled = true
+          btn.style.cursor = 'default'
+          btn.style.background = 'rgba(16, 185, 129, 0.2)'
+          btn.style.color = '#34d399'
+          btn.style.border = '1px solid rgba(16, 185, 129, 0.4)'
+          btn.style.boxShadow = 'none'
+          btn.style.opacity = '1'
+          btn.innerHTML = `<span>✓</span><span>Next Step Submitted</span>`
+        }
+      } catch (_) {}
+    }
 
     function isChatSite(): boolean {
       if (isAiChatView) return true
@@ -368,6 +624,9 @@ try {
     const executedActionTimestamps: Map<string, number> =
       (window as any).__wbExecutedActionTimestamps ||
       ((window as any).__wbExecutedActionTimestamps = new Map<string, number>())
+
+    let isUserCancelled = false
+    let lastCancelTimestamp = 0
 
     function getLatestAssistantContainer(): HTMLElement | null {
       const selectors = [
@@ -591,10 +850,15 @@ try {
     function checkAndExecuteAction(containerEl: HTMLElement) {
       if (!actionModeEnabled) return
       if (!isChatSite()) return
+      if (isUserCancelled && Date.now() - lastCancelTimestamp < 15000) {
+        return
+      }
       if (
         containerEl.getAttribute('data-workbench-executed') === 'true' ||
+        containerEl.getAttribute('data-workbench-cancelled') === 'true' ||
         executedElements.has(containerEl) ||
         containerEl.closest('[data-workbench-executed="true"]') ||
+        containerEl.closest('[data-workbench-cancelled="true"]') ||
         containerEl.parentElement?.querySelector('.workbench-action-badge')
       ) {
         return
@@ -655,7 +919,10 @@ try {
         executedActionTimestamps.set(payloadHash, now)
 
         const actionName = item.payload.action || item.payload.type || 'unknown'
-        console.log(`[Workbench Bridge:DOM] Action detected in chat DOM: "${actionName}" -> Dispatching to main process:`, item.payload)
+        const actionId = 'wb-act-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8)
+        item.payload.__wbActionId = actionId
+
+        console.log(`[Workbench Bridge:DOM] Action detected in chat DOM: "${actionName}" (ID: ${actionId}) -> Dispatching to main process:`, item.payload)
 
         // Send to main process
         ipcRenderer.send('workbench:action-triggered', item.payload)
@@ -666,17 +933,18 @@ try {
           const actionParam = item.payload.path || item.payload.folderName || item.payload.filePath || item.payload.targetDirectory || '.'
           const badge = document.createElement('div')
           badge.className = 'workbench-action-badge'
+          badge.setAttribute('data-action-id', actionId)
           badge.style.cssText =
-            'display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin:6px 0;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#34d399;font-weight:500;cursor:pointer;user-select:none;transition:all 0.15s ease;'
+            'display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin:6px 0;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#60a5fa;font-weight:500;cursor:pointer;user-select:none;transition:all 0.15s ease;'
           badge.title = 'Click to show / hide raw action JSON'
           badge.innerHTML = `
             <div style="display:flex;align-items:center;gap:6px;">
               <span style="font-size:12px;">⚡</span>
-              <span style="font-weight:600;color:#10b981;">${actionType}</span>
-              <span style="color:#94a3b8;font-size:11px;font-family:monospace;">(${actionParam})</span>
+              <span style="font-weight:600;color:#3b82f6;">${escapeHtml(actionType)}</span>
+              <span style="color:#94a3b8;font-size:11px;font-family:monospace;">(${escapeHtml(actionParam)})</span>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;">
-              <span>Executed</span>
+            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#93c5fd;">
+              <span class="wb-badge-status">Running...</span>
               <span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span>
             </div>
           `
@@ -731,6 +999,19 @@ try {
       if (!isChatSite()) return
       if (scanTimeout) clearTimeout(scanTimeout)
       scanTimeout = setTimeout(() => {
+        // If user cancelled recently, drop actions from aborted turn
+        if (isUserCancelled && Date.now() - lastCancelTimestamp < 15000) {
+          const targetContainer = getLatestAssistantContainer()
+          if (targetContainer) {
+            targetContainer.setAttribute('data-workbench-cancelled', 'true')
+            targetContainer.querySelectorAll('code, pre, code-block, [class*="code-block"]').forEach((c) => {
+              c.setAttribute('data-workbench-cancelled', 'true')
+              c.setAttribute('data-workbench-executed', 'true')
+            })
+          }
+          return
+        }
+
         // Defer action execution if AI is actively streaming response tokens
         if (isStreamingActive()) {
           scanTimeout = setTimeout(scanForActions, 300)
@@ -738,6 +1019,18 @@ try {
         }
 
         const targetContainer = getLatestAssistantContainer()
+        if (targetContainer) {
+          // If container has stopped or cancelled indicators, skip it
+          if (
+            targetContainer.getAttribute('data-workbench-cancelled') === 'true' ||
+            targetContainer.querySelector('[data-workbench-cancelled="true"]') ||
+            targetContainer.querySelector('.result-stopped') ||
+            targetContainer.getAttribute('data-is-stopped') === 'true'
+          ) {
+            return
+          }
+        }
+
         const searchScope =
           (targetContainer &&
             ((targetContainer.closest && targetContainer.closest('article, [data-testid*="conversation-turn"]')) ||
@@ -855,6 +1148,89 @@ try {
         return ret
       }
     } catch (_) {}
+
+    // -------------------------------------------------------------------------
+    // User Stop / Cancel & New Prompt Interceptors
+    // -------------------------------------------------------------------------
+    function handleUserCancel(source: string) {
+      console.log(`[viewPreload] User cancelled generation via ${source}. Suppressing actions.`)
+      isUserCancelled = true
+      lastCancelTimestamp = Date.now()
+      const targetContainer = getLatestAssistantContainer()
+      if (targetContainer) {
+        targetContainer.setAttribute('data-workbench-cancelled', 'true')
+        targetContainer.querySelectorAll('code, pre, code-block, [class*="code-block"]').forEach((c) => {
+          c.setAttribute('data-workbench-cancelled', 'true')
+          c.setAttribute('data-workbench-executed', 'true')
+        })
+      }
+      ipcRenderer.send('workbench:user-cancelled-generation')
+    }
+
+    function handleUserPromptStart() {
+      if (isUserCancelled) {
+        console.log('[viewPreload] User submitted new message. Resetting cancellation state.')
+      }
+      isUserCancelled = false
+      ipcRenderer.send('workbench:user-started-prompt')
+    }
+
+    // Capture click on native Stop / Cancel generation buttons
+    window.addEventListener(
+      'click',
+      (e: MouseEvent) => {
+        try {
+          const target = e.target as HTMLElement | null
+          if (!target) return
+          const btn = target.closest('button')
+          if (!btn) return
+          const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
+          const testId = (btn.getAttribute('data-testid') || '').toLowerCase()
+          const text = (btn.textContent || '').trim().toLowerCase()
+
+          if (
+            testId === 'stop-button' ||
+            ariaLabel.includes('stop generating') ||
+            ariaLabel.includes('stop response') ||
+            ariaLabel.includes('stop streaming') ||
+            ariaLabel === 'stop' ||
+            ariaLabel.includes('cancel') ||
+            text === 'stop generating' ||
+            text === 'stop response'
+          ) {
+            handleUserCancel('Stop button click')
+          } else if (
+            testId.includes('send') ||
+            ariaLabel.includes('send message') ||
+            ariaLabel.includes('send prompt')
+          ) {
+            handleUserPromptStart()
+          }
+        } catch (_) {}
+      },
+      true
+    )
+
+    // Capture Escape key to abort in-flight actions, and Enter to detect new human prompt
+    window.addEventListener(
+      'keydown',
+      (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          handleUserCancel('Escape key')
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          const activeEl = document.activeElement
+          if (
+            activeEl &&
+            (activeEl.tagName === 'TEXTAREA' ||
+              activeEl.getAttribute('contenteditable') === 'true' ||
+              activeEl.getAttribute('role') === 'textbox')
+          ) {
+            handleUserPromptStart()
+          }
+        }
+      },
+      true
+    )
 
     // Periodic sweep for safety
     setInterval(() => {

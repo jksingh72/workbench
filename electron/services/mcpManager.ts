@@ -77,7 +77,7 @@ export class McpManager {
             // Example configuration: SQLite server (disabled by default)
             sqlite_example: {
               command: 'uvx',
-              args: ['mcp-server-sqlite', '--db-path', './workspace.db'],
+              args: ['--with', 'mcp<2', 'mcp-server-sqlite', '--db-path', './workspace.db'],
               disabled: true,
               description: 'Example SQLite MCP Server. Set disabled to false to activate.',
             },
@@ -129,7 +129,7 @@ export class McpManager {
       const config = this.readConfig()
       const serverEntries = Object.entries(config.mcpServers || {})
 
-      for (const [serverName, serverCfg] of serverEntries) {
+      const connectionPromises = serverEntries.map(async ([serverName, serverCfg]) => {
         if (serverCfg.disabled) {
           console.log(`[MCP] Server "${serverName}" is disabled in config. Skipping.`)
           this.serverStatuses.set(serverName, {
@@ -143,11 +143,13 @@ export class McpManager {
             toolCount: 0,
             tools: [],
           })
-          continue
+          return
         }
 
         await this.connectServer(serverName, serverCfg)
-      }
+      })
+
+      await Promise.allSettled(connectionPromises)
 
       const totalConnected = Array.from(this.connectedServers.values()).length
       const totalTools = Array.from(this.connectedServers.values()).reduce(
@@ -258,13 +260,16 @@ export class McpManager {
       resolvedArgs = this.resolvePlaywrightArgs(resolvedArgs, cfg.browser)
     }
 
+    let transport: StdioClientTransport | null = null
+    let client: Client | null = null
+
     try {
       const mergedEnv: Record<string, string> = {
         ...(process.env as Record<string, string>),
         ...(cfg.env || {}),
       }
 
-      const transport = new StdioClientTransport({
+      transport = new StdioClientTransport({
         command: cfg.command,
         args: resolvedArgs,
         env: mergedEnv,
@@ -283,7 +288,7 @@ export class McpManager {
         console.warn(`[MCP:${serverName}] Transport error:`, err?.message || err)
       }
 
-      const client = new Client(
+      client = new Client(
         {
           name: 'workbench-desktop',
           version: '1.0.0',
@@ -293,13 +298,18 @@ export class McpManager {
         }
       )
 
-      // Connect with a 15-second timeout guard
+      // Connect with a 45-second timeout guard to accommodate npx/uvx cold starts
+      let timeoutHandle: any = null
       const connectPromise = client.connect(transport)
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Connection timed out after 15 seconds')), 15000)
-      )
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error('Connection timed out after 45 seconds')), 45000)
+      })
 
-      await Promise.race([connectPromise, timeoutPromise])
+      try {
+        await Promise.race([connectPromise, timeoutPromise])
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle)
+      }
 
       // Discover tools
       const toolListResult = await client.listTools()
@@ -370,6 +380,18 @@ export class McpManager {
     } catch (err: any) {
       const errMsg = err?.message || String(err)
       console.warn(`[MCP:${serverName}] Failed to connect:`, errMsg)
+
+      // Clean up transport and client to prevent orphaned child processes
+      if (transport) {
+        try {
+          await transport.close()
+        } catch (_) {}
+      }
+      if (client) {
+        try {
+          await client.close()
+        } catch (_) {}
+      }
 
       this.serverStatuses.set(serverName, {
         name: serverName,

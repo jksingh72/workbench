@@ -21,8 +21,14 @@ export class AIViewHandler {
   private isVisible: boolean = true
   private actionModeEnabled: boolean = true
   private feedbackTurnCount: number = 0
-  private lastFeedbackTimestamp: number = 0
   private executedActionTimestamps: Map<string, number> = new Map()
+  private isLoopCancelled: boolean = false
+  private actionHistory: Array<{
+    action: string
+    paramsHash: string
+    resultSummary: string
+    success: boolean
+  }> = []
   private lastUploadKey: string = ''
   private lastUploadTime: number = 0
 
@@ -1205,6 +1211,10 @@ export class AIViewHandler {
       return { success: false, executedCount: 0, message: 'Action Mode is disabled' }
     }
 
+    if (this.isLoopCancelled) {
+      return { success: false, executedCount: 0, message: 'Action loop was cancelled by user' }
+    }
+
     if (!this.view || this.view.webContents.isDestroyed()) {
       return { success: false, executedCount: 0, message: 'AI view is not ready' }
     }
@@ -1595,6 +1605,100 @@ export class AIViewHandler {
     return body
   }
 
+  public cancelAutonomousLoop(): void {
+    console.log('[AIView] Autonomous loop cancelled by user.')
+    this.isLoopCancelled = true
+    this.actionHistory = []
+  }
+
+  public resetAutonomousSession(): void {
+    if (this.isLoopCancelled) {
+      console.log('[AIView] Resetting autonomous loop cancellation state for new prompt.')
+    }
+    this.isLoopCancelled = false
+    this.actionHistory = []
+    this.feedbackTurnCount = 0
+  }
+
+  public isLoopCancelledState(): boolean {
+    return this.isLoopCancelled
+  }
+
+  /**
+   * Evaluates action history for cycles, repetitions, or consecutive failures.
+   * Allows genuine long-running progress while halting loops in 2-3 turns.
+   */
+  private checkStagnationAndCycles(
+    action: string,
+    payload: any,
+    result: any
+  ): { allowAutoSubmit: boolean; reason?: string; toastMessage?: string } {
+    const cleanAction = (action || '').toLowerCase()
+    const paramsCopy = { ...payload }
+    delete paramsCopy.timestamp
+    delete paramsCopy._t
+    const paramsHash = JSON.stringify(paramsCopy)
+    const resultSummary = (result?.message || result?.error || '').slice(0, 200)
+    const success = Boolean(result?.success)
+    const currentEntry = { action: cleanAction, paramsHash, resultSummary, success }
+
+    // 1. Immediate Duplicate: Same action called consecutively with identical parameters
+    if (this.actionHistory.length >= 1) {
+      const last = this.actionHistory[this.actionHistory.length - 1]
+      if (last.action === cleanAction && last.paramsHash === paramsHash) {
+        this.actionHistory.push(currentEntry)
+        return {
+          allowAutoSubmit: false,
+          reason: `Consecutive duplicate action detected: "${cleanAction}" called with identical parameters`,
+          toastMessage: `⚠️ Action loop paused: AI repeated identical "${cleanAction}" action without progressing.`,
+        }
+      }
+    }
+
+    // 2. Ping-Pong Oscillation (A -> B -> A -> B)
+    if (this.actionHistory.length >= 3) {
+      const len = this.actionHistory.length
+      const prev1 = this.actionHistory[len - 1]
+      const prev2 = this.actionHistory[len - 2]
+      const prev3 = this.actionHistory[len - 3]
+
+      if (
+        cleanAction === prev2.action &&
+        paramsHash === prev2.paramsHash &&
+        prev1.action === prev3.action &&
+        prev1.paramsHash === prev3.paramsHash
+      ) {
+        this.actionHistory.push(currentEntry)
+        return {
+          allowAutoSubmit: false,
+          reason: `Action oscillation detected between "${cleanAction}" and "${prev1.action}"`,
+          toastMessage: `⚠️ Action cycle paused: AI is alternating between "${cleanAction}" and "${prev1.action}".`,
+        }
+      }
+    }
+
+    // 3. Consecutive Failure Circuit Breaker: 3 actions failed in a row
+    if (!success) {
+      const recentFails = this.actionHistory.slice(-2).filter((e) => !e.success).length
+      if (recentFails >= 2) {
+        this.actionHistory.push(currentEntry)
+        return {
+          allowAutoSubmit: false,
+          reason: '3 consecutive actions failed',
+          toastMessage: `⚠️ Action loop paused: 3 consecutive actions failed. Review chat to proceed.`,
+        }
+      }
+    }
+
+    // Normal forward progress: append to history (keep last 20)
+    this.actionHistory.push(currentEntry)
+    if (this.actionHistory.length > 20) {
+      this.actionHistory.shift()
+    }
+
+    return { allowAutoSubmit: true }
+  }
+
   /**
    * Closes the action execution feedback loop by sending the result of an executed action
    * back to the AI chat, allowing multi-step reasoning and autonomous task execution.
@@ -1602,6 +1706,11 @@ export class AIViewHandler {
   public async handleActionExecutionFeedback(payload: any, result: any) {
     if (!this.view || this.view.webContents.isDestroyed()) return
     if (!this.actionModeEnabled) return
+
+    if (this.isLoopCancelled) {
+      console.log('[AIView:Feedback] Suppressed feedback because loop was cancelled by user.')
+      return
+    }
 
     const actionType = (payload.action || payload.type || result.action || 'action').toLowerCase()
     console.log(`[AIView:Feedback:STEP 1] Formatting action execution feedback for: "${actionType}"`)
@@ -1611,53 +1720,86 @@ export class AIViewHandler {
       return
     }
 
-    // Loop Guard: Reset count if idle for more than 20 seconds
-    const now = Date.now()
-    if (now - this.lastFeedbackTimestamp > 20000) {
-      this.feedbackTurnCount = 0
-    }
-    this.lastFeedbackTimestamp = now
+    // Semantic Stagnation & Cycle Detection
+    const stagnationCheck = this.checkStagnationAndCycles(actionType, payload, result)
 
-    // Cap at 8 autonomous turns per sequence to prevent infinite runaway loops
-    const MAX_AUTONOMOUS_TURNS = 8
-    let autoSubmit = true
-
-    if (this.feedbackTurnCount >= MAX_AUTONOMOUS_TURNS) {
-      autoSubmit = false
-      console.warn(`[AIView:Feedback:STEP 2] Autonomous turn limit reached (${MAX_AUTONOMOUS_TURNS}). Pausing auto-submit.`)
+    if (!stagnationCheck.allowAutoSubmit) {
+      console.warn(`[AIView:Feedback:STEP 2] ${stagnationCheck.reason}. Pausing auto-submit.`)
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send('workbench:toast', {
-          message: '⚠️ Action loop paused after 8 consecutive turns. Click Send in chat to continue.',
+          message: stagnationCheck.toastMessage || '⚠️ Action cycle detected. Review card in chat.',
           type: 'warning',
         })
       }
-    } else {
-      this.feedbackTurnCount++
     }
 
-    console.log(`[AIView:Feedback:STEP 2] Feedback Loop [Turn ${this.feedbackTurnCount}/${MAX_AUTONOMOUS_TURNS}]: Delivering result for ${actionType} (autoSubmit: ${autoSubmit})`)
-    const delivery = await this.sendActionFeedbackToAI(feedbackText, autoSubmit)
-    console.log(`[AIView:Feedback:STEP 3] Delivery result for ${actionType}:`, delivery)
+    // Dispatch action result card data to the active chat webview (keeps prompt-textarea clean!)
+    const actionId = payload.__wbActionId
+    console.log(`[AIView:Feedback:STEP 2] In-Chat Result Card ready for "${actionType}" (actionId: ${actionId}). Waiting for user click.`)
+
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.webContents.send('workbench:action-result-ready', {
+        actionId,
+        actionType,
+        payload,
+        result,
+        feedbackText,
+        turnCount: this.feedbackTurnCount + 1,
+        canContinue: stagnationCheck.allowAutoSubmit,
+        stagnationReason: stagnationCheck.reason,
+      })
+    }
+
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('workbench:toast', {
+        message: result.success
+          ? `✅ Action "${actionType}" finished. Click "Continue to Next Step" in chat to proceed.`
+          : `⚠️ Action "${actionType}" failed. Review card in chat to proceed.`,
+        type: result.success ? 'success' : 'warning',
+      })
+    }
+  }
+
+  /**
+   * Submits the next action turn to the AI when the user explicitly clicks
+   * "Continue to Next Step" on the in-chat Result Card.
+   */
+  public async submitActionStep(
+    feedbackText: string,
+    actionId?: string
+  ): Promise<{ success: boolean; submitted?: boolean; error?: string }> {
+    if (this.isLoopCancelled) {
+      console.log('[AIView:SubmitStep] Aborted because autonomous loop is cancelled by user.')
+      return { success: false, error: 'Cancelled by user' }
+    }
+
+    this.feedbackTurnCount++
+    console.log(`[AIView:SubmitStep] Delivering feedback for turn ${this.feedbackTurnCount}...`)
+
+    const delivery = await this.sendActionFeedbackToAI(feedbackText, true)
+
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.webContents.send('workbench:action-feedback-submitted', {
+        actionId,
+        submitted: delivery.submitted,
+      })
+    }
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       if (delivery.submitted) {
         this.mainWindow.webContents.send('workbench:toast', {
-          message: `✅ Action result delivered to AI: ${actionType} (turn ${this.feedbackTurnCount}/${MAX_AUTONOMOUS_TURNS})`,
-          type: result.success ? 'success' : 'warning',
-        })
-      } else if (delivery.success) {
-        this.mainWindow.webContents.send('workbench:toast', {
-          message: `⚠️ Action result ready in chat. Press Enter or click Send to submit.`,
+          message: `▶ Submitted next step (${this.feedbackTurnCount}) to AI`,
           type: 'info',
         })
       } else {
-        console.warn(`[AIView:Feedback:ERROR] Failed to deliver action feedback to AI:`, delivery.error)
         this.mainWindow.webContents.send('workbench:toast', {
-          message: `❌ Failed to deliver action result to AI: ${delivery.error}`,
+          message: `❌ Failed to submit next step: ${delivery.error}`,
           type: 'error',
         })
       }
     }
+
+    return delivery
   }
 
   /**
@@ -1693,6 +1835,11 @@ export class AIViewHandler {
         const streamWaitStart = Date.now()
         let streaming = true
         while (streaming && Date.now() - streamWaitStart < maxWaitMs) {
+          if (this.isLoopCancelled) {
+            console.log('[AIView:Inject] Streaming wait aborted because loop was cancelled by user.')
+            return { success: false, error: 'Cancelled by user' }
+          }
+
           if (!this.view || this.view.webContents.isDestroyed()) {
             return { success: false, error: 'AI view closed while waiting' }
           }
@@ -1735,6 +1882,11 @@ export class AIViewHandler {
 
         // Give the UI 200ms to settle after streaming finishes
         await new Promise((r) => setTimeout(r, 200))
+      }
+
+      if (this.isLoopCancelled) {
+        console.log('[AIView:Inject] Chat input focus aborted because loop was cancelled by user.')
+        return { success: false, error: 'Cancelled by user' }
       }
 
       // Step 2: Locate and focus the chat input in DOM across Claude, ChatGPT, Gemini, etc.
@@ -1842,6 +1994,11 @@ export class AIViewHandler {
       if (!autoSubmit) {
         console.log(`[AIView:Inject:STEP 5] autoSubmit is false. Leaving text ready in input.`)
         return { success: true, submitted: false }
+      }
+
+      if (this.isLoopCancelled) {
+        console.log('[AIView:Inject] Submission aborted because loop was cancelled by user.')
+        return { success: false, error: 'Cancelled by user' }
       }
 
       // Step 5: Multi-layered Submission

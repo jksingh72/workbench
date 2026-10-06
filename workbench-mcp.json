@@ -11,25 +11,14 @@
     "sqlite": {
       "command": "uvx",
       "args": [
+        "--with",
+        "mcp<2",
         "mcp-server-sqlite",
         "--db-path",
         "./workspace.db"
       ],
       "disabled": false,
       "description": "Local SQLite Database: Allows Claude/ChatGPT to query, create tables, and manage SQLite databases."
-    },
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest",
-        "--executable-path",
-        "C:\\Users\\jksingh\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe",
-        "--isolated"
-      ],
-      "browser": "comet",
-      "disabled": false,
-      "description": "Playwright browser automation MCP server (Default browser: Comet)"
     },
     "github": {
       "command": "npx",
@@ -64,6 +53,34 @@
       ],
       "disabled": false,
       "description": "Filesystem MCP server with access to the C drive"
+    },
+    "twitter-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@enescinar/twitter-mcp"
+      ],
+      "disabled": false,
+      "description": "Twitter/X search, trends, timeline, profile, and topic analysis MCP server"
+    },
+    "awsbrowser": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--isolated"
+      ],
+      "disabled": false,
+      "description": "Separate isolated Playwright browser for AWS Console"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ],
+      "disabled": false,
+      "description": "Playwright browser automation MCP server"
     }
   }
 }
