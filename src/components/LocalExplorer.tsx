@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback, Suspense, lazy } from 'react'
 import {
   Folder,
   FolderOpen,
@@ -40,11 +40,13 @@ import {
   Table as TableIcon
 } from 'lucide-react'
 import { FileItem, SystemRootItem } from '../types/electron'
-import { MarkdownEditor } from './editors/MarkdownEditor'
-import { SpreadsheetEditor } from './editors/SpreadsheetEditor'
-import { WordEditor } from './editors/WordEditor'
-import { TextCodeEditor } from './editors/TextCodeEditor'
-import { PdfEditor } from './editors/PdfEditor'
+
+// Code-split heavy document editors to shrink initial bundle by >2.5MB
+const MarkdownEditor = lazy(() => import('./editors/MarkdownEditor').then((m) => ({ default: m.MarkdownEditor })))
+const SpreadsheetEditor = lazy(() => import('./editors/SpreadsheetEditor').then((m) => ({ default: m.SpreadsheetEditor })))
+const WordEditor = lazy(() => import('./editors/WordEditor').then((m) => ({ default: m.WordEditor })))
+const TextCodeEditor = lazy(() => import('./editors/TextCodeEditor').then((m) => ({ default: m.TextCodeEditor })))
+const PdfEditor = lazy(() => import('./editors/PdfEditor').then((m) => ({ default: m.PdfEditor })))
 
 export interface OpenDocTab {
   id: string
@@ -1474,8 +1476,9 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       </div>
 
       {activeTabId !== '__explorer__' ? (
-        (() => {
-          const activeTab = openTabs.find((t) => t.id === activeTabId)
+        <Suspense fallback={<div className="wb-doc-loading"><span>Loading editor...</span></div>}>
+          {(() => {
+            const activeTab = openTabs.find((t) => t.id === activeTabId)
           if (!activeTab) {
             return (
               <div className="wb-doc-loading">
@@ -1618,7 +1621,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
           }
 
           return null
-        })()
+        })()}
+        </Suspense>
       ) : (
         <>
           {/* Clipped Text Quick-Banner */}

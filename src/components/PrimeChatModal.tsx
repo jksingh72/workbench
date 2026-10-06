@@ -116,9 +116,18 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
         const available = preview.availableGroups || []
         setGroups(available)
 
-        // Set default selected groups
-        const defaults = new Set(available.filter((g) => g.defaultSelected).map((g) => g.id))
-        setSelectedGroupIds(defaults)
+        // Load saved or default selected groups
+        let initialGroups = new Set(available.filter((g) => g.defaultSelected).map((g) => g.id))
+        try {
+          const saved = localStorage.getItem('workbench:action-selected-groups')
+          if (saved) {
+            const parsed = JSON.parse(saved)
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              initialGroups = new Set(parsed)
+            }
+          }
+        } catch (_) {}
+        setSelectedGroupIds(initialGroups)
 
         setPreviewPrompt(preview.prompt || '')
         setCharCount(preview.charCount || 0)
@@ -214,15 +223,33 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
     }
   }
 
+  const handleSaveDefaults = () => {
+    const trimmedInst = instructions.trim()
+    onSaveCustomInstructions(trimmedInst)
+    const selectedArr = Array.from(selectedGroupIds)
+    try {
+      localStorage.setItem('workbench:action-selected-groups', JSON.stringify(selectedArr))
+      localStorage.setItem('workbench:action-custom-instructions', trimmedInst)
+    } catch (_) {}
+    onNotify('💾 Saved prompt settings as default for 1-Click Priming!')
+    onClose()
+  }
+
   const handlePrimeChat = async () => {
     setIsPriming(true)
     try {
       const trimmedInst = instructions.trim()
       onSaveCustomInstructions(trimmedInst)
 
+      const selectedArr = Array.from(selectedGroupIds)
+      try {
+        localStorage.setItem('workbench:action-selected-groups', JSON.stringify(selectedArr))
+        localStorage.setItem('workbench:action-custom-instructions', trimmedInst)
+      } catch (_) {}
+
       const primingOptions: PrimingOptions = {
         provider,
-        selectedGroups: Array.from(selectedGroupIds),
+        selectedGroups: selectedArr,
         customInstructions: trimmedInst,
       }
 
@@ -834,6 +861,28 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
             >
               {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
               {copied ? 'Copied' : 'Copy Prompt'}
+            </button>
+
+            <button
+              onClick={handleSaveDefaults}
+              disabled={isPriming}
+              title="Save selected tool groups and instructions as default for 1-Click Priming"
+              style={{
+                background: 'rgba(59, 130, 246, 0.12)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                color: '#60a5fa',
+                padding: '8px 14px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>💾</span>
+              <span>Save as Default</span>
             </button>
 
             <button

@@ -107,6 +107,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
+    show: false,
     title: 'Workbench | O\'Reilly & ChatGPT',
     backgroundColor: '#0b0f17',
     webPreferences: {
@@ -116,6 +117,19 @@ function createWindow() {
       plugins: true,
     },
   })
+
+  // Reveal window smoothly as soon as the first frame is ready
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  })
+  // Fallback safety timer to ensure window appears even if ready-to-show event is missed
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  }, 1200)
 
   // Initialize modular view and service handlers
   bookSourceManager = new BookSourceManager()
@@ -129,10 +143,12 @@ function createWindow() {
   ActionDispatcher.getInstance().setMainWindow(mainWindow)
   ActionDispatcher.getInstance().setAIHandler(aiHandler)
 
-  // Initialize MCP (Model Context Protocol) Manager in the background
-  McpManager.getInstance().initialize().catch((err) => {
-    console.error('[Main] Failed to initialize McpManager:', err)
-  })
+  // Defer heavy MCP background processes until the UI has fully mounted & painted
+  setTimeout(() => {
+    McpManager.getInstance().initialize().catch((err) => {
+      console.error('[Main] Failed to initialize McpManager:', err)
+    })
+  }, 2500)
 
   // Set initial bounds (handlers manage attaching their own views)
   layoutManager.applyBounds()
@@ -471,7 +487,7 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.on('workbench:action-triggered', async (_, payload) => {
+  ipcMain.on('workbench:action-triggered', async (event, payload) => {
     const actName = payload?.action || payload?.type || 'unknown'
     console.log(`[Main:IPC] Received "workbench:action-triggered" for action: "${actName}"`)
 
@@ -496,7 +512,7 @@ function registerIpcHandlers() {
 
       if (aiHandler && ActionDispatcher.getInstance().isAutoFeedbackLoopEnabled()) {
         console.log(`[Main:IPC] Forwarding result of "${actName}" to AI feedback loop`)
-        await aiHandler.handleActionExecutionFeedback(payload, result)
+        await aiHandler.handleActionExecutionFeedback(payload, result, event.sender)
       }
     } catch (err: any) {
       console.error(`[Main:IPC] Error executing triggered action "${actName}":`, err)
@@ -508,7 +524,7 @@ function registerIpcHandlers() {
           success: false,
           message: err.message,
           error: err.message,
-        })
+        }, event.sender)
       }
     }
   })

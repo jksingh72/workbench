@@ -241,7 +241,57 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
 
 
-  const handlePrimeCurrentChat = () => {
+  const handleInstantPrime = async () => {
+    setLocalIsActivating(true)
+    try {
+      const savedInst = localStorage.getItem('workbench:action-custom-instructions') || ''
+      let savedGroups: string[] | undefined
+      try {
+        const rawGroups = localStorage.getItem('workbench:action-selected-groups')
+        if (rawGroups) savedGroups = JSON.parse(rawGroups)
+      } catch (_) {}
+
+      const res = await window.electron?.setActionMode?.({
+        enabled: true,
+        customInstructions: savedInst,
+        primeAI: true,
+        primingOptions: {
+          customInstructions: savedInst,
+          selectedGroups: savedGroups,
+        },
+      })
+
+      if (res?.success) {
+        setLocalActionMode(true)
+        setIsChatPrimed(true)
+        try {
+          localStorage.setItem('workbench:action-mode', 'true')
+        } catch (_) {}
+        window.electron?.showNotification?.({
+          title: '⚡ Chat Primed',
+          body: 'Connected to Workbench. Ready for instructions!',
+          type: 'info',
+        })
+      } else {
+        window.electron?.showNotification?.({
+          title: '⚠️ Priming Failed',
+          body: res?.error || 'Chat input not ready or chat not loaded.',
+          type: 'warning',
+        })
+      }
+    } catch (err: any) {
+      console.error('Instant Prime error:', err)
+      window.electron?.showNotification?.({
+        title: '⚠️ Priming Error',
+        body: err?.message || 'Failed to prime chat.',
+        type: 'error',
+      })
+    } finally {
+      setLocalIsActivating(false)
+    }
+  }
+
+  const handleOpenPrimeModal = () => {
     if (onOpenPrimeChatModal) {
       onOpenPrimeChatModal()
     } else {
@@ -648,26 +698,33 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
               {/* 2. Button to change status */}
               {!isChatPrimed ? (
-                <button
-                  className="action-pill-btn prime-action"
-                  onClick={handlePrimeCurrentChat}
-                  disabled={isActivatingAction}
-                  title="Prime this chat to connect with local files"
-                >
-                  <Zap
-                    size={11}
-                    className={isActivatingAction ? 'animate-spin text-amber' : 'text-amber fill-amber'}
-                  />
-                  <span className="pill-btn-label">{isActivatingAction ? 'Priming...' : 'Prime Chat'}</span>
-                </button>
+                <>
+                  <button
+                    className="action-pill-btn prime-action"
+                    onClick={handleInstantPrime}
+                    disabled={isActivatingAction}
+                    title="1-Click Prime: Connect this chat to local files immediately without prompt config"
+                  >
+                    <Zap
+                      size={11}
+                      className={isActivatingAction ? 'animate-spin text-amber' : 'text-amber fill-amber'}
+                    />
+                    <span className="pill-btn-label">{isActivatingAction ? 'Priming...' : 'Prime Chat'}</span>
+                  </button>
+                  <button
+                    className="action-pill-btn prime-config-btn"
+                    onClick={handleOpenPrimeModal}
+                    title="Configure tool groups or custom prompt instructions"
+                    style={{ padding: '0 4px', opacity: 0.75 }}
+                  >
+                    <Settings2 size={10} />
+                  </button>
+                </>
               ) : (
                 <>
                   <button
                     className="action-pill-btn prime-action"
-                    onClick={() => {
-                      if (onOpenPrimeChatModal) onOpenPrimeChatModal()
-                      else window.dispatchEvent(new CustomEvent('workbench:open-prime-chat-modal'))
-                    }}
+                    onClick={handleOpenPrimeModal}
                     title="Customize tools & re-prime this chat"
                     style={{ padding: '0 4px', opacity: 0.85 }}
                   >

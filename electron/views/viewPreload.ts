@@ -381,6 +381,21 @@ try {
           badge = document.querySelector(`.workbench-action-badge[data-action-id="${actionId}"]`)
         }
         if (!badge) {
+          // Check shadow roots of code-block custom elements
+          const customBlocks = document.querySelectorAll('code-block, [class*="code-block"]')
+          for (const block of customBlocks) {
+            if ((block as any).shadowRoot) {
+              const sb = (block as any).shadowRoot.querySelector(
+                actionId ? `.workbench-action-badge[data-action-id="${actionId}"]` : '.workbench-action-badge'
+              )
+              if (sb) {
+                badge = sb as HTMLElement
+                break
+              }
+            }
+          }
+        }
+        if (!badge) {
           const badges = document.querySelectorAll('.workbench-action-badge')
           if (badges.length > 0) {
             badge = badges[badges.length - 1] as HTMLElement
@@ -456,15 +471,16 @@ try {
         card.style.cssText = `
           display: flex;
           flex-direction: column;
-          margin: 6px 0 14px 0;
-          padding: 12px 14px;
-          background: rgba(15, 23, 42, 0.85);
-          border: 1px solid ${isSuccess ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'};
+          margin: 8px 0 16px 0;
+          padding: 14px 16px;
+          background: #0f172a;
+          border: 1px solid ${isSuccess ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)'};
           border-radius: 8px;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          backdrop-filter: blur(8px);
           transition: all 0.2s ease;
+          position: relative;
+          z-index: 100;
         `
 
         // Header
@@ -568,13 +584,72 @@ try {
         footer.appendChild(continueBtn)
         card.appendChild(footer)
 
-        // Insert card into DOM right after badge
-        if (badge && badge.parentNode) {
-          if (badge.nextSibling) {
-            badge.parentNode.insertBefore(card, badge.nextSibling)
-          } else {
-            badge.parentNode.appendChild(card)
+        // Resilient 4-tier DOM insertion guarantee
+        let inserted = false
+
+        // Strategy 1: Insert right after badge in light DOM
+        if (badge && badge.parentNode && badge.getRootNode() === document) {
+          try {
+            if (badge.nextSibling) {
+              badge.parentNode.insertBefore(card, badge.nextSibling)
+            } else {
+              badge.parentNode.appendChild(card)
+            }
+            inserted = true
+          } catch (_) {}
+        }
+
+        // Strategy 2: If badge was inside shadow root or custom element, insert after host
+        if (!inserted && badge) {
+          const host =
+            ((badge.getRootNode && (badge.getRootNode() as any).host) || badge.closest('code-block')) as HTMLElement | null
+          if (host && host.parentNode) {
+            try {
+              if (host.nextSibling) {
+                host.parentNode.insertBefore(card, host.nextSibling)
+              } else {
+                host.parentNode.appendChild(card)
+              }
+              inserted = true
+            } catch (_) {}
           }
+        }
+
+        // Strategy 3: Insert after the code block in the latest assistant container
+        if (!inserted) {
+          const assistantTurn = getLatestAssistantContainer()
+          if (assistantTurn) {
+            try {
+              const codeBlock = assistantTurn.querySelector(
+                'code-block:last-of-type, pre:last-of-type, [class*="code-block"]:last-of-type'
+              )
+              if (codeBlock && codeBlock.parentNode) {
+                codeBlock.parentNode.insertBefore(card, codeBlock.nextSibling)
+                inserted = true
+              } else {
+                assistantTurn.appendChild(card)
+                inserted = true
+              }
+            } catch (_) {}
+          }
+        }
+
+        // Strategy 4: Fallback to document main or body
+        if (!inserted) {
+          const fallbackContainer =
+            document.querySelector(
+              'model-response:last-of-type, [data-message-author-role="assistant"]:last-of-type, main, [role="main"]'
+            ) || document.body
+          if (fallbackContainer) {
+            fallbackContainer.appendChild(card)
+            inserted = true
+          }
+        }
+
+        if (inserted) {
+          try {
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          } catch (_) {}
         }
       } catch (err) {
         console.warn('[AIView:ResultCard] Error rendering action result card:', err)
@@ -794,17 +869,20 @@ try {
         return false
       }
 
-      // D. Quarantine system prompt guide text
+      // D. Quarantine system prompt guide text (prevent executing template examples from the initial system prompt)
       const text = el.innerText || el.textContent || ''
       if (
-        text.includes('You are integrated with Workbench Desktop') ||
-        text.includes('Available Workbench Actions') ||
-        text.includes('### Available Workbench Actions') ||
-        text.includes('workbench:action code block') ||
-        text.includes('Custom User Instructions') ||
-        text.includes('<folder_name>') ||
-        text.includes('<file_path>')
+        text.includes('You are integrated with Workbench Desktop') &&
+        (text.includes('Operational Directives') ||
+          text.includes('Available Actions') ||
+          text.includes('Available Workbench Actions') ||
+          text.includes('SINGLE-SHOT & UPLOAD CEILING') ||
+          text.includes('<folder_name>') ||
+          text.includes('<file_path>'))
       ) {
+        return false
+      }
+      if (text.includes('Custom User Instructions') && (text.includes('Available Actions') || text.includes('Available Workbench Actions'))) {
         return false
       }
 
@@ -816,40 +894,44 @@ try {
       return true
     }
 
+    let hideFeedbackTimeout: any = null
     function hideFeedbackBubbles() {
-      try {
-        const keywords = [
-          '[Workbench Action Result:',
-          'You are integrated with Workbench Desktop',
-          'Available Workbench Actions'
-        ]
-        const userTurnSelectors = [
-          'user-query',
-          '[data-message-author-role="user"]',
-          'div[data-testid="user-message"]',
-          'div.font-user-message',
-          '[data-user-message="true"]',
-          '[class*="user-message"]'
-        ]
-        const candidateElements = document.querySelectorAll(userTurnSelectors.join(', '))
-        candidateElements.forEach((el) => {
-          const htmlEl = el as HTMLElement
-          // Never hide assistant messages or responses!
-          if (
-            htmlEl.closest('[data-message-author-role="assistant"]') ||
-            htmlEl.closest('model-response') ||
-            htmlEl.closest('.font-claude-message')
-          ) {
-            return
-          }
-          if (htmlEl.getAttribute('data-wb-hidden') === 'true') return
-          const text = htmlEl.innerText || ''
-          if (keywords.some((k) => text.includes(k))) {
-            htmlEl.setAttribute('data-wb-hidden', 'true')
-            htmlEl.style.display = 'none'
-          }
-        })
-      } catch (_) {}
+      if (hideFeedbackTimeout) clearTimeout(hideFeedbackTimeout)
+      hideFeedbackTimeout = setTimeout(() => {
+        try {
+          const keywords = [
+            '[Workbench Action Result:',
+            'You are integrated with Workbench Desktop',
+            'Available Workbench Actions'
+          ]
+          const userTurnSelectors = [
+            'user-query',
+            '[data-message-author-role="user"]',
+            'div[data-testid="user-message"]',
+            'div.font-user-message',
+            '[data-user-message="true"]',
+            '[class*="user-message"]'
+          ]
+          const candidateElements = document.querySelectorAll(userTurnSelectors.join(', '))
+          candidateElements.forEach((el) => {
+            const htmlEl = el as HTMLElement
+            // Never hide assistant messages or responses!
+            if (
+              htmlEl.closest('[data-message-author-role="assistant"]') ||
+              htmlEl.closest('model-response') ||
+              htmlEl.closest('.font-claude-message')
+            ) {
+              return
+            }
+            if (htmlEl.getAttribute('data-wb-hidden') === 'true') return
+            const text = htmlEl.textContent || ''
+            if (keywords.some((k) => text.includes(k))) {
+              htmlEl.setAttribute('data-wb-hidden', 'true')
+              htmlEl.style.display = 'none'
+            }
+          })
+        } catch (_) {}
+      }, 250)
     }
 
     function checkAndExecuteAction(containerEl: HTMLElement) {
@@ -893,12 +975,14 @@ try {
       containerEl.setAttribute('data-workbench-executed', 'true')
 
       // Target full code wrapper across Gemini, Claude, ChatGPT, Grok, etc.
-      const targetBox =
-        containerEl.closest('pre') ||
-        containerEl.closest('code-block') ||
-        containerEl.closest('[class*="code-container"]') ||
-        containerEl.closest('[class*="code-block"]') ||
-        (containerEl.closest('div.rounded-md') && containerEl.closest('div.rounded-md')?.querySelector('code') ? (containerEl.closest('div.rounded-md') as HTMLElement) : null) ||
+      const targetBox: HTMLElement | null =
+        (containerEl.closest('code-block') as HTMLElement) ||
+        (containerEl.closest('pre') as HTMLElement) ||
+        (containerEl.closest('[class*="code-container"]') as HTMLElement) ||
+        (containerEl.closest('[class*="code-block"]') as HTMLElement) ||
+        (containerEl.closest('div.rounded-md') && containerEl.closest('div.rounded-md')?.querySelector('code')
+          ? (containerEl.closest('div.rounded-md') as HTMLElement)
+          : null) ||
         containerEl
 
       if (targetBox) {
@@ -971,28 +1055,80 @@ try {
 
     function isStreamingActive(): boolean {
       try {
+        // 1. If Send/Submit button is visible and active, the AI turn has completely finished.
+        const sendSelectors = [
+          'button[aria-label*="Send" i]',
+          'button[data-testid="send-button"]',
+          'button[aria-label*="Submit" i]',
+          'button.send-button'
+        ]
+        for (const sel of sendSelectors) {
+          const btn = document.querySelector(sel) as HTMLElement | null
+          if (
+            btn &&
+            btn.offsetParent !== null &&
+            !(btn as HTMLButtonElement).disabled &&
+            btn.getAttribute('aria-disabled') !== 'true'
+          ) {
+            const rect = btn.getBoundingClientRect()
+            if (rect.width > 0 && rect.height > 0) {
+              const style = window.getComputedStyle(btn)
+              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                return false
+              }
+            }
+          }
+        }
+
+        // 2. Check for active Stop buttons inside chat input / control containers
         const stopSelectors = [
           'button[data-testid="stop-button"]',
           'button[aria-label*="Stop generating" i]',
           'button[aria-label*="Stop Response" i]',
           'button[aria-label*="Stop streaming" i]',
-          'button[aria-label="Stop" i]'
+          'form button[aria-label="Stop" i]',
+          'rich-textarea ~ * button[aria-label="Stop" i]',
+          '.chat-input button[aria-label="Stop" i]',
+          '[class*="input"] button[aria-label="Stop" i]'
         ]
         for (const sel of stopSelectors) {
-          const btn = document.querySelector(sel)
-          if (btn && (btn as HTMLElement).offsetParent !== null && !(btn as HTMLButtonElement).disabled) {
+          const btn = document.querySelector(sel) as HTMLElement | null
+          if (
+            btn &&
+            btn.offsetParent !== null &&
+            !(btn as HTMLButtonElement).disabled &&
+            btn.getAttribute('aria-disabled') !== 'true' &&
+            btn.getAttribute('aria-hidden') !== 'true'
+          ) {
             const rect = btn.getBoundingClientRect()
             if (rect.width > 0 && rect.height > 0) {
-              const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
-              if (ariaLabel.includes('read') || ariaLabel.includes('voice') || ariaLabel.includes('speech') || ariaLabel.includes('audio')) {
-                continue
+              const style = window.getComputedStyle(btn)
+              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
+                if (
+                  ariaLabel.includes('read') ||
+                  ariaLabel.includes('voice') ||
+                  ariaLabel.includes('speech') ||
+                  ariaLabel.includes('audio') ||
+                  ariaLabel.includes('listen')
+                ) {
+                  continue
+                }
+                return true
               }
-              return true
             }
           }
         }
-        if (document.querySelector('.result-streaming, [data-is-streaming="true"], .cursor-blinking')) {
-          return true
+
+        // 3. Check for streaming indicator strictly on the latest assistant turn
+        const targetContainer = getLatestAssistantContainer()
+        if (targetContainer) {
+          if (
+            targetContainer.matches('.result-streaming, [data-is-streaming="true"], .streaming') ||
+            targetContainer.querySelector('.result-streaming, [data-is-streaming="true"], .cursor-blinking, .streaming')
+          ) {
+            return true
+          }
         }
       } catch (_) {}
       return false
@@ -1038,13 +1174,16 @@ try {
 
         const searchScope =
           (targetContainer &&
-            ((targetContainer.closest && targetContainer.closest('article, [data-testid*="conversation-turn"]')) ||
+            ((targetContainer.closest &&
+              targetContainer.closest(
+                'model-response, message-content, article, [data-testid*="conversation-turn"], .conversation-container'
+              )) ||
               targetContainer)) ||
           document
-        const codeElements: HTMLElement[] = []
-        searchScope.querySelectorAll(
+        const codeQuery =
           'code-block, pre, code, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
-        ).forEach((el) => {
+        let codeElements: HTMLElement[] = []
+        searchScope.querySelectorAll(codeQuery).forEach((el) => {
           codeElements.push(el as HTMLElement)
           if ((el as any).shadowRoot) {
             try {
@@ -1052,6 +1191,16 @@ try {
             } catch (_) {}
           }
         })
+
+        // Fallback: If narrowed searchScope found 0 code elements, search latest assistant containers across document
+        if (codeElements.length === 0 && searchScope !== document) {
+          document
+            .querySelectorAll(`model-response ${codeQuery}, [data-message-author-role="assistant"] ${codeQuery}`)
+            .forEach((el) => {
+              codeElements.push(el as HTMLElement)
+            })
+        }
+
         codeElements.forEach((el) => {
           checkAndExecuteAction(el)
         })
@@ -1067,7 +1216,7 @@ try {
       primeCheckTimeout = setTimeout(() => {
         try {
           const hasHiddenPrompt = Boolean(document.querySelector('.wb-hidden-action-prompt'))
-          const text = (document.body ? (document.body.innerText || document.body.textContent || '') : '')
+          const text = document.body ? document.body.textContent || '' : ''
           const hasPromptGuide =
             hasHiddenPrompt ||
             text.includes('You are integrated with Workbench Desktop') ||
@@ -1087,7 +1236,7 @@ try {
             ipcRenderer.send('workbench:chat-prime-status-changed', { isPrimed })
           }
         } catch (_) {}
-      }, 300)
+      }, 600)
     }
 
     // Set up MutationObserver on document
@@ -1099,12 +1248,21 @@ try {
 
     function markHistoricalActions() {
       try {
+        const latestAssistant = getLatestAssistantContainer()
         const blocks = document.querySelectorAll(
           'code-block, pre, code, [class*="code-container"], [class*="code-block"], div[class*="overflow-y-auto"] code, [class*="language-workbench"]'
         )
         const now = Date.now()
         blocks.forEach((el) => {
           const htmlEl = el as HTMLElement
+          // Never pre-emptively mark code blocks inside the latest assistant turn
+          if (latestAssistant && (latestAssistant === htmlEl || latestAssistant.contains(htmlEl))) {
+            return
+          }
+          // Never mark user messages
+          if (htmlEl.closest('user-query, [data-message-author-role="user"], [data-user-message="true"]')) {
+            return
+          }
           const rawText = (htmlEl.innerText || htmlEl.textContent || '').trim()
           if (
             rawText.includes('workbench:action') ||
@@ -1121,17 +1279,18 @@ try {
             executedElements.add(htmlEl)
           }
         })
+        scanForActions()
       } catch (_) {}
     }
 
     if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      observer.observe(document.body, { childList: true, subtree: true })
       checkPrimedStatus()
       hideFeedbackBubbles()
       setTimeout(markHistoricalActions, 400)
     } else {
       document.addEventListener('DOMContentLoaded', () => {
-        observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+        observer.observe(document.body, { childList: true, subtree: true })
         checkPrimedStatus()
         hideFeedbackBubbles()
         setTimeout(markHistoricalActions, 400)

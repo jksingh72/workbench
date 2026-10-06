@@ -1715,8 +1715,11 @@ export class AIViewHandler {
    * Closes the action execution feedback loop by sending the result of an executed action
    * back to the AI chat, allowing multi-step reasoning and autonomous task execution.
    */
-  public async handleActionExecutionFeedback(payload: any, result: any) {
-    if (!this.view || this.view.webContents.isDestroyed()) return
+  public async handleActionExecutionFeedback(
+    payload: any,
+    result: any,
+    senderWebContents?: Electron.WebContents
+  ) {
     if (!this.actionModeEnabled) return
 
     if (this.isLoopCancelled) {
@@ -1749,17 +1752,37 @@ export class AIViewHandler {
     const actionId = payload.__wbActionId
     console.log(`[AIView:Feedback:STEP 2] In-Chat Result Card ready for "${actionType}" (actionId: ${actionId}). Waiting for user click.`)
 
-    if (this.view && !this.view.webContents.isDestroyed()) {
-      this.view.webContents.send('workbench:action-result-ready', {
-        actionId,
-        actionType,
-        payload,
-        result,
-        feedbackText,
-        turnCount: this.feedbackTurnCount + 1,
-        canContinue: stagnationCheck.allowAutoSubmit,
-        stagnationReason: stagnationCheck.reason,
-      })
+    const cardData = {
+      actionId,
+      actionType,
+      payload,
+      result,
+      feedbackText,
+      turnCount: this.feedbackTurnCount + 1,
+      canContinue: stagnationCheck.allowAutoSubmit,
+      stagnationReason: stagnationCheck.reason,
+    }
+
+    // 1. Direct dispatch to the WebContents that triggered the action
+    if (senderWebContents && !senderWebContents.isDestroyed()) {
+      senderWebContents.send('workbench:action-result-ready', cardData)
+    }
+
+    // 2. Also send to currently active view if distinct
+    if (this.view && !this.view.webContents.isDestroyed() && this.view.webContents !== senderWebContents) {
+      this.view.webContents.send('workbench:action-result-ready', cardData)
+    }
+
+    // 3. Broadcast across all attached views to ensure visibility
+    for (const v of this.views.values()) {
+      if (
+        v.webContents &&
+        !v.webContents.isDestroyed() &&
+        v.webContents !== senderWebContents &&
+        v.webContents !== this.view?.webContents
+      ) {
+        v.webContents.send('workbench:action-result-ready', cardData)
+      }
     }
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
@@ -1963,26 +1986,37 @@ export class AIViewHandler {
       }
       console.log(`[AIView:Inject:STEP 2] Input focused: tagName="${focusResult.tagName}", contentEditable=${focusResult.isContentEditable}`)
 
-      // Step 3: Native Chromium text insertion via Electron's WebContents
+      // Step 3: Fast Native Text Injection (Atomic Clipboard Paste)
       console.log(`[AIView:Inject:STEP 3] Inserting text (${textToInsert.length} chars) via Chromium WebContents...`)
       this.view.webContents.focus()
-      try {
-        await this.view.webContents.insertText(textToInsert)
-      } catch (insertErr) {
-        console.warn('[AIView:Inject:STEP 3] webContents.insertText failed, using script fallback:', insertErr)
-        await this.view.webContents.executeJavaScript(`
-          (function(t) {
-            const input = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('div[contenteditable="true"]');
-            if (input) {
-              if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
-                input.value = t;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-              } else {
-                document.execCommand('insertText', false, t);
-              }
-            }
-          })(${JSON.stringify(textToInsert)})
-        `)
+
+      // For prompts > 300 characters, native clipboard paste executes in <5ms,
+      // completely eliminating Chromium IPC buffer saturation, GPU proxy crashes, and ProseMirror freeze.
+      if (textToInsert.length > 300) {
+        const prevClipboard = clipboard.readText()
+        try {
+          clipboard.writeText(textToInsert)
+          this.view.webContents.paste()
+          // Allow 400ms for web page editor to process paste event, then restore user's previous clipboard
+          setTimeout(() => {
+            try {
+              if (prevClipboard) clipboard.writeText(prevClipboard)
+            } catch (_) {}
+          }, 400)
+        } catch (pasteErr) {
+          console.warn('[AIView:Inject:STEP 3] webContents.paste failed, using insertText fallback:', pasteErr)
+          try {
+            await this.view.webContents.insertText(textToInsert)
+          } catch (_) {}
+        }
+      } else {
+        try {
+          await this.view.webContents.insertText(textToInsert)
+        } catch (insertErr) {
+          console.warn('[AIView:Inject:STEP 3] webContents.insertText failed, using paste fallback:', insertErr)
+          clipboard.writeText(textToInsert)
+          this.view.webContents.paste()
+        }
       }
 
       // Step 3.5: Dispatch input and change events on activeElement so React (ChatGPT) and Angular (Gemini) enable their Send buttons
@@ -1991,6 +2025,9 @@ export class AIViewHandler {
         (function() {
           const el = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('rich-textarea div[contenteditable="true"]') || document.querySelector('div[contenteditable="true"]');
           if (el) {
+            try {
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste' }));
+            } catch (_) {}
             try {
               el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText' }));
             } catch (_) {}

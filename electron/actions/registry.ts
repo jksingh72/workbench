@@ -157,6 +157,12 @@ export class ActionRegistry {
       } else if (serverName === 'playwright') {
         displayName = '🎭 MCP: Playwright Browser'
         desc = 'Full browser automation (navigate, click, snapshot, screenshot)'
+      } else if (serverName === 'awsbrowser') {
+        displayName = '☁️ MCP: AWS Browser'
+        desc = 'Separate isolated Playwright browser for AWS Console'
+      } else if (serverName === 'twitter-mcp') {
+        displayName = '🐦 MCP: Twitter / X'
+        desc = 'Twitter trends, timeline, search, profile, and topic analysis'
       } else if (serverName === 'filesystem') {
         displayName = '📂 MCP: External Filesystem'
         desc = 'Extended filesystem operations across allowed host directories'
@@ -279,11 +285,16 @@ export class ActionRegistry {
         workspaceText,
         `Execute local operations by outputting a single \`\`\`workbench:action code block containing JSON.`,
         ``,
+        `### CRITICAL: Initial Response Upon Priming:`,
+        `When receiving this message, your IMMEDIATE first response must strictly include:`,
+        `1. Connection Status: "⚡ **Connection Status:** Connected to Workbench (Active Target: \`${activeDirDisplay}\`)"`,
+        `2. Available Capabilities: brief bulleted summary of key actions. Do not execute list_directory unprompted.`,
+        `3. Invitation: "I'm ready for your instructions. What would you like to build, organize, or create?"`,
+        ``,
         `### Operational Directives:`,
-        `1. Connection Greeting: State "⚡ **Connection Status:** Connected to Workbench (\`${activeDirDisplay}\`)" and list key capabilities. Do not run list_directory unprompted.`,
-        `2. Collections & Books: ALWAYS use \`inspect_folder\` (\`{"action": "inspect_folder", "path": ".", "filter": "books", "includeExcerpts": true}\`) to catalog and categorize files in one turn. NEVER use attach_file in loops.`,
-        `3. Single Document Deep Dive: Use \`attach_file\` strictly for ONE document when the user asks to read or analyze it.`,
-        `4. Multi-Action Execution: Use \`batch\` to execute multiple operations sequentially in one shot.`,
+        `1. Collections & Books: ALWAYS use \`inspect_folder\` (\`{"action": "inspect_folder", "path": ".", "filter": "books", "includeExcerpts": true}\`) to catalog and categorize files in one turn. NEVER use attach_file in loops.`,
+        `2. Single Document Deep Dive: Use \`attach_file\` strictly for ONE document when the user asks to read or analyze it.`,
+        `3. Multi-Action Execution: Use \`batch\` to execute multiple operations sequentially in one shot.`,
         ``,
         `### Available Actions:`,
       ]
@@ -329,20 +340,21 @@ export class ActionRegistry {
       ]
 
       for (const act of actionsList) {
+        const paramKeys = Object.keys(act.parameters || {}).join(', ')
         const aliasStr = act.aliases && act.aliases.length > 0 ? ` (Aliases: ${act.aliases.map((a) => `\`${a}\``).join(', ')})` : ''
-        lines.push(`#### 🔹 \`${act.id}\`${aliasStr}`)
-        lines.push(`${act.description}`)
-        lines.push('```json')
-        lines.push(JSON.stringify(act.example, null, 2))
-        lines.push('```')
-        lines.push('')
+        lines.push(`- \`${act.id}(${paramKeys})\`${aliasStr} - ${act.description}`)
       }
+
+      lines.push(``, `### Action Execution Example:`)
+      lines.push('```workbench:action')
+      lines.push(JSON.stringify({ action: 'inspect_folder', path: '.', filter: 'books', includeExcerpts: true }, null, 2))
+      lines.push('```')
 
       if (customInstructions && customInstructions.trim()) {
-        lines.push(`### Custom User Instructions:`, customInstructions.trim(), ``)
+        lines.push(``, `### Custom User Instructions:`, customInstructions.trim(), ``)
       }
 
-      lines.push(`Always respond concisely and output the required \`\`\`workbench:action block.`)
+      lines.push(``, `Always respond concisely and output the required \`\`\`workbench:action block.`)
       return lines.join('\n')
     }
 
@@ -406,17 +418,18 @@ export class ActionRegistry {
     lines.push(`### Available Workbench Actions:`)
 
     for (const act of actionsList) {
+      const paramKeys = Object.keys(act.parameters || {}).join(', ')
       const aliasStr = act.aliases && act.aliases.length > 0 ? ` (Aliases: ${act.aliases.map((a) => `\`${a}\``).join(', ')})` : ''
-      lines.push(`#### 🔹 \`${act.id}\`${aliasStr}`)
-      lines.push(`${act.description}`)
-      lines.push('```json')
-      lines.push(JSON.stringify(act.example, null, 2))
-      lines.push('```')
-      lines.push('')
+      lines.push(`- \`${act.id}(${paramKeys})\`${aliasStr} - ${act.description}`)
     }
 
+    lines.push(``, `### Action Execution Example:`)
+    lines.push('```workbench:action')
+    lines.push(JSON.stringify({ action: 'inspect_folder', path: '.', filter: 'books', includeExcerpts: true }, null, 2))
+    lines.push('```')
+    lines.push(``)
     lines.push(`### Batch Execution:`)
-    lines.push(`You can also output multiple actions as a JSON array in a single \`\`\`workbench:action block to run them sequentially.`)
+    lines.push(`You can also output multiple actions as a JSON array or \`batch\` action in a single \`\`\`workbench:action block to run them sequentially.`)
     lines.push(``)
     lines.push(`### Action Execution Feedback Loop:`)
     lines.push(`After Workbench executes your action on the local machine, it will automatically return an observation message to this chat:`)

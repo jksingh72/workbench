@@ -60,8 +60,8 @@
         "-y",
         "@enescinar/twitter-mcp"
       ],
-      "disabled": false,
-      "description": "Twitter/X search, trends, timeline, profile, and topic analysis MCP server"
+      "disabled": true,
+      "description": "Twitter/X search, trends, timeline, profile, and topic analysis MCP server (requires API keys)"
     },
     "awsbrowser": {
       "command": "npx",

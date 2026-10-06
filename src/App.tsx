@@ -244,58 +244,65 @@ export const App: React.FC = () => {
   const isAnyModalOpenRef = useRef(isAnyModalOpen)
   isAnyModalOpenRef.current = isAnyModalOpen
 
-  // Calculate and sync bounds of native WebContentsViews
+  const syncBoundsRafRef = useRef<number | null>(null)
+
+  // Calculate and sync bounds of native WebContentsViews using RAF batching to eliminate layout thrashing
   const syncBounds = useCallback(() => {
     if (!window.electron?.updateBounds) return
+    if (syncBoundsRafRef.current !== null) return
 
-    // If any modal is open or if dragging splitters, hide all native views
-    if (isAnyModalOpenRef.current || isAnyModalOpen || dragTargetRef.current !== 'none') {
-      window.electron.updateBounds({
-        book: { x: 0, y: 0, width: 0, height: 0 },
-        ai: { x: 0, y: 0, width: 0, height: 0 },
-        note: { x: 0, y: 0, width: 0, height: 0 },
-      })
-      return
-    }
+    syncBoundsRafRef.current = requestAnimationFrame(() => {
+      syncBoundsRafRef.current = null
 
-    const bookRect = activePanes.book
-      ? bookAnchorRef.current?.getBoundingClientRect()
-      : null
-    const aiRect = activePanes.ai
-      ? aiAnchorRef.current?.getBoundingClientRect()
-      : null
-    const noteRect = activePanes.note
-      ? noteAnchorRef.current?.getBoundingClientRect()
-      : null
+      // If any modal is open or if dragging splitters, hide all native views
+      if (isAnyModalOpenRef.current || isAnyModalOpen || dragTargetRef.current !== 'none') {
+        window.electron?.updateBounds({
+          book: { x: 0, y: 0, width: 0, height: 0 },
+          ai: { x: 0, y: 0, width: 0, height: 0 },
+          note: { x: 0, y: 0, width: 0, height: 0 },
+        })
+        return
+      }
 
-    const book = bookRect
-      ? {
-          x: Math.round(bookRect.left),
-          y: Math.round(bookRect.top),
-          width: Math.round(bookRect.width),
-          height: Math.round(bookRect.height),
-        }
-      : { x: 0, y: 0, width: 0, height: 0 }
+      const bookRect = activePanes.book
+        ? bookAnchorRef.current?.getBoundingClientRect()
+        : null
+      const aiRect = activePanes.ai
+        ? aiAnchorRef.current?.getBoundingClientRect()
+        : null
+      const noteRect = activePanes.note
+        ? noteAnchorRef.current?.getBoundingClientRect()
+        : null
 
-    const ai = aiRect
-      ? {
-          x: Math.round(aiRect.left),
-          y: Math.round(aiRect.top),
-          width: Math.round(aiRect.width),
-          height: Math.round(aiRect.height),
-        }
-      : { x: 0, y: 0, width: 0, height: 0 }
+      const book = bookRect
+        ? {
+            x: Math.round(bookRect.left),
+            y: Math.round(bookRect.top),
+            width: Math.round(bookRect.width),
+            height: Math.round(bookRect.height),
+          }
+        : { x: 0, y: 0, width: 0, height: 0 }
 
-    const note = noteRect
-      ? {
-          x: Math.round(noteRect.left),
-          y: Math.round(noteRect.top),
-          width: Math.round(noteRect.width),
-          height: Math.round(noteRect.height),
-        }
-      : { x: 0, y: 0, width: 0, height: 0 }
+      const ai = aiRect
+        ? {
+            x: Math.round(aiRect.left),
+            y: Math.round(aiRect.top),
+            width: Math.round(aiRect.width),
+            height: Math.round(aiRect.height),
+          }
+        : { x: 0, y: 0, width: 0, height: 0 }
 
-    window.electron.updateBounds({ book, ai, note })
+      const note = noteRect
+        ? {
+            x: Math.round(noteRect.left),
+            y: Math.round(noteRect.top),
+            width: Math.round(noteRect.width),
+            height: Math.round(noteRect.height),
+          }
+        : { x: 0, y: 0, width: 0, height: 0 }
+
+      window.electron?.updateBounds({ book, ai, note })
+    })
   }, [
     activePanes,
     isAnyModalOpen,

@@ -81,9 +81,13 @@ async function loadModule(name: string): Promise<any> {
   }
 }
 
-async function extractQuickExcerpt(filePath: string, ext: string): Promise<string> {
+async function extractQuickExcerpt(filePath: string, ext: string, fileSize = 0): Promise<string> {
   try {
     if (ext === '.pdf') {
+      // Guard: Skip large PDF files (> 20 MB) to prevent high memory allocations
+      if (fileSize > 20 * 1024 * 1024) {
+        return ''
+      }
       const mod: any = await loadModule('pdf-parse')
       if (!mod) return ''
       const buffer = await fs.promises.readFile(filePath)
@@ -270,8 +274,8 @@ export const inspectFolderAction: ActionDefinition = {
 
             // Extract quick topic/first-page excerpt for the first 35 items if requested
             let excerpt = ''
-            if (shouldIncludeExcerpts && catalog.length < 35) {
-              excerpt = await extractQuickExcerpt(fullPath, ext)
+            if (shouldIncludeExcerpts && catalog.length < 35 && size < 20 * 1024 * 1024) {
+              excerpt = await extractQuickExcerpt(fullPath, ext, size)
             }
 
             catalog.push({
