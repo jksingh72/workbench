@@ -14,6 +14,7 @@ import { AISourceManager, AISource } from './services/aiSourceManager'
 import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
 import { ActionDispatcher } from './services/actionDispatcher'
 import { McpManager } from './services/mcpManager'
+import { PrimingOptions } from './actions'
 
 const BINARY_EXTENSIONS = new Set([
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
@@ -559,7 +560,7 @@ function registerIpcHandlers() {
     return null
   })
 
-  ipcMain.handle('workbench:set-action-mode', async (_, params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) => {
+  ipcMain.handle('workbench:set-action-mode', async (_, params: { enabled: boolean; customInstructions?: string; primeAI?: boolean; primingOptions?: PrimingOptions }) => {
     const enabled = Boolean(params?.enabled)
     ActionDispatcher.getInstance().setActionMode(enabled)
     if (aiHandler) {
@@ -567,7 +568,15 @@ function registerIpcHandlers() {
       // Only prime AI if explicitly requested (params.primeAI === true).
       // NEVER auto-prime on app launch, component mount, toggle, or settings save!
       if (enabled && params?.primeAI === true) {
-        const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, params?.customInstructions)
+        const detected = aiHandler.detectActiveProvider()
+        const opts: PrimingOptions = params?.primingOptions || {
+          provider: detected,
+          customInstructions: params?.customInstructions,
+        }
+        if (!opts.provider) opts.provider = detected
+        if (!opts.customInstructions && params?.customInstructions) opts.customInstructions = params?.customInstructions
+
+        const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, opts)
         const primeResult = await aiHandler.enableActionMode(prompt, true)
         aiHandler.notifyChatPrimeStatus()
         return { enabled: true, ...primeResult }
@@ -603,17 +612,44 @@ function registerIpcHandlers() {
     return { isPrimed: false }
   })
 
-  ipcMain.on('workbench:prime-active-chat', async () => {
+  ipcMain.on('workbench:prime-active-chat', async (_, options?: PrimingOptions) => {
     if (aiHandler) {
       ActionDispatcher.getInstance().setActionMode(true)
       aiHandler.setActionMode(true)
-      const prompt = ActionDispatcher.getInstance().getPromptGuide()
+      const detected = aiHandler.detectActiveProvider()
+      const opts: PrimingOptions = options || { provider: detected }
+      if (!opts.provider) opts.provider = detected
+      const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, opts)
       await aiHandler.enableActionMode(prompt, true)
       aiHandler.notifyChatPrimeStatus()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('workbench:action-mode-changed', { enabled: true })
         mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed: true })
       }
+    }
+  })
+
+  ipcMain.handle('workbench:get-available-tool-groups', () => {
+    return ActionDispatcher.getInstance().getAvailableToolGroups()
+  })
+
+  ipcMain.handle('workbench:get-priming-preview', async (_, options?: PrimingOptions) => {
+    const detected = aiHandler ? aiHandler.detectActiveProvider() : 'generic'
+    const provider = options?.provider || detected
+    const opts: PrimingOptions = {
+      ...options,
+      provider,
+    }
+    const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, opts)
+    const charCount = prompt.length
+    const tokenEstimate = Math.ceil(charCount / 4)
+    const availableGroups = ActionDispatcher.getInstance().getAvailableToolGroups()
+    return {
+      prompt,
+      charCount,
+      tokenEstimate,
+      detectedProvider: detected,
+      availableGroups,
     }
   })
 

@@ -437,6 +437,11 @@ try {
           if (c.length > 5000) c = c.slice(0, 5000) + `\n... [truncated ${c.length} chars]`
           outputPreview += `\n\nContent:\n${c}`
         }
+        if (data.result?.details?.stdout && !outputPreview.includes(data.result.details.stdout)) {
+          let s = String(data.result.details.stdout)
+          if (s.length > 8000) s = s.slice(0, 8000) + `\n... [truncated ${s.length} chars]`
+          outputPreview += `\n\n${s}`
+        }
         if (!isSuccess && data.result?.error) {
           outputPreview += `\nError Details: ${data.result.error}`
         }

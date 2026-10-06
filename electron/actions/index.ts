@@ -22,6 +22,8 @@ import { addMcpServerAction } from './addMcpServerAction'
 import { removeMcpServerAction } from './removeMcpServerAction'
 import { configureMcpServerAction } from './configureMcpServerAction'
 import { downloadFileAction } from './downloadFileAction'
+import { runScriptAction } from './runScriptAction'
+import { inspectFolderAction } from './inspectFolderAction'
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -46,6 +48,8 @@ export * from './addMcpServerAction'
 export * from './removeMcpServerAction'
 export * from './configureMcpServerAction'
 export * from './downloadFileAction'
+export * from './runScriptAction'
+export * from './inspectFolderAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -78,6 +82,8 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(addMcpServerAction)
   registry.register(removeMcpServerAction)
   registry.register(configureMcpServerAction)
-    registry.register(downloadFileAction)
+  registry.register(downloadFileAction)
+  registry.register(runScriptAction)
+  registry.register(inspectFolderAction)
   return registry
 }

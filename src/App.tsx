@@ -12,6 +12,7 @@ import { AIDeleteLoginModal } from './components/AIDeleteLoginModal'
 import { NoteSourceModal } from './components/NoteSourceModal'
 import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { ActionModeModal } from './components/ActionModeModal'
+import { PrimeChatModal } from './components/PrimeChatModal'
 import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
@@ -94,6 +95,7 @@ export const App: React.FC = () => {
   const [activeNoteSourceId, setActiveNoteSourceId] = useState<string>('onenote')
   const [isNoteSourceModalOpen, setIsNoteSourceModalOpen] = useState<boolean>(false)
   const [isActionModeModalOpen, setIsActionModeModalOpen] = useState<boolean>(false)
+  const [isPrimeChatModalOpen, setIsPrimeChatModalOpen] = useState<boolean>(false)
   const [actionMode, setActionMode] = useState<boolean>(() => {
     try {
       return localStorage.getItem('workbench:action-mode') === 'true'
@@ -236,7 +238,8 @@ export const App: React.FC = () => {
     isBookSourceModalOpen ||
     isAISourceModalOpen ||
     isNoteSourceModalOpen ||
-    isActionModeModalOpen
+    isActionModeModalOpen ||
+    isPrimeChatModalOpen
 
   const isAnyModalOpenRef = useRef(isAnyModalOpen)
   isAnyModalOpenRef.current = isAnyModalOpen
@@ -421,7 +424,11 @@ export const App: React.FC = () => {
     const handleOpenActionModalEvent = () => {
       handleOpenActionModeModal()
     }
+    const handleOpenPrimeChatEvent = () => {
+      handleOpenPrimeChatModal()
+    }
     window.addEventListener('workbench:open-action-mode-modal', handleOpenActionModalEvent)
+    window.addEventListener('workbench:open-prime-chat-modal', handleOpenPrimeChatEvent)
 
     return () => {
       unsubscribeNav()
@@ -434,6 +441,7 @@ export const App: React.FC = () => {
       unsubscribeOpenNoteModal?.()
       window.removeEventListener('workbench:notification', handleCustomNotify)
       window.removeEventListener('workbench:open-action-mode-modal', handleOpenActionModalEvent)
+      window.removeEventListener('workbench:open-prime-chat-modal', handleOpenPrimeChatEvent)
     }
   }, [])
 
@@ -924,6 +932,17 @@ export const App: React.FC = () => {
     setTimeout(syncBounds, 50)
   }
 
+  const handleOpenPrimeChatModal = () => {
+    setIsPrimeChatModalOpen(true)
+    window.electron?.setViewsVisible(false)
+  }
+
+  const handleClosePrimeChatModal = () => {
+    setIsPrimeChatModalOpen(false)
+    window.electron?.setViewsVisible(true)
+    setTimeout(syncBounds, 50)
+  }
+
   const handleToggleActionMode = async () => {
     const nextState = !actionMode
     setIsActivatingAction(true)
@@ -1273,6 +1292,7 @@ export const App: React.FC = () => {
       isActivatingAction={isActivatingAction}
       customInstructions={customInstructions}
       onOpenActionModeModal={handleOpenActionModeModal}
+      onOpenPrimeChatModal={handleOpenPrimeChatModal}
     />
   )
 
@@ -1547,6 +1567,19 @@ export const App: React.FC = () => {
         onSaveCustomInstructions={handleSaveCustomInstructions}
         activeDirectory={activeActionDirectory}
         onNotify={showNotification}
+        onOpenPrimeChatModal={handleOpenPrimeChatModal}
+      />
+
+      <PrimeChatModal
+        isOpen={isPrimeChatModalOpen}
+        onClose={handleClosePrimeChatModal}
+        onNotify={showNotification}
+        customInstructions={customInstructions}
+        onSaveCustomInstructions={handleSaveCustomInstructions}
+        activeDirectory={activeActionDirectory}
+        onSuccess={() => {
+          setActionMode(true)
+        }}
       />
     </div>
   )

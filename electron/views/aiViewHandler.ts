@@ -5,6 +5,7 @@ import { AuthCoordinator } from '../auth/authCoordinator'
 import { AISourceManager, AISource } from '../services/aiSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
 import { ActionDispatcher } from '../services/actionDispatcher'
+import { LLMProvider } from '../actions/registry'
 
 export const CHATGPT_START_URL = 'https://chatgpt.com/'
 
@@ -1597,6 +1598,17 @@ export class AIViewHandler {
         }
         body += `\nFile Content:\n\`\`\`\n${content}\n\`\`\``
       }
+
+      if (result.details?.stdout) {
+        let stdout = String(result.details.stdout)
+        const MAX_STDOUT_LEN = 32000
+        if (stdout.length > MAX_STDOUT_LEN) {
+          stdout =
+            stdout.slice(0, MAX_STDOUT_LEN) +
+            `\n\n... [Output truncated: showing first ${MAX_STDOUT_LEN.toLocaleString()} characters of ${stdout.length.toLocaleString()}]`
+        }
+        body += `\nScript Output:\n\`\`\`\n${stdout}\n\`\`\``
+      }
     } else {
       body = `[Workbench Action Result: ❌ Action "${actionType}" failed: ${result.error || result.message}]`
       body += `\nPlease inspect this error, adjust parameters or file paths, and proceed.`
@@ -2271,6 +2283,25 @@ export class AIViewHandler {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
     const isPrimed = await this.isChatPrimed()
     this.mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed })
+  }
+
+  public detectActiveProvider(): LLMProvider {
+    let url = ''
+    try {
+      if (this.view && !this.view.webContents.isDestroyed()) {
+        url = this.view.webContents.getURL() || ''
+      }
+    } catch {
+      url = this.currentUrl || ''
+    }
+    if (!url) url = this.currentUrl || ''
+    const lower = url.toLowerCase()
+    if (lower.includes('perplexity.ai')) return 'perplexity'
+    if (lower.includes('chatgpt.com') || lower.includes('openai.com')) return 'chatgpt'
+    if (lower.includes('claude.ai') || lower.includes('anthropic.com')) return 'claude'
+    if (lower.includes('gemini.google.com') || lower.includes('aistudio.google.com')) return 'gemini'
+    if (lower.includes('deepseek.com')) return 'deepseek'
+    return 'generic'
   }
 }
 

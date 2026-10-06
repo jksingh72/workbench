@@ -31,6 +31,7 @@ interface ActionModeModalProps {
   onSaveCustomInstructions: (instructions: string) => void
   activeDirectory: string
   onNotify: (msg: string) => void
+  onOpenPrimeChatModal?: () => void
 }
 
 const QUICK_RULES = [
@@ -49,6 +50,7 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
   onSaveCustomInstructions,
   activeDirectory,
   onNotify,
+  onOpenPrimeChatModal,
 }) => {
   const [instructions, setInstructions] = useState(customInstructions)
   const [fullPrompt, setFullPrompt] = useState<string>('')
@@ -1393,30 +1395,61 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
               Cancel
             </button>
 
-            {/* Optional explicit action to prime the active conversation ONLY when user explicitly asks */}
+            {/* Optional explicit action to prime the active conversation with customizable options */}
             {actionMode && (
-              <button
-                onClick={handlePrimeActiveChat}
-                disabled={isPriming}
-                style={{
-                  background: 'rgba(16, 185, 129, 0.12)',
-                  border: '1px solid rgba(16, 185, 129, 0.4)',
-                  color: '#34d399',
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: isPriming ? 'wait' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'all 0.15s ease',
-                }}
-                title="Send action mode rules into your active chat thread (Only click if you want AI to learn rules in this chat)"
-              >
-                <SendHorizontal size={12} className={isPriming ? 'animate-pulse' : ''} />
-                <span>{isPriming ? 'Sending...' : 'Prime Active Chat'}</span>
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    onClose()
+                    if (onOpenPrimeChatModal) {
+                      onOpenPrimeChatModal()
+                    } else {
+                      window.dispatchEvent(new CustomEvent('workbench:open-prime-chat-modal'))
+                    }
+                  }}
+                  style={{
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    color: '#fbbf24',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Configure LLM provider core, tool checkboxes, and custom instructions before priming"
+                >
+                  <Zap size={12} color="#fbbf24" fill="#fbbf24" />
+                  <span>Customize & Prime...</span>
+                </button>
+
+                <button
+                  onClick={handlePrimeActiveChat}
+                  disabled={isPriming}
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    color: '#34d399',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: isPriming ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Send action mode rules into your active chat thread (Quick Prime)"
+                >
+                  <SendHorizontal size={12} className={isPriming ? 'animate-pulse' : ''} />
+                  <span>{isPriming ? 'Sending...' : 'Quick Prime'}</span>
+                </button>
+              </>
             )}
 
             {/* Primary Action: Save Settings Locally (NEVER creates threads in Claude) */}

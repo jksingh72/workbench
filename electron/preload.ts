@@ -218,8 +218,12 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.send('workbench:report-active-directory', params),
   executeAction: (payload: any) =>
     ipcRenderer.invoke('workbench:execute-action', payload),
-  setActionMode: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) =>
+  setActionMode: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean; primingOptions?: any }) =>
     ipcRenderer.invoke('workbench:set-action-mode', params),
+  getAvailableToolGroups: () =>
+    ipcRenderer.invoke('workbench:get-available-tool-groups'),
+  getPrimingPreview: (options?: any) =>
+    ipcRenderer.invoke('workbench:get-priming-preview', options),
   getChatPrimeStatus: () =>
     ipcRenderer.invoke('workbench:get-chat-prime-status'),
   onChatPrimeStatusChanged: (callback: (data: { isPrimed: boolean }) => void) => {

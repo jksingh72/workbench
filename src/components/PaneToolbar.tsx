@@ -53,6 +53,7 @@ interface PaneToolbarProps {
   isActivatingAction?: boolean
   customInstructions?: string
   onOpenActionModeModal?: () => void
+  onOpenPrimeChatModal?: () => void
 }
 
 export const PaneToolbar: React.FC<PaneToolbarProps> = ({
@@ -80,8 +81,9 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   actionMode: _propActionMode,
   onToggleActionMode: _propToggleActionMode,
   isActivatingAction: propIsActivatingAction,
-  customInstructions: propCustomInstructions,
+  customInstructions: _propCustomInstructions,
   onOpenActionModeModal,
+  onOpenPrimeChatModal,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [customPrompt, setCustomPrompt] = useState('')
@@ -134,14 +136,6 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   const [localIsActivating, setLocalIsActivating] = useState(false)
   const isActivatingAction = typeof propIsActivatingAction === 'boolean' ? propIsActivatingAction : localIsActivating
 
-  const [localCustomInstructions] = useState<string>(() => {
-    try {
-      return localStorage.getItem('workbench:action-custom-instructions') || ''
-    } catch {
-      return ''
-    }
-  })
-  const customInstructions = typeof propCustomInstructions === 'string' ? propCustomInstructions : localCustomInstructions
   const [activeDirectory, setActiveDirectory] = useState<string>('')
   const [workspaceFolders, setWorkspaceFolders] = useState<{
     activeTarget: 'book' | 'note' | 'custom'
@@ -247,40 +241,11 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
 
 
-  const handlePrimeCurrentChat = async () => {
-    setLocalIsActivating(true)
-    try {
-      const res = await window.electron?.setActionMode?.({
-        enabled: true,
-        customInstructions: customInstructions.trim(),
-        primeAI: true,
-      })
-      if (res?.success) {
-        setLocalActionMode(true)
-        setIsChatPrimed(true)
-        try {
-          localStorage.setItem('workbench:action-mode', 'true')
-        } catch (_) {}
-        window.electron?.showNotification?.({
-          title: '⚡ Chat Primed',
-          body: 'Connected to ' + ((workspaceFolders.activeDirectory || activeDirectory).split(/[/\\]/).filter(Boolean).pop() || 'target folder') + '! AI can now run local file actions.',
-          type: 'success',
-        })
-      } else {
-        window.electron?.showNotification?.({
-          title: '⚠️ Could Not Prime Chat',
-          body: res?.error || 'Chat input not ready. Ensure Claude or ChatGPT is fully loaded.',
-          type: 'error',
-        })
-      }
-    } catch (err: any) {
-      window.electron?.showNotification?.({
-        title: '⚠️ Error Priming Chat',
-        body: err.message || 'Failed to prime chat',
-        type: 'error',
-      })
-    } finally {
-      setLocalIsActivating(false)
+  const handlePrimeCurrentChat = () => {
+    if (onOpenPrimeChatModal) {
+      onOpenPrimeChatModal()
+    } else {
+      window.dispatchEvent(new CustomEvent('workbench:open-prime-chat-modal'))
     }
   }
 
@@ -696,15 +661,28 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                   <span className="pill-btn-label">{isActivatingAction ? 'Priming...' : 'Prime Chat'}</span>
                 </button>
               ) : (
-                <button
-                  className="action-pill-btn disable-action"
-                  onClick={handleDisableChat}
-                  disabled={isActivatingAction}
-                  title="Click to disable connection and unprime this chat"
-                >
-                  <Power size={10} className="pill-disable-icon" />
-                  <span className="pill-btn-label">Disable</span>
-                </button>
+                <>
+                  <button
+                    className="action-pill-btn prime-action"
+                    onClick={() => {
+                      if (onOpenPrimeChatModal) onOpenPrimeChatModal()
+                      else window.dispatchEvent(new CustomEvent('workbench:open-prime-chat-modal'))
+                    }}
+                    title="Customize tools & re-prime this chat"
+                    style={{ padding: '0 4px', opacity: 0.85 }}
+                  >
+                    <Zap size={10} className="text-amber fill-amber" />
+                  </button>
+                  <button
+                    className="action-pill-btn disable-action"
+                    onClick={handleDisableChat}
+                    disabled={isActivatingAction}
+                    title="Click to disable connection and unprime this chat"
+                  >
+                    <Power size={10} className="pill-disable-icon" />
+                    <span className="pill-btn-label">Disable</span>
+                  </button>
+                </>
               )}
 
               {/* 3. Target Folder button */}

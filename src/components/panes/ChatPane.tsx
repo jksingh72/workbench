@@ -21,6 +21,7 @@ export interface ChatPaneProps {
   isActivatingAction?: boolean
   customInstructions?: string
   onOpenActionModeModal?: () => void
+  onOpenPrimeChatModal?: () => void
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
@@ -41,6 +42,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   isActivatingAction,
   customInstructions,
   onOpenActionModeModal,
+  onOpenPrimeChatModal,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounter = useRef(0)
@@ -196,6 +198,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         isActivatingAction={isActivatingAction}
         customInstructions={customInstructions}
         onOpenActionModeModal={onOpenActionModeModal}
+        onOpenPrimeChatModal={onOpenPrimeChatModal}
       />
       <div className="native-view-anchor" ref={anchorRef}>
         {isDragOver && (

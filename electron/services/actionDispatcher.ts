@@ -7,6 +7,8 @@ import {
   ActionRegistry,
   registerBuiltinActions,
   ActionDefinition,
+  PrimingOptions,
+  ToolGroup,
 } from '../actions'
 
 export interface WorkbenchActionPayload {
@@ -426,11 +428,12 @@ export class ActionDispatcher {
     }
   }
 
-  /**
-   * Generates prompt guide for AI models with both Book and Note folder context
-   */
-  public getPromptGuide(_targetPane?: 'book' | 'note', customInstructions?: string): string {
-    return this.registry.generatePromptGuide(this.getWorkspaceFolders(), customInstructions)
+  public getPromptGuide(_targetPane?: 'book' | 'note', options?: string | PrimingOptions): string {
+    return this.registry.generatePromptGuide(this.getWorkspaceFolders(), options)
+  }
+
+  public getAvailableToolGroups(): ToolGroup[] {
+    return this.registry.getAvailableToolGroups()
   }
 
   public notify(message: string) {

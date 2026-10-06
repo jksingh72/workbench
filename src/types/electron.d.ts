@@ -127,7 +127,9 @@ export interface ElectronAPI {
   // Workbench Action Model APIs
   reportActiveDirectory?: (params: { target?: 'book' | 'note'; currentPath: string; rootPath?: string }) => void
   executeAction?: (payload: any) => Promise<{ success: boolean; action?: string; message: string; createdPath?: string; error?: string; details?: any }>
-  setActionMode?: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean }) => Promise<{ success: boolean; enabled: boolean; error?: string; alreadyPrimed?: boolean }>
+  setActionMode?: (params: { enabled: boolean; customInstructions?: string; primeAI?: boolean; primingOptions?: PrimingOptions }) => Promise<{ success: boolean; enabled: boolean; error?: string; alreadyPrimed?: boolean }>
+  getAvailableToolGroups?: () => Promise<ToolGroup[]>
+  getPrimingPreview?: (options?: PrimingOptions) => Promise<PrimingPreviewResult>
   getChatPrimeStatus?: () => Promise<{ isPrimed: boolean }>
   onChatPrimeStatusChanged?: (callback: (data: { isPrimed: boolean }) => void) => () => void
   onActionModeChanged?: (callback: (data: { enabled: boolean }) => void) => () => void
@@ -248,6 +250,31 @@ export interface NoteBook {
   id: string
   name: string
   sections: NoteSection[]
+}
+
+export type LLMProvider = 'claude' | 'chatgpt' | 'perplexity' | 'gemini' | 'deepseek' | 'generic'
+
+export interface ToolGroup {
+  id: string
+  name: string
+  description: string
+  isMcp: boolean
+  defaultSelected: boolean
+  actionIds: string[]
+}
+
+export interface PrimingOptions {
+  provider?: LLMProvider
+  selectedGroups?: string[]
+  customInstructions?: string
+}
+
+export interface PrimingPreviewResult {
+  prompt: string
+  charCount: number
+  tokenEstimate: number
+  detectedProvider: LLMProvider
+  availableGroups: ToolGroup[]
 }
 
 declare global {
