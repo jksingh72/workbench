@@ -30,7 +30,7 @@ export const runScriptAction: ActionDefinition = {
     timeoutMs: {
       type: 'number',
       required: false,
-      description: 'Maximum execution time in milliseconds (default: 30000).',
+      description: 'Maximum execution time in milliseconds (default: 30000, max: 120000).',
       default: 30000,
     },
   },
@@ -71,9 +71,8 @@ console.log(JSON.stringify(report, null, 2));
 
     const baseCwd = ctx.getActiveDirectory(targetPane as any) || process.cwd()
     const targetCwd = payload.cwd ? ctx.resolveSafePath(payload.cwd, targetPane as any) : baseCwd
-    // Hard cap timeout at 10 seconds, default 5 seconds to prevent UI hangs
-    const requestedTimeout = typeof payload.timeoutMs === 'number' && payload.timeoutMs > 0 ? payload.timeoutMs : 5000
-    const timeoutMs = Math.min(requestedTimeout, 10000)
+    const requestedTimeout = typeof payload.timeoutMs === 'number' && payload.timeoutMs > 0 ? payload.timeoutMs : 30000
+    const timeoutMs = Math.min(requestedTimeout, 120000)
 
     console.log(`[run_script:START] Executing ${language} script (CWD: "${targetCwd}", timeout: ${timeoutMs}ms)`)
     const startTime = performance.now()
@@ -109,10 +108,7 @@ console.log(JSON.stringify(report, null, 2));
         vm.createContext(sandbox)
         const scriptWrapped = `(async () => {\n${script}\n})()`
 
-        // Evaluate the async wrapper
         const evalPromise = Promise.resolve(vm.runInContext(scriptWrapped, sandbox, { timeout: timeoutMs }))
-
-        // Hard timeout promise to guarantee async unresolving promises never hang Electron
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error(`Script execution exceeded maximum timeout of ${timeoutMs}ms`)), timeoutMs)
         )
@@ -153,27 +149,31 @@ console.log(JSON.stringify(report, null, 2));
       }
     }
 
-    // 2. PowerShell (Windows) with strict timeout and clean failure
+    // 2. PowerShell (Windows) with safe execution in os.tmpdir()
     if (language === 'powershell') {
       const tempFileName = `.wb_script_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.ps1`
       const tempFilePath = path.join(os.tmpdir(), tempFileName)
 
       try {
-        fs.writeFileSync(tempFilePath, script, 'utf-8')
+        await fs.promises.writeFile(tempFilePath, script, 'utf-8')
         const execPromise = new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
           const child = exec(
             `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${tempFilePath}"`,
             {
               cwd: targetCwd,
               timeout: timeoutMs,
-              maxBuffer: 10 * 1024 * 1024,
+              maxBuffer: 20 * 1024 * 1024,
             },
             (err, stdout, stderr) => {
-              if (err) reject(err)
-              else resolve({ stdout: stdout || '', stderr: stderr || '' })
+              if (err) {
+                ;(err as any).stdout = stdout || ''
+                ;(err as any).stderr = stderr || ''
+                reject(err)
+              } else {
+                resolve({ stdout: stdout || '', stderr: stderr || '' })
+              }
             }
           )
-          // Ensure child is killed if timeout fires
           setTimeout(() => {
             try {
               if (!child.killed) child.kill('SIGKILL')
@@ -198,37 +198,53 @@ console.log(JSON.stringify(report, null, 2));
           },
         }
       } catch (psErr: any) {
+        const durationMs = Math.round(performance.now() - startTime)
+        let errMsg = psErr.message || 'PowerShell execution failed'
+        if (psErr.killed || psErr.signal === 'SIGKILL' || errMsg.includes('timed out')) {
+          errMsg = `⏱️ PowerShell script execution exceeded maximum timeout of ${timeoutMs}ms and was safely terminated.`
+        }
+        const combined = [errMsg, psErr.stdout, psErr.stderr].filter(Boolean).join('\n')
         return {
           success: false,
           action: 'run_script',
-          message: `PowerShell script execution failed: ${psErr.message}`,
-          error: psErr.message,
+          message: combined,
+          error: errMsg,
+          details: {
+            stdout: psErr.stdout || '',
+            stderr: psErr.stderr || '',
+            executionTimeMs: durationMs,
+          },
         }
       } finally {
         try {
-          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath)
+          if (fs.existsSync(tempFilePath)) await fs.promises.unlink(tempFilePath)
         } catch (_) {}
       }
     }
 
-    // 3. Python with strict timeout and clean failure
+    // 3. Python with safe execution in os.tmpdir()
     if (language === 'python') {
       const tempFileName = `.wb_script_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.py`
       const tempFilePath = path.join(os.tmpdir(), tempFileName)
 
       try {
-        fs.writeFileSync(tempFilePath, script, 'utf-8')
+        await fs.promises.writeFile(tempFilePath, script, 'utf-8')
         const execPromise = new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
           const child = exec(
             `python "${tempFilePath}"`,
             {
               cwd: targetCwd,
               timeout: timeoutMs,
-              maxBuffer: 10 * 1024 * 1024,
+              maxBuffer: 20 * 1024 * 1024,
             },
             (err, stdout, stderr) => {
-              if (err) reject(err)
-              else resolve({ stdout: stdout || '', stderr: stderr || '' })
+              if (err) {
+                ;(err as any).stdout = stdout || ''
+                ;(err as any).stderr = stderr || ''
+                reject(err)
+              } else {
+                resolve({ stdout: stdout || '', stderr: stderr || '' })
+              }
             }
           )
           setTimeout(() => {
@@ -255,15 +271,26 @@ console.log(JSON.stringify(report, null, 2));
           },
         }
       } catch (pyErr: any) {
+        const durationMs = Math.round(performance.now() - startTime)
+        let errMsg = pyErr.message || 'Python execution failed'
+        if (pyErr.killed || pyErr.signal === 'SIGKILL' || errMsg.includes('timed out')) {
+          errMsg = `⏱️ Python script execution exceeded maximum timeout of ${timeoutMs}ms and was safely terminated.`
+        }
+        const combined = [errMsg, pyErr.stdout, pyErr.stderr].filter(Boolean).join('\n')
         return {
           success: false,
           action: 'run_script',
-          message: `Python script execution failed: ${pyErr.message}`,
-          error: pyErr.message,
+          message: combined,
+          error: errMsg,
+          details: {
+            stdout: pyErr.stdout || '',
+            stderr: pyErr.stderr || '',
+            executionTimeMs: durationMs,
+          },
         }
       } finally {
         try {
-          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath)
+          if (fs.existsSync(tempFilePath)) await fs.promises.unlink(tempFilePath)
         } catch (_) {}
       }
     }

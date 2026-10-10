@@ -219,13 +219,18 @@ const DOC_RELS = XML_DECL + '<Relationships xmlns="http://schemas.openxmlformats
   '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>' +
   '</Relationships>'
 
+import os from 'node:os'
+import crypto from 'node:crypto'
+import { renderDocxAction } from './renderDocxAction'
+
 export const createDocxAction: ActionDefinition = {
   id: 'create_docx',
-  aliases: ['new_docx', 'write_docx', 'save_docx', 'create_word_doc', 'generate_docx'],
-  description: 'Generates a Word (.docx) file from Markdown-style content: # / ## / ### headings, - bullets, 1. numbered lists (2-space indent nests), **bold**, *italic*, [[pagebreak]]. Each other non-empty line is a paragraph.',
+  aliases: ['new_docx', 'write_docx', 'save_docx', 'create_word_doc'],
+  description: 'Generates a Word (.docx) file from Markdown-style content (# / ## headings, - bullets, 1. numbered lists, **bold**, *italic*, [[pagebreak]]) or a structured JSON spec.',
   parameters: {
     path: { type: 'string', required: true, description: 'Target file path (.docx added if missing)' },
-    content: { type: 'string', required: true, description: 'Markdown-style document body' },
+    content: { type: 'string', required: false, description: 'Markdown-style document body' },
+    spec: { type: 'object', required: false, description: 'Structured JSON spec with blocks (headings, tables, etc.)' },
     title: { type: 'string', required: false, description: 'Optional title shown at top and stored in document properties' },
     author: { type: 'string', required: false, description: 'Document author property (default: Workbench)' },
     overwrite: { type: 'boolean', required: false, description: 'Replace an existing file (default: false)' },
@@ -239,7 +244,13 @@ export const createDocxAction: ActionDefinition = {
   },
   async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult> {
     const params = payload.params || {}
-    const rawPath: string = params.path || payload.path
+    const hasSpec = Boolean(params.spec || payload.spec || params.specPath || payload.specPath || params.blocks || payload.blocks)
+    if (hasSpec) {
+      const outPath = params.path ?? payload.path ?? params.outPath ?? payload.outPath
+      return await renderDocxAction.execute(ctx, { ...payload, outPath }, targetPane)
+    }
+
+    const rawPath: string = params.path || payload.path || params.outPath || payload.outPath
     const content: string = String(params.content ?? payload.content ?? '')
     const title: string | undefined = params.title ?? payload.title
     const author: string = String(params.author ?? payload.author ?? 'Workbench')
@@ -276,18 +287,37 @@ export const createDocxAction: ActionDefinition = {
       { name: 'word/numbering.xml', data: numberingXml(numberedLists) }
     ])
 
-    console.log(`[create_docx:STEP 5] Writing .docx package (${zip.length} bytes) to disk...`)
-    await fs.promises.writeFile(targetPath, zip)
+    // Write to temp file first to prevent OneDrive sync lock
+    const tempFile = path.join(os.tmpdir(), `wb_create_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.docx`)
+    try {
+      await fs.promises.writeFile(tempFile, zip)
+      await fs.promises.copyFile(tempFile, targetPath)
+    } finally {
+      try {
+        if (fs.existsSync(tempFile)) await fs.promises.unlink(tempFile)
+      } catch (_) {}
+    }
 
-    console.log(`[create_docx:STEP 6] DOCX created successfully. Refreshing explorer...`)
+    const sha256 = crypto.createHash('sha256').update(zip).digest('hex')
+    console.log(`[create_docx:STEP 5] DOCX created successfully. Refreshing explorer...`)
     ctx.notify(`📝 Created: ${path.basename(targetPath)}`)
     ctx.refreshExplorer(targetPane)
 
     if (open) {
-      console.log(`[create_docx:STEP 7] Opening created DOCX in tab: "${targetPath}"`)
+      console.log(`[create_docx:STEP 6] Opening created DOCX in tab: "${targetPath}"`)
       ctx.openInTab(targetPath)
     }
 
-    return { success: true, action: 'create_docx', message: `Created ${relPath}`, createdPath: targetPath }
+    return {
+      success: true,
+      action: 'create_docx',
+      message: `Created ${relPath} (${zip.length} bytes, SHA-256: ${sha256.substring(0, 12)}...)`,
+      createdPath: targetPath,
+      details: {
+        filePath: targetPath,
+        sizeBytes: zip.length,
+        sha256,
+      },
+    }
   }
 }

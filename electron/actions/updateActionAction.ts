@@ -1,12 +1,19 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app } from 'electron'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
 
-function findActionsDir(): string {
+async function findActionsDir(): Promise<string> {
+  let appPath = ''
+  try {
+    const electron = await import('electron')
+    if (electron && (electron as any).app?.getAppPath) {
+      appPath = (electron as any).app.getAppPath()
+    }
+  } catch (_) {}
+
   const candidates = [
-    path.join(app.getAppPath(), 'electron', 'actions'),
-    path.join(process.cwd(), 'electron', 'actions')
+    ...(appPath ? [path.join(appPath, 'electron', 'actions')] : []),
+    path.join(process.cwd(), 'electron', 'actions'),
   ]
   for (const dir of candidates) {
     if (fs.existsSync(path.join(dir, 'index.ts'))) return dir
@@ -54,7 +61,7 @@ export const updateActionAction: ActionDefinition = {
       throw new Error(`New code does not declare id '${name}'`)
     }
 
-    const dir = findActionsDir()
+    const dir = await findActionsDir()
     const target = path.join(dir, fileName)
     console.log(`[update_action:STEP 2] Target module path: "${target}"`)
 

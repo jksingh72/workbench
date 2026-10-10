@@ -1,5 +1,6 @@
 import { WebContentsView, BrowserWindow, session, clipboard, Menu, Rectangle } from 'electron'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { AISourceManager, AISource } from '../services/aiSourceManager'
@@ -1585,6 +1586,8 @@ export class AIViewHandler {
 
   /**
    * Formats an ActionResult into an observation payload suitable for AI consumption.
+   * If any content/stdout/result body exceeds 30,000 characters, spills full content to os.tmpdir()
+   * and provides a 4,000-character preview.
    */
   public formatActionFeedback(payload: any, result: any): string {
     const actionType = (payload.action || payload.type || result.action || 'action').toLowerCase()
@@ -1595,6 +1598,24 @@ export class AIViewHandler {
        result.message.includes('Duplicate action suppressed'))
     ) {
       return ''
+    }
+
+    const handleLargeText = (text: string, label: string): string => {
+      const MAX_LEN = 30000
+      if (!text) return ''
+      if (text.length <= MAX_LEN) {
+        return `\n${label}:\n\`\`\`\n${text}\n\`\`\``
+      }
+      const timestamp = Date.now()
+      const rand = Math.random().toString(36).substring(2, 6)
+      const spillFile = path.join(os.tmpdir(), `wb_result_${timestamp}_${rand}.txt`)
+      const preview = text.slice(0, 4000)
+      try {
+        fs.writeFileSync(spillFile, text, 'utf-8')
+        return `\n${label} (Showing first 4,000 of ${text.length.toLocaleString()} characters):\n\`\`\`\n${preview}\n\`\`\`\n[Output was ${text.length.toLocaleString()} characters; full output saved to: ${spillFile}. Use read_pages or search_text to query specific sections if needed.]`
+      } catch (err: any) {
+        return `\n${label} (Showing first 4,000 of ${text.length.toLocaleString()} characters):\n\`\`\`\n${preview}\n\`\`\`\n[Output was ${text.length.toLocaleString()} characters; failed to save spill file: ${err?.message || err}]`
+      }
     }
 
     let body = ''
@@ -1620,30 +1641,75 @@ export class AIViewHandler {
         body += `- Files (${files.length}): ${shownFiles || 'none'}`
       }
 
-      if (result.details?.content) {
-        let content = String(result.details.content)
-        const MAX_CONTENT_LEN = 32000
-        if (content.length > MAX_CONTENT_LEN) {
-          content =
-            content.slice(0, MAX_CONTENT_LEN) +
-            `\n\n... [Content truncated: showing first ${MAX_CONTENT_LEN.toLocaleString()} characters of ${content.length.toLocaleString()}]`
+      // Batch step details
+      if (Array.isArray(result.details?.results)) {
+        body += `\nBatch Step Results (${result.details.results.length} total, ${result.details.succeeded ?? 0} succeeded, ${result.details.failed ?? 0} failed):`
+        for (const step of result.details.results) {
+          const statusIcon = step.success ? '✅' : '❌'
+          body += `\n- [Step ${step.step}: ${step.action}] ${statusIcon} ${step.message || (step.success ? 'OK' : 'Failed')}`
+          if (step.createdPath) {
+            body += ` (Target: ${step.createdPath})`
+          }
+          if (step.error) {
+            body += ` (Error: ${step.error})`
+          }
+          if (step.details?.matches && Array.isArray(step.details.matches)) {
+            body += ` (${step.details.matches.length} matches)`
+          }
+          if (step.details?.content) {
+            body += handleLargeText(String(step.details.content), `Step ${step.step} Content`)
+          }
+          if (step.details?.stdout) {
+            body += handleLargeText(String(step.details.stdout), `Step ${step.step} Output`)
+          }
         }
-        body += `\nFile Content:\n\`\`\`\n${content}\n\`\`\``
+      }
+
+      // Extracted RFP files
+      if (Array.isArray(result.details?.extractedFiles)) {
+        body += `\nExtracted Files (${result.details.extractedFiles.length}):`
+        for (const ef of result.details.extractedFiles.slice(0, 30)) {
+          body += `\n- ${ef.originalFile} (${ef.pageCount || 1} pages${ef.isScanned ? ', ⚠️ SCANNED/NO OCR' : ''}) -> ${ef.extractedTextFile}`
+        }
+        if (result.details.extractedFiles.length > 30) {
+          body += `\n... (+${result.details.extractedFiles.length - 30} more)`
+        }
+      }
+
+      // Search matches
+      if (Array.isArray(result.details?.matches) && !Array.isArray(result.details?.results)) {
+        body += `\nMatches (${result.details.matches.length} found):`
+        for (const m of result.details.matches.slice(0, 20)) {
+          const loc = m.page ? `Page ${m.page}, Line ${m.line}` : `Line ${m.line}`
+          body += `\n- [${m.file}:${loc}] ${m.text || m.match}`
+        }
+        if (result.details.matches.length > 20) {
+          body += `\n... (+${result.details.matches.length - 20} more matches)`
+        }
+      }
+
+      if (result.details?.content) {
+        body += handleLargeText(String(result.details.content), 'File Content')
       }
 
       if (result.details?.stdout) {
-        let stdout = String(result.details.stdout)
-        const MAX_STDOUT_LEN = 32000
-        if (stdout.length > MAX_STDOUT_LEN) {
-          stdout =
-            stdout.slice(0, MAX_STDOUT_LEN) +
-            `\n\n... [Output truncated: showing first ${MAX_STDOUT_LEN.toLocaleString()} characters of ${stdout.length.toLocaleString()}]`
-        }
-        body += `\nScript Output:\n\`\`\`\n${stdout}\n\`\`\``
+        body += handleLargeText(String(result.details.stdout), 'Script Output')
       }
     } else {
       body = `[Workbench Action Result: ❌ Action "${actionType}" failed: ${result.error || result.message}]`
       body += `\nPlease inspect this error, adjust parameters or file paths, and proceed.`
+    }
+
+    // Safety check on final body size
+    if (body.length > 35000) {
+      const timestamp = Date.now()
+      const rand = Math.random().toString(36).substring(2, 6)
+      const spillFile = path.join(os.tmpdir(), `wb_result_full_${timestamp}_${rand}.txt`)
+      try {
+        fs.writeFileSync(spillFile, body, 'utf-8')
+        const preview = body.slice(0, 4000)
+        body = `${preview}\n\n... [Action result text was ${body.length.toLocaleString()} characters; full payload saved to: ${spillFile}. Use read_pages or search_text to query specific sections if needed.]`
+      } catch (_) {}
     }
 
     return body

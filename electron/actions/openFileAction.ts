@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { shell } from 'electron'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
 
 export const openFileAction: ActionDefinition = {
@@ -44,7 +43,12 @@ export const openFileAction: ActionDefinition = {
 
     if (reveal) {
       console.log(`[open_file:STEP 3] Revealing file in system file explorer: "${targetPath}"`)
-      shell.showItemInFolder(targetPath)
+      try {
+        const electron = await import('electron')
+        if (electron && (electron as any).shell?.showItemInFolder) {
+          (electron as any).shell.showItemInFolder(targetPath)
+        }
+      } catch (_) {}
     } else {
       console.log(`[open_file:STEP 3] Opening file in Workbench editor tab: "${targetPath}"`)
       ctx.openInTab(targetPath)

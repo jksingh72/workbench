@@ -13,10 +13,10 @@ import { readPdfAction } from './readPdfAction'
 import { listActionsAction } from './listActionsAction'
 import { getWorkspaceFoldersAction, setActiveDirectoryAction } from './workspaceActions'
 import { createActionAction } from './createActionAction'
-
 import { summarizeFileAction } from './summarizeFileAction'
 import { updateActionAction } from './updateActionAction'
 import { createDocxAction } from './createDocxAction'
+import { renderDocxAction } from './renderDocxAction'
 import { attachFileAction } from './attachFileAction'
 import { addMcpServerAction } from './addMcpServerAction'
 import { removeMcpServerAction } from './removeMcpServerAction'
@@ -24,6 +24,10 @@ import { configureMcpServerAction } from './configureMcpServerAction'
 import { downloadFileAction } from './downloadFileAction'
 import { runScriptAction } from './runScriptAction'
 import { inspectFolderAction } from './inspectFolderAction'
+import { extractRfpAction } from './extractRfpAction'
+import { searchTextAction } from './searchTextAction'
+import { readPagesAction } from './readPagesAction'
+
 export * from './types'
 export * from './registry'
 export * from './createFolderAction'
@@ -44,12 +48,16 @@ export * from './createActionAction'
 export * from './summarizeFileAction'
 export * from './updateActionAction'
 export * from './createDocxAction'
+export * from './renderDocxAction'
 export * from './addMcpServerAction'
 export * from './removeMcpServerAction'
 export * from './configureMcpServerAction'
 export * from './downloadFileAction'
 export * from './runScriptAction'
 export * from './inspectFolderAction'
+export * from './extractRfpAction'
+export * from './searchTextAction'
+export * from './readPagesAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -75,15 +83,19 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(getWorkspaceFoldersAction)
   registry.register(setActiveDirectoryAction)
   registry.register(createActionAction)
-
   registry.register(summarizeFileAction)
   registry.register(updateActionAction)
   registry.register(createDocxAction)
+  registry.register(renderDocxAction)
   registry.register(addMcpServerAction)
   registry.register(removeMcpServerAction)
   registry.register(configureMcpServerAction)
   registry.register(downloadFileAction)
   registry.register(runScriptAction)
   registry.register(inspectFolderAction)
+  registry.register(extractRfpAction)
+  registry.register(searchTextAction)
+  registry.register(readPagesAction)
+
   return registry
 }

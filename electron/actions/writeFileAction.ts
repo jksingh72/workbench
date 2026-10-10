@@ -51,6 +51,11 @@ export const writeFileAction: ActionDefinition = {
     }
     console.log(`[write_file:STEP 2] Resolved file destination: "${targetFile}"`)
 
+    const overwrite = (params.overwrite ?? payload.overwrite) !== false
+    if (!overwrite && fs.existsSync(targetFile)) {
+      throw new Error(`File already exists at "${targetFile}" (overwrite: false)`)
+    }
+
     // Ensure parent directory exists
     const parentDir = path.dirname(targetFile)
     await fs.promises.mkdir(parentDir, { recursive: true })

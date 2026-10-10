@@ -774,8 +774,8 @@ try {
       return null
     }
 
-    function extractActionsFromText(fullText: string): Array<{ payload: any; raw: string }> {
-      const actions: Array<{ payload: any; raw: string }> = []
+    function extractActionsFromText(fullText: string): Array<{ payload: any; raw: string; error?: string }> {
+      const actions: Array<{ payload: any; raw: string; error?: string }> = []
       if (!fullText || fullText.length < 10) return actions
 
       let depth = 0
@@ -803,24 +803,46 @@ try {
             depth--
             if (depth === 0 && startIdx !== -1) {
               const candidate = fullText.substring(startIdx, i + 1).trim()
-              try {
-                let parsed: any = null
+              if (candidate.length > 500000) {
+                actions.push({ payload: null, raw: candidate.slice(0, 1000), error: 'Action payload exceeds 500 KB limit' })
+              } else {
                 try {
-                  parsed = JSON.parse(candidate)
-                } catch (_) {
-                  // Fallback: fix unescaped backslashes in Windows paths (e.g. \O, \D, \0)
-                  const sanitized = candidate.replace(/\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\')
-                  parsed = JSON.parse(sanitized)
+                  let parsed: any = null
+                  try {
+                    parsed = JSON.parse(candidate)
+                  } catch (parseErr: any) {
+                    // Fallback: fix unescaped backslashes in Windows paths (e.g. \O, \D, \0)
+                    const sanitized = candidate.replace(/\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\')
+                    try {
+                      parsed = JSON.parse(sanitized)
+                    } catch (_) {
+                      if (candidate.includes('"action"') || candidate.includes('"type"')) {
+                        actions.push({ payload: null, raw: candidate, error: `Malformed JSON: ${parseErr?.message || 'Syntax error'}` })
+                      }
+                    }
+                  }
+                  if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
+                    actions.push({ payload: parsed, raw: candidate })
+                  }
+                } catch (e: any) {
+                  if (candidate.includes('"action"') || candidate.includes('"type"')) {
+                    actions.push({ payload: null, raw: candidate, error: `Parse error: ${e?.message || 'Unknown error'}` })
+                  }
                 }
-                if (parsed && typeof parsed === 'object' && (parsed.action || parsed.type)) {
-                  actions.push({ payload: parsed, raw: candidate })
-                }
-              } catch (_) {}
+              }
               startIdx = -1
             }
           }
         }
       }
+
+      if (depth > 0 && startIdx !== -1) {
+        const trailing = fullText.substring(startIdx).trim()
+        if (trailing.includes('"action"') || trailing.includes('"type"') || fullText.includes('workbench:action')) {
+          actions.push({ payload: null, raw: trailing, error: 'Incomplete or unclosed JSON block' })
+        }
+      }
+
       return actions
     }
 
@@ -967,8 +989,17 @@ try {
         return
       }
 
-      const extracted = extractActionsFromText(rawText)
-      if (extracted.length === 0) return
+      let extracted = extractActionsFromText(rawText)
+      if (extracted.length === 0) {
+        if (
+          rawText.includes('workbench:action') ||
+          (rawText.startsWith('{') && rawText.includes('"action"') && rawText.length > 20)
+        ) {
+          extracted = [{ payload: null, raw: rawText, error: 'Malformed action block: invalid JSON syntax or unclosed structure' }]
+        } else {
+          return
+        }
+      }
 
       // Tag container immediately
       executedElements.add(containerEl)
@@ -1000,6 +1031,37 @@ try {
       }
 
       for (const item of extracted) {
+        if (item.error || !item.payload) {
+          try {
+            const badge = document.createElement('div')
+            badge.className = 'workbench-action-badge workbench-action-error-badge'
+            badge.style.cssText =
+              'display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin:6px 0;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f87171;font-weight:500;cursor:pointer;user-select:none;transition:all 0.15s ease;'
+            badge.title = 'Click to show / hide raw block'
+            badge.innerHTML = `
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:13px;">⚠️</span>
+                <span style="font-weight:600;color:#ef4444;">Workbench Action Error:</span>
+                <span style="color:#fca5a5;font-size:11px;">${escapeHtml(item.error || 'Action parsing failed')}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#fca5a5;">
+                <span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span>
+              </div>
+            `
+            const collapseTarget = targetBox || containerEl
+            badge.addEventListener('click', () => {
+              const isHidden = collapseTarget.style.display === 'none'
+              collapseTarget.style.display = isHidden ? 'block' : 'none'
+              const arrow = badge.querySelector('.wb-badge-arrow')
+              if (arrow) arrow.textContent = isHidden ? '▲' : '▼'
+            })
+            if (collapseTarget.parentNode && !collapseTarget.parentNode.querySelector('.workbench-action-error-badge')) {
+              collapseTarget.parentNode.insertBefore(badge, collapseTarget)
+            }
+          } catch (_) {}
+          continue
+        }
+
         const payloadHash = JSON.stringify(item.payload)
         const lastRan = executedActionTimestamps.get(payloadHash)
         if (lastRan && now - lastRan < 15000) {
@@ -1142,8 +1204,35 @@ try {
 
         // Defer action execution if AI is actively streaming response tokens
         if (isStreamingActive()) {
+          try {
+            const targetContainer = getLatestAssistantContainer() || document
+            const codeElements = targetContainer.querySelectorAll('code-block, pre, code, [class*="code-container"], [class*="code-block"]')
+            codeElements.forEach((el) => {
+              const htmlEl = el as HTMLElement
+              if (htmlEl.getAttribute('data-workbench-executed') === 'true') return
+              const txt = (htmlEl.innerText || htmlEl.textContent || '').trim()
+              if (txt.includes('workbench:action') || (txt.includes('"action"') && txt.length > 30)) {
+                let streamBadge = htmlEl.parentElement?.querySelector('.wb-streaming-badge') as HTMLElement | null
+                const sizeKb = (txt.length / 1024).toFixed(1)
+                if (!streamBadge) {
+                  streamBadge = document.createElement('div')
+                  streamBadge.className = 'wb-streaming-badge'
+                  streamBadge.style.cssText =
+                    'display:inline-flex;align-items:center;gap:6px;padding:3px 8px;margin:4px 0;background:rgba(59,130,246,0.1);border:1px dashed rgba(59,130,246,0.4);border-radius:4px;font-size:11px;font-family:sans-serif;color:#60a5fa;'
+                  if (htmlEl.parentNode) {
+                    htmlEl.parentNode.insertBefore(streamBadge, htmlEl)
+                  }
+                }
+                streamBadge.innerHTML = `<span style="animation:pulse 1s infinite;">⚡</span> Receiving action (${sizeKb} KB)...`
+              }
+            })
+          } catch (_) {}
           scanTimeout = setTimeout(scanForActions, 300)
           return
+        } else {
+          try {
+            document.querySelectorAll('.wb-streaming-badge').forEach((b) => b.remove())
+          } catch (_) {}
         }
 
         const targetContainer = getLatestAssistantContainer()
