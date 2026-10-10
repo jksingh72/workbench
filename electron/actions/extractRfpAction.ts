@@ -27,6 +27,11 @@ export interface RfpManifest {
   files: ExtractedFileInfo[]
 }
 
+export interface ZipEntryCheck {
+  name: string
+  sizeBytes: number
+}
+
 function computeSha256(filePath: string): string {
   const fileBuffer = fs.readFileSync(filePath)
   return crypto.createHash('sha256').update(fileBuffer).digest('hex')
@@ -36,6 +41,47 @@ function sanitizeTextFileName(fileName: string): string {
   const parsed = path.parse(fileName)
   const cleanBase = parsed.name.replace(/[<>:"/\\|?*]/g, '_')
   return `${cleanBase}.txt`
+}
+
+export function isExcludedFileOrDir(nameOrRelPath: string): boolean {
+  const norm = nameOrRelPath.replace(/\\/g, '/')
+  const parts = norm.split('/')
+  const baseName = parts[parts.length - 1]
+
+  // Folders to exclude
+  const excludedFolderPatterns = [
+    /^_extracted$/i,
+    /^_test$/i,
+    /^Resp-format-docs$/i,
+    /^old-files$/i,
+    /^Old-files-.*$/i,
+  ]
+
+  for (const part of parts.slice(0, -1)) {
+    if (excludedFolderPatterns.some((rx) => rx.test(part))) {
+      return true
+    }
+  }
+
+  if (excludedFolderPatterns.some((rx) => rx.test(baseName))) {
+    return true
+  }
+
+  // File patterns to never extract:
+  // *-report-v*, *-Section-Summary-v*, Layer*-Prompt-*, rfp-facts-*.json, hidden files
+  const excludedFilePatterns = [
+    /.*-report-v.*/i,
+    /.*-Section-Summary-v.*/i,
+    /^Layer.*-Prompt-.*/i,
+    /^rfp-facts-.*\.json$/i,
+    /^\./, // hidden files
+  ]
+
+  if (excludedFilePatterns.some((rx) => rx.test(baseName))) {
+    return true
+  }
+
+  return false
 }
 
 async function extractPdfTextByPages(filePath: string): Promise<{
@@ -94,7 +140,7 @@ export const extractRfpAction: ActionDefinition = {
   id: 'extract_rfp',
   aliases: ['unpack_rfp', 'process_rfp', 'extract_rfp_package', 'unzip_and_extract_rfp'],
   description:
-    'Unpacks and extracts full text from all documents (.pdf, .docx, .txt) in an RFP folder. Automatically unzips if a zip archive is present, writes clean page-marked text files into `<folder>/_extracted/`, and creates `manifest.json` with file sizes, page counts, SHA-256 hashes, and OCR scan detection. Returns a concise summary instead of overwhelming the chat context.',
+    'Unpacks and extracts full text from RFP source documents (.pdf, .docx, .txt). If a zip archive exists, extracts only files from the zip (plus optional `include` list). Cleans stale extracted text files, excludes reports and prompts, tracks OCR text layer presence, and writes a manifest.json with hashes and page counts.',
   parameters: {
     folder: {
       type: 'string',
@@ -104,7 +150,12 @@ export const extractRfpAction: ActionDefinition = {
     zip: {
       type: 'string',
       required: false,
-      description: 'Optional name or path of a specific zip file to extract. If omitted and exactly one .zip exists in folder, it will be automatically unpacked.',
+      description: 'Optional name or path of a specific zip file to extract. If omitted and a .zip exists in folder, it will be automatically unpacked.',
+    },
+    include: {
+      type: 'array',
+      required: false,
+      description: 'Optional list of additional specific file names to extract alongside zip contents.',
     },
     overwrite: {
       type: 'boolean',
@@ -115,7 +166,7 @@ export const extractRfpAction: ActionDefinition = {
   },
   example: {
     action: 'extract_rfp',
-    folder: 'RFP-2',
+    folder: 'RFP-3',
     overwrite: false,
   },
   async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult> {
@@ -131,6 +182,13 @@ export const extractRfpAction: ActionDefinition = {
     }
 
     const overwrite = Boolean(params.overwrite ?? payload.overwrite ?? false)
+    const includeRaw = params.include ?? payload.include ?? params.includes ?? payload.includes
+    const additionalIncludes: string[] = Array.isArray(includeRaw)
+      ? includeRaw.map((s) => String(s).trim())
+      : typeof includeRaw === 'string' && includeRaw.trim()
+      ? includeRaw.split(',').map((s) => s.trim())
+      : []
+
     console.log(`[extract_rfp:START] Processing RFP directory: "${resolvedFolder}" (overwrite: ${overwrite})`)
 
     // 1. Check for Zip Archive extraction
@@ -145,23 +203,45 @@ export const extractRfpAction: ActionDefinition = {
         targetZipPath = explicitZip
       }
     } else {
-      // Auto-detect if exactly one .zip exists in the folder
+      // Auto-detect if a .zip exists in the folder
       const allFiles = await fs.promises.readdir(resolvedFolder)
-      const zipCandidates = allFiles.filter((f) => f.toLowerCase().endsWith('.zip'))
-      if (zipCandidates.length === 1) {
+      const zipCandidates = allFiles.filter(
+        (f) => f.toLowerCase().endsWith('.zip') && !isExcludedFileOrDir(f)
+      )
+      if (zipCandidates.length >= 1) {
+        // Use the first non-excluded zip file (or exact single zip)
         targetZipPath = path.join(resolvedFolder, zipCandidates[0])
       }
     }
 
-    const unzippedFiles: string[] = []
+    const zipCheckResults: ZipEntryCheck[] = []
+    const unpackedFiles: string[] = []
+    const skippedExistingFiles: string[] = []
+    const zipExtractedFileNames = new Set<string>()
+
     if (targetZipPath && fs.existsSync(targetZipPath)) {
-      console.log(`[extract_rfp:UNZIP] Found zip archive: "${targetZipPath}". Extracting entries...`)
+      console.log(`[extract_rfp:UNZIP] Found zip archive: "${targetZipPath}". Reading entries...`)
       try {
         const zip = new AdmZip(targetZipPath)
         const entries = zip.getEntries()
+
         for (const entry of entries) {
           if (entry.isDirectory) continue
-          const destPath = path.join(resolvedFolder, entry.entryName)
+          const entryName = entry.entryName
+
+          // Check if excluded
+          if (isExcludedFileOrDir(entryName)) {
+            continue
+          }
+
+          const uncompressedSize = entry.header ? entry.header.size : 0
+          zipCheckResults.push({
+            name: entryName,
+            sizeBytes: uncompressedSize,
+          })
+          zipExtractedFileNames.add(path.basename(entryName))
+
+          const destPath = path.join(resolvedFolder, entryName)
           const destDir = path.dirname(destPath)
 
           if (!fs.existsSync(destDir)) {
@@ -170,10 +250,14 @@ export const extractRfpAction: ActionDefinition = {
 
           if (!fs.existsSync(destPath) || overwrite) {
             zip.extractEntryTo(entry, destDir, false, true)
-            unzippedFiles.push(entry.entryName)
+            unpackedFiles.push(entryName)
+          } else {
+            skippedExistingFiles.push(entryName)
           }
         }
-        console.log(`[extract_rfp:UNZIP] Extracted ${unzippedFiles.length} file(s) from zip.`)
+        console.log(
+          `[extract_rfp:UNZIP] Archive check: ${zipCheckResults.length} entries, ${unpackedFiles.length} newly unpacked, ${skippedExistingFiles.length} skipped existing.`
+        )
       } catch (zipErr: any) {
         console.warn(`[extract_rfp:UNZIP:WARN] Error unpacking zip file:`, zipErr.message)
       }
@@ -185,18 +269,54 @@ export const extractRfpAction: ActionDefinition = {
       await fs.promises.mkdir(extractedDir, { recursive: true })
     }
 
-    // 3. Scan directory and extract text from all documents
-    const folderEntries = await fs.promises.readdir(resolvedFolder, { withFileTypes: true })
+    // 3. Determine source file candidates to extract text from
+    // If a zip archive was found, extract ONLY the files that came from the zip + explicit includes.
+    // If no zip was found, scan the folder and exclude any created/temporary files.
+    const candidateFileNames: string[] = []
+
+    if (targetZipPath && zipCheckResults.length > 0) {
+      for (const zc of zipCheckResults) {
+        if (!candidateFileNames.includes(zc.name)) {
+          candidateFileNames.push(zc.name)
+        }
+      }
+      for (const inc of additionalIncludes) {
+        if (!candidateFileNames.includes(inc)) {
+          candidateFileNames.push(inc)
+        }
+      }
+    } else {
+      const folderEntries = await fs.promises.readdir(resolvedFolder, { withFileTypes: true })
+      for (const ent of folderEntries) {
+        if (ent.isDirectory()) continue
+        const fileName = ent.name
+        if (isExcludedFileOrDir(fileName)) continue
+        candidateFileNames.push(fileName)
+      }
+      for (const inc of additionalIncludes) {
+        if (!candidateFileNames.includes(inc) && !isExcludedFileOrDir(inc)) {
+          candidateFileNames.push(inc)
+        }
+      }
+    }
+
+    // 4. Extract text from candidates
     const manifestFiles: ExtractedFileInfo[] = []
     const scannedFilesWithoutText: string[] = []
     let totalPdfPages = 0
 
-    for (const ent of folderEntries) {
-      if (ent.isDirectory()) continue
-      const fileName = ent.name
-      if (fileName.startsWith('.') || fileName.startsWith('_extracted')) continue
+    for (const relFileName of candidateFileNames) {
+      if (isExcludedFileOrDir(relFileName)) continue
 
-      const filePath = path.join(resolvedFolder, fileName)
+      const filePath = path.isAbsolute(relFileName)
+        ? relFileName
+        : path.join(resolvedFolder, relFileName)
+
+      if (!fs.existsSync(filePath)) {
+        continue
+      }
+
+      const fileName = path.basename(filePath)
       const ext = path.extname(fileName).toLowerCase()
       const stats = await fs.promises.stat(filePath)
       const sha256 = computeSha256(filePath)
@@ -250,7 +370,7 @@ export const extractRfpAction: ActionDefinition = {
           formattedText = `-- page 1 --\n[Error reading file: ${txtErr.message}]`
         }
       } else {
-        // Unsupported format for text extraction (images, zips, spreadsheets, etc.)
+        // Unsupported format for text extraction (images, zips, spreadsheets, binaries)
         continue
       }
 
@@ -261,7 +381,7 @@ export const extractRfpAction: ActionDefinition = {
 
       manifestFiles.push({
         name: fileName,
-        relPath: fileName,
+        relPath: relFileName,
         type: ext === '.pdf' ? 'pdf' : ext.startsWith('.doc') ? 'docx' : 'txt',
         pages,
         bytes: stats.size,
@@ -273,7 +393,27 @@ export const extractRfpAction: ActionDefinition = {
       })
     }
 
-    // 4. Generate manifest.json
+    // 5. Clean up stale .txt files in _extracted that are not in the new manifest
+    const currentExtractedTxtNames = new Set(
+      manifestFiles.map((f) => path.basename(f.extractedTextFile))
+    )
+    const staleFilesRemoved: string[] = []
+
+    try {
+      const existingExtractedFiles = await fs.promises.readdir(extractedDir)
+      for (const exFile of existingExtractedFiles) {
+        if (exFile === 'manifest.json' || !exFile.endsWith('.txt')) continue
+        if (!currentExtractedTxtNames.has(exFile)) {
+          const stalePath = path.join(extractedDir, exFile)
+          try {
+            await fs.promises.unlink(stalePath)
+            staleFilesRemoved.push(exFile)
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    // 6. Generate manifest.json
     const manifest: RfpManifest = {
       extractedAt: new Date().toISOString(),
       folder: resolvedFolder,
@@ -288,16 +428,35 @@ export const extractRfpAction: ActionDefinition = {
 
     ctx.refreshExplorer(targetPane)
 
-    // 5. Construct summary message
+    // 7. Construct rich summary message
     const folderName = path.basename(resolvedFolder)
-    let message = `Extracted ${manifestFiles.length} document(s) in "${folderName}" (${totalPdfPages} PDF pages). Text files and manifest saved to "_extracted/".`
-    if (unzippedFiles.length > 0) {
-      message += ` (Unpacked ${unzippedFiles.length} files from archive).`
-    }
-    if (scannedFilesWithoutText.length > 0) {
-      message += `\n⚠️ Warning: ${scannedFilesWithoutText.length} PDF(s) contain no text layer (image-only): ${scannedFilesWithoutText.join(', ')}.`
+    const summaryLines: string[] = [
+      `Extracted ${manifestFiles.length} RFP document(s) in "${folderName}" (${totalPdfPages} PDF pages).`,
+    ]
+
+    if (targetZipPath) {
+      const zipName = path.basename(targetZipPath)
+      const totalZipBytes = zipCheckResults.reduce((sum, z) => sum + z.sizeBytes, 0)
+      summaryLines.push(
+        `📦 Archive Check: "${zipName}" (${zipCheckResults.length} file(s), ${(totalZipBytes / 1024 / 1024).toFixed(2)} MB total)`
+      )
+      summaryLines.push(`- Files unpacked: ${unpackedFiles.length}`)
+      summaryLines.push(`- Files skipped (already existed): ${skippedExistingFiles.length}`)
     }
 
+    if (staleFilesRemoved.length > 0) {
+      summaryLines.push(
+        `- Stale text files removed: ${staleFilesRemoved.length} (${staleFilesRemoved.join(', ')})`
+      )
+    }
+
+    if (scannedFilesWithoutText.length > 0) {
+      summaryLines.push(
+        `⚠️ Scanned PDFs without text layer (${scannedFilesWithoutText.length}): ${scannedFilesWithoutText.join(', ')}`
+      )
+    }
+
+    const message = summaryLines.join('\n')
     ctx.notify(`📦 RFP Extracted: ${manifestFiles.length} files (${totalPdfPages} pages)`)
 
     return {
@@ -310,7 +469,11 @@ export const extractRfpAction: ActionDefinition = {
         manifestPath,
         totalFiles: manifestFiles.length,
         totalPdfPages,
-        unzippedCount: unzippedFiles.length,
+        zipArchive: targetZipPath ? path.basename(targetZipPath) : null,
+        zipCheck: zipCheckResults,
+        unpackedFiles,
+        skippedExistingFiles,
+        staleFilesRemoved,
         scannedWithoutText: scannedFilesWithoutText,
         files: manifestFiles.map((f) => ({
           name: f.name,
@@ -325,3 +488,4 @@ export const extractRfpAction: ActionDefinition = {
     }
   },
 }
+

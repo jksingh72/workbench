@@ -41,42 +41,47 @@ export const batchAction: ActionDefinition = {
     )
 
     const stepLogs: string[] = []
-    const results: ActionResult[] = []
+    const results: Array<ActionResult & { step: string }> = []
     let allSucceeded = true
-    let failedIndex = -1
 
     for (let i = 0; i < actions.length; i++) {
       const act = actions[i]
       const stepNum = i + 1
+      const stepLabel = `${stepNum}/${actions.length}`
       const actType = (act?.action || act?.type || 'unknown').toLowerCase()
       const actTarget = act?.path || act?.folder || act?.outPath || act?.file || act?.query || ''
       const targetStr = actTarget ? ` (${actTarget})` : ''
 
-      console.log(`[batch:STEP ${stepNum}/${actions.length}] Dispatching: "${actType}"${targetStr}`)
+      console.log(`[batch:STEP ${stepLabel}] Dispatching: "${actType}"${targetStr}`)
       const res = await ctx.dispatch(act, targetPane)
-      results.push(res)
+      const stepResult: ActionResult & { step: string } = {
+        ...res,
+        step: stepLabel,
+        action: res.action || actType,
+      }
+      results.push(stepResult)
 
       if (res.success) {
-        stepLogs.push(`[${stepNum}/${actions.length}] ${actType}${targetStr} -> ✅ ${res.message}`)
-        console.log(`[batch:STEP ${stepNum}/${actions.length}] "${actType}" succeeded`)
+        const firstLine = (res.message || 'OK').split('\n')[0]
+        stepLogs.push(`- [Step ${stepLabel}: ${actType}${targetStr}] ✅ ${firstLine}`)
+        console.log(`[batch:STEP ${stepLabel}] "${actType}" succeeded`)
       } else {
         allSucceeded = false
-        failedIndex = stepNum
         const errText = res.error || res.message || 'Failed'
-        stepLogs.push(`[${stepNum}/${actions.length}] ${actType}${targetStr} -> ❌ ${errText}`)
-        console.error(`[batch:FAILED] Step ${stepNum} ("${actType}") failed:`, errText)
+        stepLogs.push(`- [Step ${stepLabel}: ${actType}${targetStr}] ❌ ${errText}`)
+        console.error(`[batch:FAILED] Step ${stepLabel} ("${actType}") failed:`, errText)
 
         if (stopOnFailure) {
-          const summary = `Batch halted at step ${failedIndex}/${actions.length} with failure:\n\n${stepLogs.join('\n')}`
+          const summary = `Batch halted at step ${stepLabel} with failure:\n${stepLogs.join('\n')}`
           return {
             success: false,
             action: 'batch',
             message: summary,
-            error: `Failed at step ${failedIndex}: ${errText}`,
+            error: `Failed at step ${stepLabel}: ${errText}`,
             details: {
               total: actions.length,
               executed: results.length,
-              failedStep: failedIndex,
+              failedStep: stepLabel,
               results,
             },
           }
@@ -85,7 +90,7 @@ export const batchAction: ActionDefinition = {
     }
 
     const successCount = results.filter((r) => r.success).length
-    const overallSummary = `Batch completed (${successCount}/${actions.length} succeeded):\n\n${stepLogs.join('\n')}`
+    const overallSummary = `Batch completed (${successCount}/${actions.length} succeeded):\n${stepLogs.join('\n')}`
 
     return {
       success: allSucceeded,
@@ -100,3 +105,4 @@ export const batchAction: ActionDefinition = {
     }
   },
 }
+

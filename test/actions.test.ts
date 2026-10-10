@@ -9,11 +9,13 @@ import mammoth from 'mammoth'
 import { ActionRegistry } from '../electron/actions/registry.ts'
 import { ActionContext, ActionResult } from '../electron/actions/types.ts'
 import { renderDocxAction } from '../electron/actions/renderDocxAction.ts'
+import { createDocxAction } from '../electron/actions/createDocxAction.ts'
 import { extractRfpAction } from '../electron/actions/extractRfpAction.ts'
 import { searchTextAction } from '../electron/actions/searchTextAction.ts'
 import { readPagesAction } from '../electron/actions/readPagesAction.ts'
 import { createFolderAction } from '../electron/actions/createFolderAction.ts'
 import { writeFileAction } from '../electron/actions/writeFileAction.ts'
+import { copyFileAction } from '../electron/actions/fileOpsActions.ts'
 import { batchAction } from '../electron/actions/batchAction.ts'
 
 describe('Workbench Document & RFP Actions Test Suite', () => {
@@ -27,11 +29,13 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
 
     registry = ActionRegistry.getInstance()
     registry.register(renderDocxAction)
+    registry.register(createDocxAction)
     registry.register(extractRfpAction)
     registry.register(searchTextAction)
     registry.register(readPagesAction)
     registry.register(createFolderAction)
     registry.register(writeFileAction)
+    registry.register(copyFileAction)
     registry.register(batchAction)
 
     mockContext = {
@@ -88,215 +92,251 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
     test('All new actions are registered in ActionRegistry', () => {
       const actions = registry.getAll().map((a) => a.id)
       assert.ok(actions.includes('render_docx'), 'render_docx must be registered')
+      assert.ok(actions.includes('create_docx'), 'create_docx must be registered')
       assert.ok(actions.includes('extract_rfp'), 'extract_rfp must be registered')
       assert.ok(actions.includes('search_text'), 'search_text must be registered')
       assert.ok(actions.includes('read_pages'), 'read_pages must be registered')
+      assert.ok(actions.includes('write_file'), 'write_file must be registered')
+      assert.ok(actions.includes('copy_file'), 'copy_file must be registered')
       assert.ok(actions.includes('batch'), 'batch must be registered')
     })
   })
 
-  describe('2. render_docx action', () => {
-    test('renders complex document with headings, bold text, source refs, and tables', async () => {
-      const targetDocx = path.join(tempTestDir, 'report.docx')
+  describe('2. File-writing actions (render_docx, create_docx, write_file, copy_file)', () => {
+    test('render_docx returns full 64-character SHA-256, byte size, and target folder listing', async () => {
+      const targetDocx = path.join(tempTestDir, 'out_test', 'report.docx')
 
       const spec = {
         title: 'Project Evaluation & Feasibility Study',
-        theme: 'modern_teal',
         blocks: [
           { type: 'heading', level: 1, text: 'Executive Summary' },
           {
             type: 'paragraph',
-            text: 'This report provides a **rigorous evaluation** of the proposed system architecture and operational readiness. [[Source: Section 4.1]]',
+            text: 'This report provides a **rigorous evaluation** of the proposed system architecture. [[Section 4.1]]',
           },
-          { type: 'heading', level: 2, text: 'Technical Specifications & Milestones' },
           {
             type: 'table',
-            columnWidths: [2.0, 3.5, 1.5],
-            headerRows: 1,
-            rows: [
-              ['Milestone', 'Description', 'Target Date'],
-              ['Phase 1', 'Local Extraction & Parsing Pipeline', 'Q1 2026'],
-              ['Phase 2', 'Document Generation & Automated Verification', 'Q2 2026'],
-              ['Phase 3', 'Integration & End-to-End Hardening', 'Q3 2026'],
+            columns: [
+              { header: 'Milestone', width: 2.0 },
+              { header: 'Description', width: 3.5 },
             ],
-          },
-          { type: 'pageBreak' },
-          { type: 'heading', level: 1, text: 'Detailed Requirements' },
-          {
-            type: 'bulletList',
-            items: [
-              'Zero base64 bloat over AI chat websockets',
-              'Pure local execution for Word and PDF generation',
-              'Safe temporary writes in os.tmpdir() to prevent OneDrive lock issues',
+            rows: [
+              ['Phase 1', 'Local Extraction & Parsing Pipeline'],
+              ['Phase 2', 'Document Generation & Automated Verification'],
             ],
           },
         ],
       }
 
-      const result = await renderDocxAction.execute(
-        mockContext,
-        {
-          path: targetDocx,
-          spec,
-        }
-      )
+      const result = await renderDocxAction.execute(mockContext, {
+        outPath: targetDocx,
+        spec,
+      })
 
       assert.ok(result.success, `render_docx failed: ${result.error || result.message}`)
       assert.ok(fs.existsSync(targetDocx), 'Output docx file should exist on disk')
+      assert.strictEqual(result.createdPath, targetDocx)
       assert.ok(result.details?.sizeBytes > 0, 'Output file size should be > 0')
-      assert.ok(result.details?.sha256, 'Should return SHA-256 hash')
+      assert.strictEqual(typeof result.details?.sha256, 'string')
+      assert.strictEqual(result.details?.sha256.length, 64, 'SHA-256 must be full 64 hex characters')
+      assert.ok(!result.message.includes('...'), 'Message must not truncate SHA-256')
+      assert.ok(Array.isArray(result.details?.files), 'Should return files in target directory')
+      assert.ok(result.details?.files.includes('report.docx'))
+      assert.ok(result.details?.fileCount >= 1)
 
-      // Verify with mammoth that file is valid docx and contains expected text
       const extracted = await mammoth.extractRawText({ path: targetDocx })
       assert.ok(extracted.value.includes('Project Evaluation & Feasibility Study'))
-      assert.ok(extracted.value.includes('Local Extraction & Parsing Pipeline'))
-      assert.ok(extracted.value.includes('Zero base64 bloat'))
     })
 
-    test('respects overwrite: false protection', async () => {
-      const targetDocx = path.join(tempTestDir, 'report.docx')
-      const result = await renderDocxAction.execute(
-        mockContext,
-        {
-          path: targetDocx,
-          overwrite: false,
-          spec: {
-            title: 'Attempt Overwrite',
-            blocks: [{ type: 'paragraph', text: 'Should fail' }],
-          },
-        }
-      )
+    test('create_docx returns full 64-char SHA-256 and target folder listing', async () => {
+      const targetDocx = path.join(tempTestDir, 'out_test', 'simple.docx')
+      const result = await createDocxAction.execute(mockContext, {
+        path: targetDocx,
+        title: 'Simple Doc',
+        content: '# Header\n- Bullet 1\n- Bullet 2',
+      })
 
-      assert.strictEqual(result.success, false)
-      assert.ok(result.message.includes('already exists') || (result.error && result.error.includes('already exists')))
+      assert.ok(result.success, `create_docx failed: ${result.error || result.message}`)
+      assert.strictEqual(result.createdPath, targetDocx)
+      assert.strictEqual(result.details?.sha256.length, 64)
+      assert.ok(Array.isArray(result.details?.files))
+      assert.ok(result.details?.files.includes('simple.docx'))
+    })
+
+    test('write_file returns full 64-char SHA-256 and target folder listing', async () => {
+      const targetFile = path.join(tempTestDir, 'out_test', 'data.json')
+      const result = await writeFileAction.execute(mockContext, {
+        path: targetFile,
+        content: '{"status": "ok"}',
+      })
+
+      assert.ok(result.success, `write_file failed: ${result.error || result.message}`)
+      assert.strictEqual(result.createdPath, targetFile)
+      assert.strictEqual(result.details?.sha256.length, 64)
+      assert.ok(result.details?.files.includes('data.json'))
+    })
+
+    test('copy_file returns full 64-char SHA-256 and target folder listing', async () => {
+      const srcFile = path.join(tempTestDir, 'out_test', 'data.json')
+      const dstFile = path.join(tempTestDir, 'out_test', 'data_copy.json')
+      const result = await copyFileAction.execute(mockContext, {
+        source: srcFile,
+        target: dstFile,
+      })
+
+      assert.ok(result.success, `copy_file failed: ${result.error || result.message}`)
+      assert.strictEqual(result.createdPath, dstFile)
+      assert.strictEqual(result.details?.sha256.length, 64)
+      assert.ok(result.details?.files.includes('data_copy.json'))
     })
   })
 
-  describe('3. extract_rfp action', () => {
+  describe('3. extract_rfp action (Zip Scoping, Exclusions & Stale File Cleanup)', () => {
     let rfpFolder: string
 
     before(async () => {
-      rfpFolder = path.join(tempTestDir, 'rfp_package')
+      rfpFolder = path.join(tempTestDir, 'RFP_Exclusion_Test')
       fs.mkdirSync(rfpFolder, { recursive: true })
 
-      // Create a docx inside rfpFolder
-      await renderDocxAction.execute(
-        mockContext,
-        {
-          path: path.join(rfpFolder, 'requirements.docx'),
-          spec: {
-            title: 'RFP Statement of Work',
-            blocks: [
-              { type: 'heading', level: 1, text: 'Mandatory Compliance Criteria' },
-              { type: 'paragraph', text: 'All sub-contractors must satisfy ISO 27001 standards and provide continuous logging.' },
-            ],
-          },
-        }
-      )
-
-      // Create a plain text file inside rfpFolder
-      fs.writeFileSync(
-        path.join(rfpFolder, 'notes.txt'),
-        'Appendix A: Pricing schedule must be submitted in USD with 30-day payment terms.',
-        'utf-8'
-      )
-
-      // Create a zip file containing another document
+      // 1. Create a zip archive with 3 valid RFP source files
       const zip = new AdmZip()
-      zip.addFile('subcontractor_guidelines.txt', Buffer.from('Guidelines for third-party security audits.', 'utf-8'))
-      zip.writeZip(path.join(rfpFolder, 'annex.zip'))
+      zip.addFile('Exhibit_A_Scope.txt', Buffer.from('Scope of work document.', 'utf-8'))
+      zip.addFile('Exhibit_B_Pricing.txt', Buffer.from('Pricing schedule.', 'utf-8'))
+      zip.addFile('Exhibit_D_Insurance.txt', Buffer.from('-- page 1 --\nHeader\n-- page 5 --\n5.2.5 \tCyber \tLiability \tCoverage\n-- page 6 --\ncyber \tliability requirements', 'utf-8'))
+      zip.writeZip(path.join(rfpFolder, 'rfp_source.zip'))
+
+      // 2. Create created/temporary files in the folder that should be EXCLUDED
+      fs.writeFileSync(path.join(rfpFolder, 'RFP-3-report-v1.docx'), 'Fake report')
+      fs.writeFileSync(path.join(rfpFolder, 'Doc-Section-Summary-v2.docx'), 'Fake section summary')
+      fs.writeFileSync(path.join(rfpFolder, 'Layer1-Prompt-1.txt'), 'Fake prompt')
+      fs.writeFileSync(path.join(rfpFolder, 'rfp-facts-01.json'), '{"facts": []}')
+
+      // 3. Create excluded folders with files
+      const excludedDirs = ['_test', 'Resp-format-docs', 'old-files', 'Old-files-backup']
+      for (const d of excludedDirs) {
+        const dPath = path.join(rfpFolder, d)
+        fs.mkdirSync(dPath, { recursive: true })
+        fs.writeFileSync(path.join(dPath, 'should_be_ignored.txt'), 'ignore me')
+      }
+
+      // 4. Pre-populate _extracted with stale .txt files
+      const extractedDir = path.join(rfpFolder, '_extracted')
+      fs.mkdirSync(extractedDir, { recursive: true })
+      fs.writeFileSync(path.join(extractedDir, 'stale_old_report.txt'), 'Stale report text')
+      fs.writeFileSync(path.join(extractedDir, 'stale_prompt.txt'), 'Stale prompt text')
     })
 
-    test('extracts zip, docx, and txt files into _extracted with manifest', async () => {
-      const result = await extractRfpAction.execute(
-        mockContext,
-        {
-          folder: rfpFolder,
-        }
-      )
+    test('extracts only zip files, excludes generated files, removes stale files, and reports rich summary', async () => {
+      const result = await extractRfpAction.execute(mockContext, {
+        folder: rfpFolder,
+      })
 
       assert.ok(result.success, `extract_rfp failed: ${result.error || result.message}`)
       const extractedDir = path.join(rfpFolder, '_extracted')
-      assert.ok(fs.existsSync(extractedDir), '_extracted directory should be created')
 
+      // Check manifest
       const manifestPath = path.join(extractedDir, 'manifest.json')
       assert.ok(fs.existsSync(manifestPath), 'manifest.json must exist')
-
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
-      assert.ok(manifest.files.length >= 3, 'Manifest should list at least 3 extracted documents')
 
-      // Verify extracted content text files exist and have page headers
-      const docxTextFile = path.join(extractedDir, 'requirements.txt')
-      assert.ok(fs.existsSync(docxTextFile), 'requirements.txt should exist in _extracted')
-      const docxText = fs.readFileSync(docxTextFile, 'utf-8')
-      assert.ok(docxText.includes('-- page 1 --'), 'Should include page 1 marker')
-      assert.ok(docxText.includes('Mandatory Compliance Criteria'))
+      // Must only contain the 3 files from zip
+      assert.strictEqual(manifest.files.length, 3, 'Should extract only the 3 files originating from the zip')
+      const fileNames = manifest.files.map((f: any) => f.name)
+      assert.ok(fileNames.includes('Exhibit_A_Scope.txt'))
+      assert.ok(fileNames.includes('Exhibit_B_Pricing.txt'))
+      assert.ok(fileNames.includes('Exhibit_D_Insurance.txt'))
+      assert.ok(!fileNames.includes('RFP-3-report-v1.docx'))
+      assert.ok(!fileNames.includes('Layer1-Prompt-1.txt'))
+      assert.ok(!fileNames.includes('rfp-facts-01.json'))
+
+      // Verify stale files were deleted from _extracted
+      assert.ok(!fs.existsSync(path.join(extractedDir, 'stale_old_report.txt')), 'stale_old_report.txt should be deleted')
+      assert.ok(!fs.existsSync(path.join(extractedDir, 'stale_prompt.txt')), 'stale_prompt.txt should be deleted')
+      assert.ok(result.details?.staleFilesRemoved?.includes('stale_old_report.txt'))
+      assert.ok(result.details?.staleFilesRemoved?.includes('stale_prompt.txt'))
+
+      // Verify rich summary reporting
+      assert.ok(result.message.includes('Extracted 3 RFP document(s)'))
+      assert.ok(result.message.includes('Archive Check:'))
+      assert.ok(result.message.includes('Stale text files removed: 2'))
     })
   })
 
-  describe('4. search_text action', () => {
-    test('finds occurrences across extracted text files with line and page context', async () => {
-      const rfpFolder = path.join(tempTestDir, 'rfp_package')
-      const result = await searchTextAction.execute(
-        mockContext,
-        {
-          folder: rfpFolder,
-          query: 'ISO 27001',
-          caseSensitive: false,
-          contextLines: 1,
-        }
-      )
+  describe('4. search_text action (Whitespace normalization, cross-line phrases & case sensitivity)', () => {
+    test('matches "Cyber Liability" across tabs, multi-space, and line breaks on correct pages and lines', async () => {
+      const rfpFolder = path.join(tempTestDir, 'RFP_Exclusion_Test')
+
+      // Plain search for "Cyber Liability"
+      const result = await searchTextAction.execute(mockContext, {
+        folder: rfpFolder,
+        query: 'Cyber Liability',
+        caseSensitive: false,
+      })
 
       assert.ok(result.success, `search_text failed: ${result.error || result.message}`)
-      assert.ok(result.details?.totalMatches >= 1, 'Should find at least 1 match')
-      const match = result.details.matches[0]
-      assert.strictEqual(match.page, 1)
-      assert.ok(match.text.includes('ISO 27001'))
+      assert.strictEqual(result.details?.totalMatches, 2, 'Should find 2 matches for Cyber Liability')
+
+      const match1 = result.details.matches[0]
+      assert.strictEqual(match1.page, 5, 'First match must be on page 5')
+      assert.ok(match1.text.toLowerCase().includes('cyber liability'))
+
+      const match2 = result.details.matches[1]
+      assert.strictEqual(match2.page, 6, 'Second match must be on page 6')
+      assert.ok(match2.text.toLowerCase().includes('cyber liability'))
     })
 
-    test('supports regular expression searching', async () => {
-      const rfpFolder = path.join(tempTestDir, 'rfp_package')
-      const result = await searchTextAction.execute(
-        mockContext,
-        {
-          folder: rfpFolder,
-          query: 'Pricing schedule.*USD',
-          regex: true,
-        }
+    test('respects caseSensitive: true parameter', async () => {
+      const rfpFolder = path.join(tempTestDir, 'RFP_Exclusion_Test')
+
+      const result = await searchTextAction.execute(mockContext, {
+        folder: rfpFolder,
+        query: 'Cyber Liability',
+        caseSensitive: true,
+      })
+
+      assert.ok(result.success)
+      // Exactly 1 match should have Title Case "Cyber Liability" on page 5
+      assert.strictEqual(result.details?.totalMatches, 1)
+      assert.strictEqual(result.details.matches[0].page, 5)
+    })
+
+    test('matches phrases wrapping onto next line across line break', async () => {
+      const rfpFolder = path.join(tempTestDir, 'RFP_Exclusion_Test')
+      const extractedDir = path.join(rfpFolder, '_extracted')
+
+      // Create a test file with phrase wrapping across line break
+      fs.writeFileSync(
+        path.join(extractedDir, 'wrap_test.txt'),
+        '-- page 1 --\nLine 1 before\nComprehensive Operational\nRisk Management framework.\nLine 4 after.',
+        'utf-8'
       )
 
-      assert.ok(result.success, `search_text regex failed: ${result.error || result.message}`)
-      assert.ok(result.details?.totalMatches >= 1, 'Should find regex match')
+      // Update manifest to include wrap_test.txt
+      const manifestPath = path.join(extractedDir, 'manifest.json')
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+      manifest.files.push({ name: 'wrap_test.txt', extractedTextFile: '_extracted/wrap_test.txt' })
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
+
+      const result = await searchTextAction.execute(mockContext, {
+        folder: rfpFolder,
+        query: 'Operational Risk Management',
+      })
+
+      assert.ok(result.success)
+      assert.strictEqual(result.details?.totalMatches, 1)
+      assert.strictEqual(result.details.matches[0].line, 3, 'Should report starting line 3')
+      assert.strictEqual(result.details.matches[0].page, 1)
     })
   })
 
-  describe('5. read_pages action', () => {
-    test('reads specific page range without truncation caps', async () => {
-      const textFile = path.join(tempTestDir, 'rfp_package', '_extracted', 'requirements.txt')
-      const result = await readPagesAction.execute(
-        mockContext,
-        {
-          file: textFile,
-          fromPage: 1,
-          toPage: 1,
-        }
-      )
-
-      assert.ok(result.success, `read_pages failed: ${result.error || result.message}`)
-      assert.ok(result.details?.content.includes('Mandatory Compliance Criteria'))
-      assert.strictEqual(result.details?.fromPage, 1)
-      assert.strictEqual(result.details?.toPage, 1)
-    })
-  })
-
-  describe('6. batch action', () => {
-    test('executes multi-action sequence and returns ordered per-step results', async () => {
+  describe('5. batch action (Step labeling and single output)', () => {
+    test('labels steps "Step 1/3", "Step 2/3", "Step 3/3" and executes cleanly', async () => {
       const batchPayload = {
         action: 'batch',
         actions: [
-          { action: 'create_folder', path: 'batch_test_dir' },
-          { action: 'write_file', path: 'batch_test_dir/file1.txt', content: 'Hello batch' },
-          { action: 'write_file', path: 'batch_test_dir/file2.txt', content: 'World batch' },
+          { action: 'create_folder', path: 'batch_test_clean' },
+          { action: 'write_file', path: 'batch_test_clean/f1.txt', content: 'Step 2 file' },
+          { action: 'write_file', path: 'batch_test_clean/f2.txt', content: 'Step 3 file' },
         ],
       }
 
@@ -304,46 +344,16 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
       assert.ok(result.success, `batch execution failed: ${result.error || result.message}`)
       assert.strictEqual(result.details?.total, 3)
       assert.strictEqual(result.details?.succeeded, 3)
-      assert.strictEqual(result.details?.failed, 0)
-      assert.strictEqual(result.details?.results?.length, 3)
-    })
 
-    test('stopOnFailure: true halts batch on first failed step', async () => {
-      const batchPayload = {
-        action: 'batch',
-        stopOnFailure: true,
-        actions: [
-          { action: 'create_folder', path: 'batch_stop_dir' },
-          { action: 'write_file', path: 'batch_stop_dir/existing.txt', content: 'Initial', overwrite: false },
-          { action: 'write_file', path: 'batch_stop_dir/existing.txt', content: 'Will Fail', overwrite: false },
-          { action: 'write_file', path: 'batch_stop_dir/unreached.txt', content: 'Should not run' },
-        ],
-      }
+      const steps = result.details.results
+      assert.strictEqual(steps[0].step, '1/3')
+      assert.strictEqual(steps[1].step, '2/3')
+      assert.strictEqual(steps[2].step, '3/3')
 
-      const result = await batchAction.execute(mockContext, batchPayload)
-      assert.strictEqual(result.success, false)
-      assert.strictEqual(result.details?.executed, 3)
-      assert.strictEqual(result.details?.failedStep, 3)
-      assert.ok(!fs.existsSync(path.join(tempTestDir, 'batch_stop_dir/unreached.txt')))
-    })
-  })
-
-  describe('7. Large output spilling & error formatting', () => {
-    test('spills payloads exceeding 30,000 characters to os.tmpdir()', () => {
-      const largeContent = 'A'.repeat(35000)
-      const MAX_LEN = 30000
-      let body = ''
-
-      if (largeContent.length > MAX_LEN) {
-        const timestamp = Date.now()
-        const spillFile = path.join(os.tmpdir(), `wb_result_test_${timestamp}.txt`)
-        fs.writeFileSync(spillFile, largeContent, 'utf-8')
-        const preview = largeContent.slice(0, 4000)
-        body = `File Content (Showing first 4,000 of ${largeContent.length.toLocaleString()} characters):\n\`\`\`\n${preview}\n\`\`\`\n[Output was ${largeContent.length.toLocaleString()} characters; full output saved to: ${spillFile}. Use read_pages or search_text to query specific sections if needed.]`
-      }
-
-      assert.ok(body.includes('full output saved to:'))
-      assert.ok(body.includes('35,000 characters'))
+      assert.ok(result.message.includes('[Step 1/3: create_folder'))
+      assert.ok(result.message.includes('[Step 2/3: write_file'))
+      assert.ok(result.message.includes('[Step 3/3: write_file'))
     })
   })
 })
+

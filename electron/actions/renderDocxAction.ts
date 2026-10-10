@@ -675,10 +675,12 @@ export const renderDocxAction: ActionDefinition = {
       ctx.refreshExplorer(targetPane)
 
       // Get target folder listing
-      let folderFiles: string[] = []
+      let folders: string[] = []
+      let files: string[] = []
       try {
         const entries = await fs.promises.readdir(outDir, { withFileTypes: true })
-        folderFiles = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
+        folders = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
+        files = entries.filter((e) => !e.isDirectory()).map((e) => e.name).sort()
       } catch (_) {}
 
       const fileName = path.basename(resolvedOutPath)
@@ -689,14 +691,17 @@ export const renderDocxAction: ActionDefinition = {
         success: true,
         action: 'render_docx',
         createdPath: resolvedOutPath,
-        message: `Successfully generated Word document "${fileName}" (${stats.size.toLocaleString()} bytes, SHA-256: ${sha256.substring(0, 12)}...)`,
+        message: `Successfully generated Word document "${fileName}" (${stats.size.toLocaleString()} bytes, SHA-256: ${sha256})`,
         details: {
           filePath: resolvedOutPath,
           fileName,
           sizeBytes: stats.size,
           sha256,
           tableCount: spec.blocks.filter((b) => b.type === 'table').length,
-          folderFiles,
+          folderCount: folders.length,
+          fileCount: files.length,
+          folders,
+          files,
         },
       }
     } finally {

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
 
 export const writeFileAction: ActionDefinition = {
@@ -64,6 +65,19 @@ export const writeFileAction: ActionDefinition = {
     await fs.promises.writeFile(targetFile, content, 'utf-8')
     console.log(`[write_file:STEP 4] Successfully wrote ${content.length} characters to: "${targetFile}"`)
 
+    const stats = await fs.promises.stat(targetFile)
+    const fileBuf = await fs.promises.readFile(targetFile)
+    const sha256 = crypto.createHash('sha256').update(fileBuf).digest('hex')
+
+    // Get target folder listing
+    let folders: string[] = []
+    let files: string[] = []
+    try {
+      const entries = await fs.promises.readdir(parentDir, { withFileTypes: true })
+      folders = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
+      files = entries.filter((e) => !e.isDirectory()).map((e) => e.name).sort()
+    } catch (_) {}
+
     const displayFile = path.basename(targetFile) || fileTarget
     ctx.notify(`📄 Created file: ${displayFile}`)
     ctx.refreshExplorer(targetPane)
@@ -76,8 +90,17 @@ export const writeFileAction: ActionDefinition = {
     return {
       success: true,
       action: 'write_file',
-      message: `Created file "${displayFile}"`,
+      message: `Created file "${displayFile}" (${stats.size.toLocaleString()} bytes, SHA-256: ${sha256})`,
       createdPath: targetFile,
+      details: {
+        filePath: targetFile,
+        sizeBytes: stats.size,
+        sha256,
+        folderCount: folders.length,
+        fileCount: files.length,
+        folders,
+        files,
+      },
     }
   },
 }

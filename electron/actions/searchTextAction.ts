@@ -14,7 +14,7 @@ export const searchTextAction: ActionDefinition = {
   id: 'search_text',
   aliases: ['grep_rfp', 'find_in_rfp', 'search_rfp', 'query_extracted_text'],
   description:
-    'Searches across all extracted RFP documents in a folder (`_extracted/*.txt`). Returns precise matching hits with source file name, page number, line number, and surrounding context lines.',
+    'Searches across all extracted RFP documents in a folder (`_extracted/*.txt`). Normalizes whitespace across lines, tracks exact page/line numbers, and returns high-signal context hits.',
   parameters: {
     folder: {
       type: 'string',
@@ -25,6 +25,12 @@ export const searchTextAction: ActionDefinition = {
       type: 'string',
       required: true,
       description: 'Search string or regular expression to search for.',
+    },
+    caseSensitive: {
+      type: 'boolean',
+      required: false,
+      description: 'Whether search should be case-sensitive (default: false).',
+      default: false,
     },
     regex: {
       type: 'boolean',
@@ -48,7 +54,8 @@ export const searchTextAction: ActionDefinition = {
   example: {
     action: 'search_text',
     folder: 'RFP-2',
-    query: 'Reliability Status',
+    query: 'Cyber Liability',
+    caseSensitive: false,
     contextLines: 2,
     maxHits: 20,
   },
@@ -56,6 +63,7 @@ export const searchTextAction: ActionDefinition = {
     const params = payload.params || {}
     const folderRaw = params.folder ?? payload.folder ?? params.path ?? payload.path
     const query = (params.query ?? payload.query ?? '').trim()
+    const caseSensitive = Boolean(params.caseSensitive ?? payload.caseSensitive ?? false)
     const isRegex = Boolean(params.regex ?? payload.regex ?? false)
     const contextLines = Number(params.contextLines ?? payload.contextLines ?? 2)
     const maxHits = Number(params.maxHits ?? payload.maxHits ?? 50)
@@ -76,57 +84,143 @@ export const searchTextAction: ActionDefinition = {
       )
     }
 
-    let searchPattern: RegExp
-    if (isRegex) {
-      searchPattern = new RegExp(query, 'i')
-    } else {
-      // Escape regex special chars for literal search
-      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      searchPattern = new RegExp(escaped, 'i')
+    // Read manifest.json to only search valid extracted RFP files
+    const manifestPath = path.join(extractedDir, 'manifest.json')
+    let allowedFileNames: Set<string> | null = null
+
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifestRaw = await fs.promises.readFile(manifestPath, 'utf8')
+        const manifest = JSON.parse(manifestRaw)
+        if (Array.isArray(manifest.files)) {
+          allowedFileNames = new Set(
+            manifest.files.map((f: any) => path.basename(f.extractedTextFile || f.name))
+          )
+        }
+      } catch (_) {}
     }
 
     const files = await fs.promises.readdir(extractedDir)
-    const txtFiles = files.filter((f) => f.endsWith('.txt') && f !== 'manifest.json')
+    const txtFiles = files.filter((f) => {
+      if (!f.endsWith('.txt') || f === 'manifest.json') return false
+      if (allowedFileNames && !allowedFileNames.has(f)) return false
+      return true
+    })
+
+    // Build search regex pattern with whitespace normalization
+    let searchPattern: RegExp
+    if (isRegex) {
+      searchPattern = new RegExp(query, caseSensitive ? 'g' : 'gi')
+    } else {
+      // Normalize whitespace runs in query to single spaces
+      const normalizedQuery = query.replace(/\s+/g, ' ').trim()
+      const escapedWords = normalizedQuery.split(' ').map((w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      // \s+ matches spaces, tabs, and newlines across line breaks
+      const patternStr = escapedWords.join('\\s+')
+      searchPattern = new RegExp(patternStr, caseSensitive ? 'g' : 'gi')
+    }
+
     const hits: SearchHit[] = []
 
     for (const txtFile of txtFiles) {
       if (hits.length >= maxHits) break
 
       const fullPath = path.join(extractedDir, txtFile)
-      const content = await fs.promises.readFile(fullPath, 'utf8')
-      const lines = content.split('\n')
+      const rawContent = await fs.promises.readFile(fullPath, 'utf8')
+      const lines = rawContent.split(/\r?\n/)
 
+      // Track 1-based page and line offsets exactly against rawContent
+      const lineOffsets: number[] = [0]
+      const linePageMap: number[] = []
       let currentPage = 1
-      // Derive original file name (strip trailing .txt)
-      const originalDocName = txtFile.endsWith('.txt') ? txtFile.slice(0, -4) : txtFile
 
+      let curIdx = 0
       for (let i = 0; i < lines.length; i++) {
-        if (hits.length >= maxHits) break
-
         const line = lines[i]
         const pageMarkerMatch = line.match(/^--\s*page\s+(\d+)\s*--/i)
         if (pageMarkerMatch) {
           currentPage = parseInt(pageMarkerMatch[1], 10)
+        }
+        linePageMap.push(currentPage)
+
+        curIdx += line.length
+        if (curIdx < rawContent.length && rawContent[curIdx] === '\r') {
+          curIdx++
+        }
+        if (curIdx < rawContent.length && rawContent[curIdx] === '\n') {
+          curIdx++
+        }
+        if (i < lines.length - 1) {
+          lineOffsets.push(curIdx)
+        }
+      }
+
+      // Helper to map char index to line index (0-based)
+      const findLineIndex = (charIndex: number): number => {
+        let low = 0
+        let high = lineOffsets.length - 1
+        let result = 0
+        while (low <= high) {
+          const mid = (low + high) >> 1
+          if (lineOffsets[mid] <= charIndex) {
+            result = mid
+            low = mid + 1
+          } else {
+            high = mid - 1
+          }
+        }
+        return result
+      }
+
+      // Execute search across full document text
+      let match: RegExpExecArray | null = null
+      searchPattern.lastIndex = 0
+
+      while ((match = searchPattern.exec(rawContent)) !== null) {
+        if (hits.length >= maxHits) break
+
+        const matchStartChar = match.index
+        const matchEndChar = matchStartChar + match[0].length
+        const startLineIdx = findLineIndex(matchStartChar)
+        const endLineIdx = findLineIndex(Math.max(matchStartChar, matchEndChar - 1))
+
+        const matchPage = linePageMap[startLineIdx] || 1
+        const matchLineNum = startLineIdx + 1
+
+        // Skip hit if the match is strictly within a page marker comment
+        if (lines[startLineIdx] && /^--\s*page\s+\d+\s*--/i.test(lines[startLineIdx].trim())) {
+          if (searchPattern.lastIndex === match.index) searchPattern.lastIndex++
           continue
         }
 
-        if (searchPattern.test(line)) {
-          const start = Math.max(0, i - contextLines)
-          const end = Math.min(lines.length - 1, i + contextLines)
-          const contextSnippetLines: string[] = []
+        // Build context snippet
+        const contextStart = Math.max(0, startLineIdx - contextLines)
+        const contextEnd = Math.min(lines.length - 1, endLineIdx + contextLines)
+        const contextSnippetLines: string[] = []
 
-          for (let c = start; c <= end; c++) {
-            const prefix = c === i ? '>> ' : '   '
-            contextSnippetLines.push(`${prefix}${lines[c]}`)
-          }
+        for (let c = contextStart; c <= contextEnd; c++) {
+          const isMatchLine = c >= startLineIdx && c <= endLineIdx
+          const prefix = isMatchLine ? '>> ' : '   '
+          contextSnippetLines.push(`${prefix}${lines[c]}`)
+        }
 
-          hits.push({
-            fileName: originalDocName,
-            page: currentPage,
-            lineNumber: i + 1,
-            matchText: line.trim(),
-            context: contextSnippetLines.join('\n'),
-          })
+        const originalDocName = txtFile.endsWith('.txt') ? txtFile.slice(0, -4) : txtFile
+        const snippetText = lines
+          .slice(startLineIdx, endLineIdx + 1)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+
+        hits.push({
+          fileName: originalDocName,
+          page: matchPage,
+          lineNumber: matchLineNum,
+          matchText: snippetText,
+          context: contextSnippetLines.join('\n'),
+        })
+
+        if (searchPattern.lastIndex === match.index) {
+          searchPattern.lastIndex++
         }
       }
     }
@@ -139,7 +233,10 @@ export const searchTextAction: ActionDefinition = {
         details: {
           query,
           hitsCount: 0,
+          totalMatches: 0,
           searchedFilesCount: txtFiles.length,
+          hits: [],
+          matches: [],
         },
       }
     }

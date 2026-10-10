@@ -303,6 +303,16 @@ export const createDocxAction: ActionDefinition = {
     ctx.notify(`📝 Created: ${path.basename(targetPath)}`)
     ctx.refreshExplorer(targetPane)
 
+    // Get target folder listing
+    const targetDir = path.dirname(targetPath)
+    let folders: string[] = []
+    let files: string[] = []
+    try {
+      const entries = await fs.promises.readdir(targetDir, { withFileTypes: true })
+      folders = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
+      files = entries.filter((e) => !e.isDirectory()).map((e) => e.name).sort()
+    } catch (_) {}
+
     if (open) {
       console.log(`[create_docx:STEP 6] Opening created DOCX in tab: "${targetPath}"`)
       ctx.openInTab(targetPath)
@@ -311,12 +321,16 @@ export const createDocxAction: ActionDefinition = {
     return {
       success: true,
       action: 'create_docx',
-      message: `Created ${relPath} (${zip.length} bytes, SHA-256: ${sha256.substring(0, 12)}...)`,
+      message: `Created ${relPath} (${zip.length.toLocaleString()} bytes, SHA-256: ${sha256})`,
       createdPath: targetPath,
       details: {
         filePath: targetPath,
         sizeBytes: zip.length,
         sha256,
+        folderCount: folders.length,
+        fileCount: files.length,
+        folders,
+        files,
       },
     }
   }

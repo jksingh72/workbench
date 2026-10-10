@@ -54,6 +54,8 @@ export const moveFileAction: ActionDefinition = {
   },
 }
 
+import crypto from 'node:crypto'
+
 export const copyFileAction: ActionDefinition = {
   id: 'copy_file',
   aliases: ['cp'],
@@ -93,15 +95,41 @@ export const copyFileAction: ActionDefinition = {
     console.log(`[copy_file:STEP 4] Executing recursive copy operation...`)
     await fs.promises.cp(srcPath, dstPath, { recursive: true })
 
+    const stats = await fs.promises.stat(dstPath)
+    let sha256 = ''
+    if (!stats.isDirectory()) {
+      const fileBuf = await fs.promises.readFile(dstPath)
+      sha256 = crypto.createHash('sha256').update(fileBuf).digest('hex')
+    }
+
+    const targetDir = stats.isDirectory() ? dstPath : path.dirname(dstPath)
+    let folders: string[] = []
+    let files: string[] = []
+    try {
+      const entries = await fs.promises.readdir(targetDir, { withFileTypes: true })
+      folders = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
+      files = entries.filter((e) => !e.isDirectory()).map((e) => e.name).sort()
+    } catch (_) {}
+
     console.log(`[copy_file:STEP 5] Copy complete. Refreshing explorer...`)
     ctx.notify(`📋 Copied "${path.basename(srcPath)}" -> "${path.basename(dstPath)}"`)
     ctx.refreshExplorer(targetPane)
 
+    const shaSuffix = sha256 ? `, SHA-256: ${sha256}` : ''
     return {
       success: true,
       action: 'copy_file',
-      message: `Copied "${source}" to "${target}"`,
+      message: `Copied "${source}" to "${target}" (${stats.size.toLocaleString()} bytes${shaSuffix})`,
       createdPath: dstPath,
+      details: {
+        filePath: dstPath,
+        sizeBytes: stats.size,
+        sha256,
+        folderCount: folders.length,
+        fileCount: files.length,
+        folders,
+        files,
+      },
     }
   },
 }

@@ -1641,59 +1641,48 @@ export class AIViewHandler {
         body += `- Files (${files.length}): ${shownFiles || 'none'}`
       }
 
-      // Batch step details
+      // Batch execution: format each step once and include any step-level output
       if (Array.isArray(result.details?.results)) {
-        body += `\nBatch Step Results (${result.details.results.length} total, ${result.details.succeeded ?? 0} succeeded, ${result.details.failed ?? 0} failed):`
         for (const step of result.details.results) {
-          const statusIcon = step.success ? '✅' : '❌'
-          body += `\n- [Step ${step.step}: ${step.action}] ${statusIcon} ${step.message || (step.success ? 'OK' : 'Failed')}`
-          if (step.createdPath) {
-            body += ` (Target: ${step.createdPath})`
-          }
-          if (step.error) {
-            body += ` (Error: ${step.error})`
-          }
-          if (step.details?.matches && Array.isArray(step.details.matches)) {
-            body += ` (${step.details.matches.length} matches)`
-          }
+          const stepLabel = step.step || '1/1'
           if (step.details?.content) {
-            body += handleLargeText(String(step.details.content), `Step ${step.step} Content`)
+            body += handleLargeText(String(step.details.content), `Step ${stepLabel} Content`)
           }
           if (step.details?.stdout) {
-            body += handleLargeText(String(step.details.stdout), `Step ${step.step} Output`)
+            body += handleLargeText(String(step.details.stdout), `Step ${stepLabel} Output`)
           }
         }
-      }
-
-      // Extracted RFP files
-      if (Array.isArray(result.details?.extractedFiles)) {
-        body += `\nExtracted Files (${result.details.extractedFiles.length}):`
-        for (const ef of result.details.extractedFiles.slice(0, 30)) {
-          body += `\n- ${ef.originalFile} (${ef.pageCount || 1} pages${ef.isScanned ? ', ⚠️ SCANNED/NO OCR' : ''}) -> ${ef.extractedTextFile}`
+      } else {
+        // Extracted RFP files
+        if (Array.isArray(result.details?.extractedFiles)) {
+          body += `\nExtracted Files (${result.details.extractedFiles.length}):`
+          for (const ef of result.details.extractedFiles.slice(0, 30)) {
+            body += `\n- ${ef.originalFile} (${ef.pageCount || 1} pages${ef.isScanned ? ', ⚠️ SCANNED/NO OCR' : ''}) -> ${ef.extractedTextFile}`
+          }
+          if (result.details.extractedFiles.length > 30) {
+            body += `\n... (+${result.details.extractedFiles.length - 30} more)`
+          }
         }
-        if (result.details.extractedFiles.length > 30) {
-          body += `\n... (+${result.details.extractedFiles.length - 30} more)`
-        }
-      }
 
-      // Search matches
-      if (Array.isArray(result.details?.matches) && !Array.isArray(result.details?.results)) {
-        body += `\nMatches (${result.details.matches.length} found):`
-        for (const m of result.details.matches.slice(0, 20)) {
-          const loc = m.page ? `Page ${m.page}, Line ${m.line}` : `Line ${m.line}`
-          body += `\n- [${m.file}:${loc}] ${m.text || m.match}`
+        // Search matches
+        if (Array.isArray(result.details?.matches)) {
+          body += `\nMatches (${result.details.matches.length} found):`
+          for (const m of result.details.matches.slice(0, 20)) {
+            const loc = m.page ? `Page ${m.page}, Line ${m.line}` : `Line ${m.line}`
+            body += `\n- [${m.file}:${loc}] ${m.text || m.match}`
+          }
+          if (result.details.matches.length > 20) {
+            body += `\n... (+${result.details.matches.length - 20} more matches)`
+          }
         }
-        if (result.details.matches.length > 20) {
-          body += `\n... (+${result.details.matches.length - 20} more matches)`
+
+        if (result.details?.content) {
+          body += handleLargeText(String(result.details.content), 'File Content')
         }
-      }
 
-      if (result.details?.content) {
-        body += handleLargeText(String(result.details.content), 'File Content')
-      }
-
-      if (result.details?.stdout) {
-        body += handleLargeText(String(result.details.stdout), 'Script Output')
+        if (result.details?.stdout) {
+          body += handleLargeText(String(result.details.stdout), 'Script Output')
+        }
       }
     } else {
       body = `[Workbench Action Result: ❌ Action "${actionType}" failed: ${result.error || result.message}]`
