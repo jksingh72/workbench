@@ -200,10 +200,19 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   onNotification: (callback: (msg: string) => void) => {
-    const listener = (_: any, msg: string) => callback(msg)
-    ipcRenderer.on('workbench:notify', listener)
+    const notifyListener = (_: any, msg: any) => {
+      const text = typeof msg === 'string' ? msg : (msg?.message || msg?.body || String(msg))
+      callback(text)
+    }
+    const toastListener = (_: any, data: any) => {
+      const text = typeof data === 'string' ? data : (data?.message || data?.body || String(data))
+      callback(text)
+    }
+    ipcRenderer.on('workbench:notify', notifyListener)
+    ipcRenderer.on('workbench:toast', toastListener)
     return () => {
-      ipcRenderer.removeListener('workbench:notify', listener)
+      ipcRenderer.removeListener('workbench:notify', notifyListener)
+      ipcRenderer.removeListener('workbench:toast', toastListener)
     }
   },
   showNotification: (params: any) => {
@@ -297,4 +306,8 @@ contextBridge.exposeInMainWorld('electron', {
   mcpRemoveServer: (serverName: string) => ipcRenderer.invoke('workbench:mcp-remove-server', serverName),
   mcpConfigureServer: (serverName: string, updates: any) =>
     ipcRenderer.invoke('workbench:mcp-configure-server', { serverName, updates }),
+
+  // Error Log Management
+  openErrorLog: () => ipcRenderer.invoke('workbench:open-error-log'),
+  getLogPath: () => ipcRenderer.invoke('workbench:get-log-path'),
 })

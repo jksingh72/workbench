@@ -6,6 +6,7 @@ import { AISourceManager, AISource } from '../services/aiSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
 import { ActionDispatcher } from '../services/actionDispatcher'
 import { LLMProvider } from '../actions/registry'
+import { Logger } from '../services/logger'
 
 export const CHATGPT_START_URL = 'https://chatgpt.com/'
 
@@ -32,6 +33,7 @@ export class AIViewHandler {
   }> = []
   private lastUploadKey: string = ''
   private lastUploadTime: number = 0
+  private primedSources: Set<string> = new Set()
 
   constructor(mainWindow: BrowserWindow, aiSourceManager: AISourceManager) {
     this.mainWindow = mainWindow
@@ -170,8 +172,38 @@ export class AIViewHandler {
     })
     wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
       if (this.currentSourceId === sourceId) {
-        console.warn(`[AIView] Load failed (${errorCode}):`, errorDescription, validatedURL)
         onStateChange()
+        // Error code -3 is ERR_ABORTED (normal when clicking new links or redirecting)
+        if (errorCode !== -3) {
+          Logger.warn('AIView', `Page failed to load (${errorCode}): ${errorDescription} for ${validatedURL}`)
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send(
+              'workbench:notify',
+              `⚠️ AI page failed to load: ${errorDescription || 'Connection issue'}. Click reload to retry.`
+            )
+          }
+        }
+      }
+    })
+
+    wc.on('render-process-gone', (_event, details) => {
+      const reasonStr = details.reason === 'oom' ? 'Out of memory' : details.reason
+      Logger.error('AIView', `Render process gone for "${sourceId}": ${details.reason} (code: ${details.exitCode})`, details)
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(
+          'workbench:notify',
+          `⚠️ The AI chat tab crashed (${reasonStr}). Click the reload button in the toolbar to restore it.`
+        )
+      }
+    })
+
+    wc.on('unresponsive', () => {
+      Logger.warn('AIView', `WebContents unresponsive for "${sourceId}"`)
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(
+          'workbench:notify',
+          '⏳ AI chat tab is taking longer than expected to respond. Please wait or click reload.'
+        )
       }
     })
     const checkPrimeDebounced = () => {
@@ -1864,6 +1896,10 @@ export class AIViewHandler {
     } = options
 
     try {
+      if (isPriming) {
+        this.resetAutonomousSession()
+      }
+
       // Step 1: Wait for AI streaming / response generation to complete
       if (waitForStreaming) {
         console.log(`[AIView:Inject:STEP 1] Checking/waiting for AI streaming completion (max: ${maxWaitMs}ms)...`)
@@ -1881,6 +1917,14 @@ export class AIViewHandler {
 
           const isStreaming: boolean = await this.view.webContents.executeJavaScript(`
             (function() {
+              function isVisible(el) {
+                if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
+              }
+
               const stopSelectors = [
                 'button[data-testid="stop-button"]',
                 'button[aria-label*="Stop generating" i]',
@@ -1890,7 +1934,7 @@ export class AIViewHandler {
               ];
               for (const sel of stopSelectors) {
                 const btn = document.querySelector(sel);
-                if (btn && btn.offsetParent !== null && !btn.disabled) {
+                if (isVisible(btn)) {
                   const rect = btn.getBoundingClientRect();
                   if (rect.width > 0 && rect.height > 0) {
                     const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
@@ -1929,6 +1973,14 @@ export class AIViewHandler {
       const focusResult: { success: boolean; error?: string; isContentEditable?: boolean; tagName?: string } =
         await this.view.webContents.executeJavaScript(`
         (function() {
+          function isVisible(el) {
+            if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            const rect = el.getBoundingClientRect();
+            return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
+          }
+
           const inputSelectors = [
             '#prompt-textarea',
             'div.ProseMirror[contenteditable="true"]',
@@ -1947,14 +1999,25 @@ export class AIViewHandler {
           let input = null;
           for (const sel of inputSelectors) {
             const el = document.querySelector(sel);
-            if (el && el.offsetParent !== null && !el.disabled) {
+            if (isVisible(el)) {
               input = el;
               break;
             }
           }
 
           if (!input) {
-            return { success: false, error: 'Chat input field not found' };
+            const url = window.location.href;
+            if (url.includes('/auth/login') || url.includes('/login') || url.includes('accounts.google.com') || url.includes('login.microsoftonline.com')) {
+              return { success: false, error: 'Please log in to your AI provider account before connecting Workbench.' };
+            }
+            if (document.querySelector('.cf-turnstile, #challenge-running, #cf-stage, div[id*="turnstile"]') || (document.title && document.title.includes('Just a moment'))) {
+              return { success: false, error: 'Cloudflare verification required in chat pane. Please solve the challenge and retry.' };
+            }
+            const bodyText = document.body ? document.body.innerText : '';
+            if (bodyText.includes('Free message limit reached') || bodyText.includes('limit reached until') || bodyText.includes('rate limit') || bodyText.includes('over capacity')) {
+              return { success: false, error: 'AI provider usage limit reached. Priming paused until capacity is restored.' };
+            }
+            return { success: false, error: 'Chat input field not found. Please ensure the chat interface is open.' };
           }
 
           input.focus();
@@ -1981,8 +2044,12 @@ export class AIViewHandler {
       `)
 
       if (!focusResult.success) {
-        console.error(`[AIView:Inject:ERROR] Failed to focus chat input:`, focusResult.error)
-        return { success: false, error: focusResult.error || 'Failed to focus chat input' }
+        const friendlyError = focusResult.error || 'Failed to locate chat input'
+        Logger.warn('AIView', `Priming / action injection blocked: ${friendlyError}`)
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('workbench:notify', `⚠️ ${friendlyError}`)
+        }
+        return { success: false, error: friendlyError }
       }
       console.log(`[AIView:Inject:STEP 2] Input focused: tagName="${focusResult.tagName}", contentEditable=${focusResult.isContentEditable}`)
 
@@ -2056,6 +2123,14 @@ export class AIViewHandler {
       const clickResult: { clicked: boolean; sendBtnFound: boolean } =
         await this.view.webContents.executeJavaScript(`
         (function() {
+          function isVisible(el) {
+            if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            const rect = el.getBoundingClientRect();
+            return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
+          }
+
           const sendSelectors = [
             'button[data-testid="send-button"]',
             'button[data-testid="fruitjuice-send-button"]',
@@ -2074,7 +2149,7 @@ export class AIViewHandler {
 
           for (const sel of sendSelectors) {
             const btn = document.querySelector(sel);
-            if (btn && btn.offsetParent !== null && !btn.disabled) {
+            if (isVisible(btn)) {
               btn.click();
               return { clicked: true, sendBtnFound: true };
             }
@@ -2097,6 +2172,14 @@ export class AIViewHandler {
 
       const verification: { submitted: boolean } = await this.view.webContents.executeJavaScript(`
         (function() {
+          function isVisible(el) {
+            if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            const rect = el.getBoundingClientRect();
+            return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
+          }
+
           const inputSelectors = [
             '#prompt-textarea',
             'div.ProseMirror[contenteditable="true"]',
@@ -2110,14 +2193,14 @@ export class AIViewHandler {
           ];
           for (const sel of inputSelectors) {
             const el = document.querySelector(sel);
-            if (el && el.offsetParent !== null) {
+            if (isVisible(el)) {
               const val = (el.value || el.innerText || el.textContent || '').trim();
               if (val.length === 0) return { submitted: true };
             }
           }
 
           const stopBtn = document.querySelector('button[data-testid="stop-button"], button[aria-label*="Stop" i]');
-          if (stopBtn && stopBtn.offsetParent !== null && !stopBtn.disabled) {
+          if (isVisible(stopBtn)) {
             return { submitted: true };
           }
 
@@ -2197,6 +2280,9 @@ export class AIViewHandler {
 
   public setActionMode(enabled: boolean) {
     this.actionModeEnabled = enabled
+    if (!enabled) {
+      this.primedSources.delete(this.currentSourceId)
+    }
     if (this.view && !this.view.webContents.isDestroyed()) {
       this.view.webContents.send('workbench:action-mode-changed', enabled)
     }
@@ -2274,12 +2360,20 @@ export class AIViewHandler {
       }
 
       // 3. Inject and auto-submit the system priming prompt using the hardened pipeline
+      this.resetAutonomousSession()
       const res = await this.injectAndSubmitChatText(promptText, {
         autoSubmit: true,
         waitForStreaming: false,
         isPriming: true,
       })
 
+      if (res.success) {
+        this.primedSources.add(this.currentSourceId)
+      } else {
+        this.primedSources.delete(this.currentSourceId)
+      }
+
+      await this.notifyChatPrimeStatus()
       setTimeout(() => this.notifyChatPrimeStatus(), 800)
       setTimeout(() => this.notifyChatPrimeStatus(), 2000)
 
@@ -2294,6 +2388,9 @@ export class AIViewHandler {
     if (!this.actionModeEnabled) {
       return false
     }
+    if (this.primedSources.has(this.currentSourceId)) {
+      return true
+    }
     if (!this.view || this.view.webContents.isDestroyed()) {
       return false
     }
@@ -2302,24 +2399,49 @@ export class AIViewHandler {
         (function() {
           try {
             if (document.querySelector('.wb-hidden-action-prompt')) return true;
+            if (document.querySelector('.workbench-action-badge')) return true;
             const bodyText = (document.body ? (document.body.innerText || document.body.textContent || '') : '');
-            return bodyText.includes('You are integrated with Workbench Desktop') ||
-                   bodyText.includes('Available Workbench Actions');
+            return bodyText.includes('Connected to Workbench') ||
+                   bodyText.includes('Connection Status') ||
+                   bodyText.includes('You are integrated with Workbench') ||
+                   bodyText.includes('Available Workbench Actions') ||
+                   bodyText.includes('Available Actions') ||
+                   bodyText.includes('workbench:action');
           } catch (_) {
             return false;
           }
         })()
       `)
-      return Boolean(primed)
+      if (primed) {
+        this.primedSources.add(this.currentSourceId)
+      }
+      return Boolean(primed || this.primedSources.has(this.currentSourceId))
     } catch (_) {
-      return false
+      return this.primedSources.has(this.currentSourceId)
+    }
+  }
+
+  public broadcastToViews(channel: string, ...args: any[]): void {
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      try {
+        this.view.webContents.send(channel, ...args)
+      } catch (_) {}
+    }
+    for (const v of this.views.values()) {
+      if (v.webContents && !v.webContents.isDestroyed() && v.webContents !== this.view?.webContents) {
+        try {
+          v.webContents.send(channel, ...args)
+        } catch (_) {}
+      }
     }
   }
 
   public async notifyChatPrimeStatus(): Promise<void> {
-    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
     const isPrimed = await this.isChatPrimed()
-    this.mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed })
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed })
+    }
+    this.broadcastToViews('workbench:chat-prime-status-changed', { isPrimed })
   }
 
   public detectActiveProvider(): LLMProvider {

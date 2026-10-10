@@ -154,6 +154,8 @@ export interface ElectronAPI {
   mcpOpenConfig?: () => Promise<{ success: boolean; path?: string; error?: string }>
   mcpRemoveServer?: (serverName: string) => Promise<{ success: boolean; status: McpServerInfo[] }>
   mcpConfigureServer?: (serverName: string, updates: any) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
+  openErrorLog?: () => Promise<boolean>
+  getLogPath?: () => Promise<string>
 }
 
 export interface McpServerInfo {

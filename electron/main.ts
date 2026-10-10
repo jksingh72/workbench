@@ -15,6 +15,15 @@ import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
 import { ActionDispatcher } from './services/actionDispatcher'
 import { McpManager } from './services/mcpManager'
 import { PrimingOptions } from './actions'
+import { Logger } from './services/logger'
+
+process.on('uncaughtException', (err) => {
+  Logger.error('Process', 'Uncaught Exception in Electron Main Process', err)
+})
+
+process.on('unhandledRejection', (reason) => {
+  Logger.error('Process', 'Unhandled Promise Rejection in Electron Main Process', reason)
+})
 
 const BINARY_EXTENSIONS = new Set([
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
@@ -67,6 +76,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 // Disable native Windows WebAuthn UI to prevent the "Insert your security key into the USB port" dialog
 app.commandLine.appendSwitch('disable-features', 'WebAuthenticationUseNativeWinApi')
+
+// Enforce single instance to prevent Chromium LevelDB & SQLite partition locks (ChromeMethodBFE: 15::LockFile::5)
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  Logger.warn('Main', 'Secondary instance attempted to launch and was terminated to prevent partition locking.')
+  console.warn('[Workbench] Another instance is already running. Exiting secondary process immediately.')
+  app.quit()
+  process.exit(0)
+} else {
+  app.on('second-instance', () => {
+    Logger.warn('Main', 'Detected second instance launch attempt. Focusing existing window.')
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+      mainWindow.webContents.send('workbench:notify', '⚠️ Workbench is already running in this window.')
+    }
+  })
+}
 
 process.env.APP_ROOT = path.join(__dirname, '..')
 
@@ -189,6 +216,15 @@ function registerIpcHandlers() {
 
   ipcMain.on('workbench:set-views-dragging', (_, isDragging: boolean) => {
     layoutManager?.setViewsDragging(isDragging)
+  })
+
+  // Error Log Management
+  ipcMain.handle('workbench:open-error-log', async () => {
+    return await Logger.openLogFile()
+  })
+
+  ipcMain.handle('workbench:get-log-path', () => {
+    return Logger.getLogPath()
   })
 
   // Navigation
@@ -610,6 +646,9 @@ function registerIpcHandlers() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('workbench:chat-prime-status-changed', data)
     }
+    if (aiHandler) {
+      aiHandler.broadcastToViews('workbench:chat-prime-status-changed', data)
+    }
   })
 
   ipcMain.handle('workbench:is-ai-view', (event) => {
@@ -636,11 +675,11 @@ function registerIpcHandlers() {
       const opts: PrimingOptions = options || { provider: detected }
       if (!opts.provider) opts.provider = detected
       const prompt = ActionDispatcher.getInstance().getPromptGuide(undefined, opts)
-      await aiHandler.enableActionMode(prompt, true)
-      aiHandler.notifyChatPrimeStatus()
+      const primeResult = await aiHandler.enableActionMode(prompt, true)
+      await aiHandler.notifyChatPrimeStatus()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('workbench:action-mode-changed', { enabled: true })
-        mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed: true })
+        mainWindow.webContents.send('workbench:chat-prime-status-changed', { isPrimed: Boolean(primeResult?.success) })
       }
     }
   })
@@ -1878,7 +1917,12 @@ app.on('before-quit', async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
+    process.exit(0)
   }
+})
+
+app.on('will-quit', () => {
+  process.exit(0)
 })
 
 app.on('activate', () => {

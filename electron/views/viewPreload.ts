@@ -1062,21 +1062,20 @@ try {
           'button[aria-label*="Submit" i]',
           'button.send-button'
         ]
+        function isVisibleElement(el: HTMLElement | null): el is HTMLElement {
+          if (!el || (el as any).disabled || el.getAttribute('aria-disabled') === 'true' || el.getAttribute('aria-hidden') === 'true') {
+            return false
+          }
+          const rect = el.getBoundingClientRect()
+          if (rect.width <= 0 || rect.height <= 0) return false
+          const style = window.getComputedStyle(el)
+          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+        }
+
         for (const sel of sendSelectors) {
           const btn = document.querySelector(sel) as HTMLElement | null
-          if (
-            btn &&
-            btn.offsetParent !== null &&
-            !(btn as HTMLButtonElement).disabled &&
-            btn.getAttribute('aria-disabled') !== 'true'
-          ) {
-            const rect = btn.getBoundingClientRect()
-            if (rect.width > 0 && rect.height > 0) {
-              const style = window.getComputedStyle(btn)
-              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
-                return false
-              }
-            }
+          if (isVisibleElement(btn)) {
+            return false
           }
         }
 
@@ -1093,30 +1092,18 @@ try {
         ]
         for (const sel of stopSelectors) {
           const btn = document.querySelector(sel) as HTMLElement | null
-          if (
-            btn &&
-            btn.offsetParent !== null &&
-            !(btn as HTMLButtonElement).disabled &&
-            btn.getAttribute('aria-disabled') !== 'true' &&
-            btn.getAttribute('aria-hidden') !== 'true'
-          ) {
-            const rect = btn.getBoundingClientRect()
-            if (rect.width > 0 && rect.height > 0) {
-              const style = window.getComputedStyle(btn)
-              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
-                const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
-                if (
-                  ariaLabel.includes('read') ||
-                  ariaLabel.includes('voice') ||
-                  ariaLabel.includes('speech') ||
-                  ariaLabel.includes('audio') ||
-                  ariaLabel.includes('listen')
-                ) {
-                  continue
-                }
-                return true
-              }
+          if (isVisibleElement(btn)) {
+            const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
+            if (
+              ariaLabel.includes('read') ||
+              ariaLabel.includes('voice') ||
+              ariaLabel.includes('speech') ||
+              ariaLabel.includes('audio') ||
+              ariaLabel.includes('listen')
+            ) {
+              continue
             }
+            return true
           }
         }
 
@@ -1216,11 +1203,17 @@ try {
       primeCheckTimeout = setTimeout(() => {
         try {
           const hasHiddenPrompt = Boolean(document.querySelector('.wb-hidden-action-prompt'))
+          const hasBadge = Boolean(document.querySelector('.workbench-action-badge'))
           const text = document.body ? document.body.textContent || '' : ''
           const hasPromptGuide =
             hasHiddenPrompt ||
-            text.includes('You are integrated with Workbench Desktop') ||
-            text.includes('Available Workbench Actions')
+            hasBadge ||
+            text.includes('Connected to Workbench') ||
+            text.includes('Connection Status') ||
+            text.includes('You are integrated with Workbench') ||
+            text.includes('Available Workbench Actions') ||
+            text.includes('Available Actions') ||
+            text.includes('workbench:action')
 
           // If the chat conversation already has the prompt guide in its history,
           // ensure action execution is active so existing chats work immediately.
@@ -1432,13 +1425,26 @@ try {
     }
 
     let isActionModeGloballyEnabled = true
+    let isChatPrimedStatus = false
     try {
       ipcRenderer.on('workbench:action-mode-changed', (_e, dataOrBool: any) => {
         const enabled = typeof dataOrBool === 'boolean' ? dataOrBool : Boolean(dataOrBool?.enabled)
         isActionModeGloballyEnabled = enabled
+        if (!enabled) {
+          isChatPrimedStatus = false
+        }
         const existing = document.getElementById('wb-chat-status-card')
         if (existing) {
           renderStatusCard('status')
+        }
+      })
+
+      ipcRenderer.on('workbench:chat-prime-status-changed', (_e, data: { isPrimed: boolean }) => {
+        const primed = Boolean(data?.isPrimed)
+        isChatPrimedStatus = primed
+        const existing = document.getElementById('wb-chat-status-card')
+        if (existing) {
+          renderStatusCard(primed ? 'connected' : 'status')
         }
       })
     } catch (_) {}
@@ -1462,7 +1468,36 @@ try {
       return el.innerText || el.textContent || ''
     }
 
+    function sanitizeCommandText(raw: string): string {
+      return (raw || '')
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
+        .trim()
+        .toLowerCase()
+    }
+
+    function isStatusCmd(val: string): boolean {
+      return val === '/status' || val === '!status' || val === 'wb:status'
+    }
+
+    function isConnectCmd(val: string): boolean {
+      return (
+        val === '/connect' ||
+        val === '!connect' ||
+        val === 'wb:connect' ||
+        val === '/prime' ||
+        val === '!prime' ||
+        val === 'wb:prime'
+      )
+    }
+
     function clearInputField(el: HTMLElement) {
+      try {
+        // Send Escape to close any slash command or mention autocomplete popup in Claude/ProseMirror
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
+      } catch (_) {}
+
       if (el.tagName === 'TEXTAREA') {
         const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
         if (nativeSetter) {
@@ -1473,25 +1508,43 @@ try {
         el.dispatchEvent(new Event('input', { bubbles: true }))
         el.dispatchEvent(new Event('change', { bubbles: true }))
       } else {
+        try {
+          el.focus()
+          const sel = window.getSelection()
+          if (sel) {
+            const range = document.createRange()
+            range.selectNodeContents(el)
+            sel.removeAllRanges()
+            sel.addRange(range)
+          }
+          document.execCommand('delete', false)
+        } catch (_) {}
         el.textContent = ''
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: '' }))
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }))
+        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
+        el.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
       }
     }
 
     function checkIsPrimed(): boolean {
       try {
         if (document.querySelector('.wb-hidden-action-prompt')) return true
+        if (document.querySelector('.workbench-action-badge')) return true
         const text = document.body ? document.body.innerText || document.body.textContent || '' : ''
         return (
-          text.includes('You are integrated with Workbench Desktop') ||
-          text.includes('Available Workbench Actions')
+          text.includes('Connected to Workbench') ||
+          text.includes('Connection Status') ||
+          text.includes('You are integrated with Workbench') ||
+          text.includes('Available Workbench Actions') ||
+          text.includes('Available Actions') ||
+          text.includes('workbench:action')
         )
       } catch (_) {
         return false
       }
     }
 
-    async function renderStatusCard(type: 'status' | 'connected') {
+    async function renderStatusCard(type: 'status' | 'connected' | 'priming') {
       const existing = document.getElementById('wb-chat-status-card')
       if (existing) existing.remove()
 
@@ -1505,7 +1558,8 @@ try {
         }
       } catch (_) {}
 
-      const isPrimed = type === 'connected' ? true : (isActionModeGloballyEnabled && checkIsPrimed())
+      const isPriming = type === 'priming'
+      const isPrimed = isPriming ? false : (type === 'connected' ? true : (isActionModeGloballyEnabled && (isChatPrimedStatus || checkIsPrimed())))
       const folderName = currentActiveDir
         ? currentActiveDir.split(/[/\\]/).filter(Boolean).pop() || currentActiveDir
         : 'None'
@@ -1519,20 +1573,23 @@ try {
       const card = document.createElement('div')
       card.id = 'wb-chat-status-card'
       card.style.cssText = `
-        display: block;
-        margin: 10px auto;
+        position: fixed;
+        bottom: 95px;
+        left: 50%;
+        transform: translateX(-50%);
         max-width: 680px;
-        width: calc(100% - 24px);
-        background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.96));
-        border: 1px solid ${isPrimed ? 'rgba(52, 211, 153, 0.4)' : 'rgba(245, 158, 11, 0.4)'};
-        border-radius: 8px;
-        padding: 12px 16px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+        width: calc(100% - 32px);
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));
+        border: 1px solid ${isPrimed ? 'rgba(52, 211, 153, 0.5)' : (isPriming ? 'rgba(245, 158, 11, 0.7)' : 'rgba(245, 158, 11, 0.5)')};
+        border-radius: 10px;
+        padding: 14px 18px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         color: #f1f5f9;
         font-size: 13px;
         line-height: 1.5;
-        z-index: 9999;
+        z-index: 999999;
+        backdrop-filter: blur(12px);
         animation: wbFadeIn 0.2s ease-out;
       `
 
@@ -1541,8 +1598,12 @@ try {
         style.id = 'wb-chat-cmd-styles'
         style.textContent = `
           @keyframes wbFadeIn {
-            from { opacity: 0; transform: translateY(6px); }
-            to { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; transform: translate(-50%, 8px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+          }
+          @keyframes wbPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
           }
           .wb-cmd-btn-prime {
             background: rgba(245, 158, 11, 0.22);
@@ -1558,6 +1619,10 @@ try {
           .wb-cmd-btn-prime:hover {
             background: rgba(245, 158, 11, 0.38);
             color: #fef08a;
+          }
+          .wb-cmd-btn-prime:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
           }
           .wb-cmd-btn-disable {
             background: rgba(255, 255, 255, 0.06);
@@ -1593,7 +1658,27 @@ try {
         document.head.appendChild(style)
       }
 
-      if (isPrimed) {
+      if (isPriming) {
+        card.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#fbbf24;">
+              <span>⚡</span> <span>Workbench</span>
+              <span style="font-size:11px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); padding:1px 6px; border-radius:3px; animation:wbPulse 1.2s infinite ease-in-out;">⚡ Priming...</span>
+            </div>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
+          </div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:4px;">
+            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#fde68a;">${targetLabel}: ${folderName}</code>
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${currentActiveDir || 'No path'})</span>
+          </div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-bottom:8px;">
+            Connecting chat to Workbench and injecting action system...
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="wb-cmd-btn-prime" disabled style="opacity:0.7;">⚡ Priming Chat...</button>
+          </div>
+        `
+      } else if (isPrimed) {
         card.innerHTML = `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
             <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399;">
@@ -1631,20 +1716,13 @@ try {
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <button class="wb-cmd-btn-prime" id="wb-cmd-trigger-prime-btn">⚡ Prime Chat</button>
-            <span style="font-size:11px; color:#64748b;">or type <code style="color:#cbd5e1;">/connect</code></span>
+            <span style="font-size:11px; color:#64748b;">or type <code style="color:#cbd5e1;">!connect</code> / <code style="color:#cbd5e1;">!status</code></span>
           </div>
         `
       }
 
-      const inputEl = getInputField()
-      const formEl = inputEl
-        ? inputEl.closest('form') || inputEl.closest('fieldset') || inputEl.closest('div[class*="relative"]')
-        : null
-      if (formEl && formEl.parentNode) {
-        formEl.parentNode.insertBefore(card, formEl)
-      } else {
-        document.body.appendChild(card)
-      }
+      // Always append directly to body with high z-index overlay so it is never clipped or unmounted by chat frameworks
+      document.body.appendChild(card)
 
       const closeBtn = card.querySelector('#wb-card-close-btn')
       if (closeBtn) {
@@ -1654,13 +1732,9 @@ try {
       const primeBtn = card.querySelector('#wb-cmd-trigger-prime-btn')
       if (primeBtn) {
         primeBtn.addEventListener('click', () => {
-          primeBtn.textContent = '⚡ Priming...'
-          ;(primeBtn as HTMLButtonElement).disabled = true
           isActionModeGloballyEnabled = true
+          renderStatusCard('priming')
           ipcRenderer.send('workbench:prime-active-chat', {})
-          setTimeout(() => {
-            renderStatusCard('connected')
-          }, 1200)
         })
       }
 
@@ -1670,6 +1744,7 @@ try {
           disableBtn.textContent = 'Disabling...'
           ;(disableBtn as HTMLButtonElement).disabled = true
           isActionModeGloballyEnabled = false
+          isChatPrimedStatus = false
           ipcRenderer.invoke('workbench:set-action-mode', { enabled: false })
           setTimeout(() => {
             renderStatusCard('status')
@@ -1679,12 +1754,27 @@ try {
     }
 
     function handleCommand(cmd: string) {
-      if (cmd === '/status') {
+      if (isStatusCmd(cmd)) {
         renderStatusCard('status')
-      } else if (cmd === '/connect' || cmd === '/prime') {
+      } else if (isConnectCmd(cmd)) {
         isActionModeGloballyEnabled = true
+        renderStatusCard('priming')
         ipcRenderer.send('workbench:prime-active-chat', {})
-        renderStatusCard('connected')
+      }
+    }
+
+    function checkAndInterceptCommand(e: Event) {
+      if (!isChatSite()) return
+      const inputEl = getInputField()
+      if (!inputEl) return
+      const raw = getInputValue(inputEl)
+      const val = sanitizeCommandText(raw)
+      if (isStatusCmd(val) || isConnectCmd(val)) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        clearInputField(inputEl)
+        handleCommand(val)
       }
     }
 
@@ -1692,17 +1782,7 @@ try {
       'keydown',
       (e: KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-          if (!isChatSite()) return
-          const inputEl = getInputField()
-          if (!inputEl) return
-          const val = getInputValue(inputEl).trim().toLowerCase()
-          if (val === '/status' || val === '/connect' || val === '/prime') {
-            e.preventDefault()
-            e.stopPropagation()
-            e.stopImmediatePropagation()
-            clearInputField(inputEl)
-            handleCommand(val)
-          }
+          checkAndInterceptCommand(e)
         }
       },
       true
@@ -1713,20 +1793,10 @@ try {
       (e: MouseEvent) => {
         const target = e.target as HTMLElement | null
         const sendBtn = target?.closest(
-          'button[data-testid*="send"], button[aria-label*="Send"], button[aria-label*="send"], button[type="submit"]'
+          'button[data-testid*="send"], button[aria-label*="Send"], button[aria-label*="send"], button[type="submit"], button:has(svg)'
         )
         if (sendBtn) {
-          if (!isChatSite()) return
-          const inputEl = getInputField()
-          if (!inputEl) return
-          const val = getInputValue(inputEl).trim().toLowerCase()
-          if (val === '/status' || val === '/connect' || val === '/prime') {
-            e.preventDefault()
-            e.stopPropagation()
-            e.stopImmediatePropagation()
-            clearInputField(inputEl)
-            handleCommand(val)
-          }
+          checkAndInterceptCommand(e)
         }
       },
       true

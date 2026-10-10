@@ -134,7 +134,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   })
 
   const [localIsActivating, setLocalIsActivating] = useState(false)
-  const isActivatingAction = typeof propIsActivatingAction === 'boolean' ? propIsActivatingAction : localIsActivating
+  const isActivatingAction = Boolean(propIsActivatingAction || localIsActivating)
 
   const [activeDirectory, setActiveDirectory] = useState<string>('')
   const [workspaceFolders, setWorkspaceFolders] = useState<{
@@ -214,6 +214,14 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
     }
   }, [isAI])
 
+  // Re-sync Chat Prime status whenever the AI source or URL changes
+  useEffect(() => {
+    if (!isAI) return
+    window.electron?.getChatPrimeStatus?.().then((res) => {
+      if (res) setIsChatPrimed(Boolean(res.isPrimed))
+    })
+  }, [isAI, activeAISourceId, navState.url])
+
   const handleDisableChat = async () => {
     setLocalIsActivating(true)
     try {
@@ -238,8 +246,6 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
       setLocalIsActivating(false)
     }
   }
-
-
 
   const handleInstantPrime = async () => {
     setLocalIsActivating(true)
@@ -273,6 +279,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
           type: 'info',
         })
       } else {
+        setIsChatPrimed(false)
         window.electron?.showNotification?.({
           title: '⚠️ Priming Failed',
           body: res?.error || 'Chat input not ready or chat not loaded.',

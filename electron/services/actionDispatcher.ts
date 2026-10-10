@@ -10,6 +10,7 @@ import {
   PrimingOptions,
   ToolGroup,
 } from '../actions'
+import { Logger } from './logger'
 
 export interface WorkbenchActionPayload {
   type?: string
@@ -418,14 +419,51 @@ export class ActionDispatcher {
 
       return result
     } catch (err: any) {
-      console.error(`[Action:EXCEPTION] Execution error: ${err.message}`, err)
-      this.notify(`❌ Action failed: ${err.message}`)
+      const friendlyMessage = ActionDispatcher.translateErrorMessage(err)
+      Logger.error('ActionDispatcher', `Action failed: ${friendlyMessage}`, {
+        payload: rawPayload,
+        targetPane: effectivePane,
+        originalError: err?.message,
+        stack: err?.stack,
+      })
+      this.notify(`❌ Action failed: ${friendlyMessage}`)
       return {
         success: false,
-        message: err.message || 'Action execution failed',
-        error: err.message,
+        message: friendlyMessage,
+        error: friendlyMessage,
       }
     }
+  }
+
+  public static translateErrorMessage(err: any): string {
+    const code = err?.code || ''
+    const msg = err?.message || String(err)
+
+    if (code === 'EBUSY' || msg.includes('EBUSY') || msg.includes('resource busy or locked')) {
+      return '📄 File is currently locked by another program (e.g. Microsoft Word, Excel, or OneDrive sync). Please close the document and retry.'
+    }
+    if (code === 'EPERM' || code === 'EACCES' || msg.includes('EPERM') || msg.includes('operation not permitted')) {
+      return '⚠️ Permission denied: File is marked Read-Only or requires Administrator privileges.'
+    }
+    if (code === 'ENOENT' || msg.includes('ENOENT')) {
+      if (msg.includes('spawn python')) {
+        return '🐍 Python interpreter was not found in your system PATH. Please install Python and ensure it is in PATH.'
+      }
+      if (msg.includes('spawn uvx')) {
+        return '📦 Command "uvx" not found. Please install uv (Astral) or add to PATH.'
+      }
+      return '📁 Specified file or directory was not found. Please verify the path.'
+    }
+    if (code === 'ENOSPC' || msg.includes('ENOSPC')) {
+      return '💾 Disk is full: Cannot write file to disk. Please free up space and retry.'
+    }
+    if (msg.includes('exceeded maximum timeout')) {
+      return '⏱️ Script timed out and was safely terminated to prevent freezing.'
+    }
+    if (msg.includes('Chat input field not found')) {
+      return '🔍 Could not locate chat input. Please verify you are logged in and no CAPTCHA is blocking the screen.'
+    }
+    return msg || 'Action execution failed'
   }
 
   public getPromptGuide(_targetPane?: 'book' | 'note', options?: string | PrimingOptions): string {
@@ -442,6 +480,7 @@ export class ActionDispatcher {
         message,
         type: message.includes('❌') ? 'error' : 'success',
       })
+      this.mainWindow.webContents.send('workbench:notify', message)
     }
   }
 

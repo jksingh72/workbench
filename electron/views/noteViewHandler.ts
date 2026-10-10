@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { NoteSourceManager, NoteSource } from '../services/noteSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
+import { Logger } from '../services/logger'
 
 export class NoteViewHandler {
   private view: WebContentsView | null = null
@@ -205,8 +206,37 @@ export class NoteViewHandler {
     wc.on('did-finish-load', onStateChange)
     wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
       if (this.currentSourceId === sourceId) {
-        console.warn(`[NoteView] Load failed (${errorCode}):`, errorDescription, validatedURL)
         onStateChange()
+        if (errorCode !== -3) {
+          Logger.warn('NoteView', `Note pane load failed (${errorCode}): ${errorDescription} - ${validatedURL}`)
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send(
+              'workbench:notify',
+              `⚠️ Note pane failed to load: ${errorDescription || 'Connection issue'}. Click reload to retry.`
+            )
+          }
+        }
+      }
+    })
+
+    wc.on('render-process-gone', (_event, details) => {
+      const reasonStr = details.reason === 'oom' ? 'Out of memory' : details.reason
+      Logger.error('NoteView', `Render process gone for "${sourceId}": ${details.reason} (code: ${details.exitCode})`, details)
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(
+          'workbench:notify',
+          `⚠️ Note pane tab crashed (${reasonStr}). Click the reload button in the toolbar to restore it.`
+        )
+      }
+    })
+
+    wc.on('unresponsive', () => {
+      Logger.warn('NoteView', `WebContents unresponsive for "${sourceId}"`)
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(
+          'workbench:notify',
+          '⏳ Note pane is taking longer than expected to respond. Please wait or click reload.'
+        )
       }
     })
     wc.on('did-navigate', onStateChange)

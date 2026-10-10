@@ -1588,6 +1588,31 @@ export const App: React.FC = () => {
           setActionMode(true)
         }}
       />
+
+      {/* Ambient Floating Notification Toast */}
+      {notification && (
+        <div className="wb-ambient-toast" role="alert">
+          <div className="wb-ambient-toast-body">
+            <span className="wb-ambient-toast-message">{notification}</span>
+            {(notification.includes('❌') || notification.includes('⚠️')) && (
+              <button
+                className="wb-ambient-toast-btn"
+                onClick={() => window.electron?.openErrorLog?.()}
+                title="Open persistent error log in Notepad"
+              >
+                View Log
+              </button>
+            )}
+            <button
+              className="wb-ambient-toast-close"
+              onClick={() => setNotification(null)}
+              title="Dismiss notification"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

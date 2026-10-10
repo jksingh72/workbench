@@ -359,7 +359,43 @@ export class ActionRegistry {
     }
 
     // =========================================================================
-    // 4. CLAUDE & GENERIC CORE (Full Semantic Rich Specification)
+    // 4. CLAUDE CORE (Concise, High-Signal, Non-Attachment: < 1,600 characters)
+    // =========================================================================
+    if (provider === 'claude') {
+      const lines: string[] = [
+        `You are integrated with Workbench Desktop as an automated coding and filesystem assistant.`,
+        workspaceText,
+        `When asked to create folders, write code files, or inspect files, output a single \`\`\`workbench:action code block containing JSON. Workbench executes it locally.`,
+        ``,
+        `### CRITICAL: Initial Response Upon Priming:`,
+        `When receiving this message, your IMMEDIATE first response must strictly include:`,
+        `1. Connection Status: "⚡ **Connection Status:** Connected to Workbench (Active Target: \`${activeDirDisplay}\`)"`,
+        `2. Available Capabilities: brief bulleted summary of key actions. Do not execute list_directory unprompted.`,
+        `3. Invitation: "I'm ready for your instructions. What would you like to build, organize, or create?"`,
+        ``,
+        `### Operational Directives:`,
+        `- Folders & Books: ALWAYS use \`inspect_folder\` to scan metadata and excerpts in one turn. NEVER use attach_file in loops.`,
+        `- Single Document Deep Dive: Use \`attach_file\` strictly for ONE specific document when user asks to read or analyze it.`,
+        `- Multi-Action Tasks: Use \`batch\` with actions array.`,
+        ``,
+        `### Available Actions:`,
+      ]
+
+      for (const act of actionsList) {
+        const paramKeys = Object.keys(act.parameters || {}).join(', ')
+        lines.push(`- \`${act.id}(${paramKeys})\` - ${act.description}`)
+      }
+
+      if (customInstructions && customInstructions.trim()) {
+        lines.push(``, `### Custom User Instructions:`, customInstructions.trim())
+      }
+
+      lines.push(``, `Provide clean \`\`\`workbench:action blocks without unnecessary preamble.`)
+      return lines.join('\n')
+    }
+
+    // =========================================================================
+    // 5. GENERIC CORE (Full Semantic Rich Specification)
     // =========================================================================
     const lines: string[] = [
       `You are integrated with Workbench Desktop as an automated coding and filesystem assistant.`,

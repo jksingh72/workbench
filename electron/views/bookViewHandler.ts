@@ -4,6 +4,7 @@ import { AuthCoordinator } from '../auth/authCoordinator'
 import { CHROME_DESKTOP_UA } from '../auth/strategies/defaultAuthStrategy'
 import { BookSourceManager, BookSource } from '../services/bookSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
+import { Logger } from '../services/logger'
 
 export { CHROME_DESKTOP_UA }
 
@@ -162,8 +163,37 @@ export class BookViewHandler {
     wc.on('did-finish-load', onStateChange)
     wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
       if (this.currentSourceId === sourceId) {
-        console.warn(`[BookView] Load failed (${errorCode}):`, errorDescription, validatedURL)
         onStateChange()
+        if (errorCode !== -3) {
+          Logger.warn('BookView', `Reading pane load failed (${errorCode}): ${errorDescription} - ${validatedURL}`)
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send(
+              'workbench:notify',
+              `⚠️ Reading pane failed to load: ${errorDescription || 'Connection issue'}. Click reload to retry.`
+            )
+          }
+        }
+      }
+    })
+
+    wc.on('render-process-gone', (_event, details) => {
+      const reasonStr = details.reason === 'oom' ? 'Out of memory' : details.reason
+      Logger.error('BookView', `Render process gone for "${sourceId}": ${details.reason} (code: ${details.exitCode})`, details)
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(
+          'workbench:notify',
+          `⚠️ Reading pane tab crashed (${reasonStr}). Click the reload button in the toolbar to restore it.`
+        )
+      }
+    })
+
+    wc.on('unresponsive', () => {
+      Logger.warn('BookView', `WebContents unresponsive for "${sourceId}"`)
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send(
+          'workbench:notify',
+          '⏳ Reading pane is taking longer than expected to respond. Please wait or click reload.'
+        )
       }
     })
     wc.on('did-navigate', onStateChange)
