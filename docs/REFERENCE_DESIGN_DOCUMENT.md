@@ -1,9 +1,10 @@
 # Workbench — Reference Design Document (RDD)
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Target:** Desktop Technical Reading, AI Synthesis & Knowledge Workspace  
 **Stack:** Electron 34, React 19, TypeScript 5.7, Vite 6  
-**Repository Root:** `d:\Products\Workbench`
+**Repository Root:** `d:\Products\Workbench`  
+**Feature Catalog:** See [FEATURE_LIST.md](file:///d:/Products/Workbench/docs/FEATURE_LIST.md) for the complete feature breakdown.
 
 ---
 
@@ -18,6 +19,8 @@ graph TD
         LM["LayoutManager (Coordinate Geometry & Occlusion)"]
         SM["SessionManager & SourceManagers (Book/AI/Note)"]
         AC["AuthCoordinator (Chrome Identity & Popups)"]
+        AD["ActionDispatcher & ActionRegistry"]
+        MCP["McpManager (Model Context Protocol Engine)"]
         
         BVH["BookViewHandler (WebContentsView)"]
         AVH["AIViewHandler (WebContentsView)"]
@@ -30,6 +33,7 @@ graph TD
         PBook["BookPane.tsx"]
         PChat["ChatPane.tsx (Drop Interceptor)"]
         PNote["NotePane.tsx (LocalExplorer / OneNote)"]
+        Readers["Local Readers (EPUB, MOBI, PDF, DOCX, XLSX)"]
     end
 
     subgraph "External Cloud / Web Services"
@@ -42,16 +46,20 @@ graph TD
     LM -->|Physical Bounds & Detach/Attach| BVH
     LM -->|Physical Bounds & Detach/Attach| AVH
     LM -->|Physical Bounds & Detach/Attach| NVH
+    AD -->|Dispatches Tool Execution| MP
+    MCP -->|Connects stdio Tool Servers| AD
     BVH -->|Isolated Partition| OReilly
     AVH -->|Isolated Partition & Preload| AIChat
     NVH -->|Isolated Partition| CloudNote
     App -->|DOM-Measured Anchors| LM
+    PBook --> Readers
 ```
 
 ### Architectural Principles:
 1. **`WebContentsView` over deprecated `<webview>`**: Guest web sessions run as native `WebContentsView` children attached directly to the `BrowserWindow.contentView`, guaranteeing modern Chromium process isolation, hardware acceleration, and memory containment.
 2. **Strict Session Partitioning**: Each source retains isolated persistent storage (`persist:workbench-book-{id}`, `persist:workbench-ai-{id}`, `persist:workbench-note-{id}`), ensuring credential independence and zero cookie collision across accounts.
 3. **Decoupled Presentation & Native Surfaces**: The React 19 renderer maintains UI controls, floating toolbars, and layout anchors, while the main process coordinates native coordinate geometry and view positioning.
+4. **Window Navigation Guarding**: Enforces strict `will-navigate` interception to guarantee in-app link clicks and custom protocol schemes never unload or unmount the Workbench application.
 
 ---
 
@@ -59,12 +67,15 @@ graph TD
 
 | Subsystem | Key Files | Primary Responsibilities |
 | :--- | :--- | :--- |
-| **Application & IPC Hub** | [`electron/main.ts`](file:///d:/Products/Workbench/electron/main.ts) | Window creation, IPC router, file system operations, drag-and-drop file transfers, system menus. |
+| **Application & IPC Hub** | [`electron/main.ts`](file:///d:/Products/Workbench/electron/main.ts) | Window creation, IPC router, file system operations, window navigation guards, system menus. |
 | **Layout & Geometry** | [`electron/services/layoutManager.ts`](file:///d:/Products/Workbench/electron/services/layoutManager.ts) | Dual-axis coordinate calculation, DOM-measured anchor tracking, view detaching during modal display, ghost dragging state. |
 | **Auth & Anti-Bot Engine** | [`electron/auth/authCoordinator.ts`](file:///d:/Products/Workbench/electron/auth/authCoordinator.ts), [`viewPreload.ts`](file:///d:/Products/Workbench/electron/views/viewPreload.ts) | Chrome User-Agent enforcement, Client Hints rewriting, `window.chrome` runtime API stubbing, OAuth popup containment. |
 | **Source Management** | [`bookSourceManager.ts`](file:///d:/Products/Workbench/electron/services/bookSourceManager.ts), [`aiSourceManager.ts`](file:///d:/Products/Workbench/electron/services/aiSourceManager.ts), [`noteSourceManager.ts`](file:///d:/Products/Workbench/electron/services/noteSourceManager.ts) | Dynamic presets and user configurations stored in persistent JSON files under `userData`. |
-| **View Handlers** | [`bookViewHandler.ts`](file:///d:/Products/Workbench/electron/views/bookViewHandler.ts), [`aiViewHandler.ts`](file:///d:/Products/Workbench/electron/views/aiViewHandler.ts), [`noteViewHandler.ts`](file:///d:/Products/Workbench/electron/views/noteViewHandler.ts) | Lifecycle management of guest web contents, zoom control, DOM extraction, and synthetic input insertion. |
-| **Local Explorer & Notes** | [`src/components/LocalExplorer.tsx`](file:///d:/Products/Workbench/src/components/LocalExplorer.tsx), [`OneNoteApp.tsx`](file:///d:/Products/Workbench/src/components/OneNoteApp.tsx) | Direct filesystem file explorer, tree view, inline viewer/editor, and file staging. |
+| **View Handlers** | [`bookViewHandler.ts`](file:///d:/Products/Workbench/electron/views/bookViewHandler.ts), [`aiViewHandler.ts`](file:///d:/Products/Workbench/electron/views/aiViewHandler.ts), [`noteViewHandler.ts`](file:///d:/Products/Workbench/electron/views/noteViewHandler.ts) | Lifecycle management of guest web contents, zoom control, DOM extraction, synthetic input insertion, and auto-feedback loop. |
+| **Action Model & Agents** | [`actionDispatcher.ts`](file:///d:/Products/Workbench/electron/services/actionDispatcher.ts), [`actionRegistry.ts`](file:///d:/Products/Workbench/electron/services/actionRegistry.ts) | Execution of structured JSON action blocks (`render_docx`, `create_docx`, `extract_rfp`, `search_text`, `batch`, `run_script`, etc.), AI priming, feedback loops. |
+| **Model Context Protocol**| [`mcpManager.ts`](file:///d:/Products/Workbench/electron/services/mcpManager.ts) | Stdio client for external MCP servers, dynamic tool discovery, and runtime configuration management. |
+| **Local Document Readers**| [`EpubEditor.tsx`](file:///d:/Products/Workbench/src/components/editors/EpubEditor.tsx), [`epubParser.ts`](file:///d:/Products/Workbench/electron/utils/epubParser.ts), [`mobiParser.ts`](file:///d:/Products/Workbench/electron/utils/mobiParser.ts), [`WordEditor.tsx`](file:///d:/Products/Workbench/src/components/editors/WordEditor.tsx), [`SpreadsheetEditor.tsx`](file:///d:/Products/Workbench/src/components/editors/SpreadsheetEditor.tsx), [`PdfEditor.tsx`](file:///d:/Products/Workbench/src/components/editors/PdfEditor.tsx) | Complete offline viewer and editor suite for EPUB, MOBI/AZW/PRC, PDF, DOCX, XLSX/CSV with companion notes. |
+| **Local Explorer & Notes** | [`src/components/LocalExplorer.tsx`](file:///d:/Products/Workbench/src/components/LocalExplorer.tsx), [`OneNoteApp.tsx`](file:///d:/Products/Workbench/src/components/OneNoteApp.tsx) | Direct filesystem file explorer, multi-line tab wrapping, tree view, inline viewer/editor, and file staging. |
 
 ---
 
@@ -132,6 +143,15 @@ Managing native `WebContentsView` surfaces alongside web modals and splitters re
 | `workbench:save-ai-content` | Renderer → Main | `invoke` | `{ type, targetDir?, activeFilePath? }` | Saves AI response, code blocks, or full transcript. |
 | `workbench:clear-session` | Renderer → Main | `invoke` | `(target, scope)` | Clears cookies, cache, and storage for a source. |
 | `workbench:read-directory` | Renderer → Main | `invoke` | `dirPath: string` | Scans filesystem for LocalExplorer file tree. |
+| `workbench:read-epub` | Renderer → Main | `invoke` | `filePath: string` | Parses EPUB book with chapters, TOC, base64 images. |
+| `workbench:read-mobi` | Renderer → Main | `invoke` | `filePath: string` | Decompresses PalmDOC/KF8 MOBI with anchor markers. |
+| `workbench:read-docx` / `save-docx` | Renderer → Main | `invoke` | `{ filePath, html?, text? }` | Reads Word document via Mammoth, saves OpenXML docx. |
+| `workbench:read-spreadsheet` / `save` | Renderer → Main | `invoke` | `{ filePath, sheets? }` | Reads and saves Excel/CSV workbooks. |
+| `workbench:read-pdf` | Renderer → Main | `invoke` | `{ filePath, maxPages? }` | Extracts PDF text and page arrays. |
+| `workbench:execute-action` | Renderer → Main | `invoke` | `payload: ActionPayload` | Dispatches action blocks (`render_docx`, `run_script`). |
+| `workbench:set-action-mode` | Renderer → Main | `invoke` | `{ enabled, customInstructions?, primeAI? }` | Toggles action mode and triggers AI priming. |
+| `workbench:scan-ai-actions` | Renderer → Main | `invoke` | `void` | Scans active AI conversation for executable action blocks. |
+| `workbench:mcp-get-config` / `reload` | Renderer → Main | `invoke` | `void \| config` | Manages Model Context Protocol (MCP) server status. |
 
 ---
 

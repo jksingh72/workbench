@@ -1,35 +1,37 @@
-# Workbench (O'Reilly & ChatGPT)
+# Workbench — Technical Reading & AI Synthesis Workspace
 
-A dual-pane desktop application built with **Electron**, **React**, and **TypeScript** designed for technical reading and AI-assisted learning.
+A multi-pane desktop application built with **Electron 34**, **React 19**, and **TypeScript 5.7** designed for technical reading, generative AI collaboration, document engineering, and knowledge synthesis.
+
+📘 **Detailed Feature List:** [`docs/FEATURE_LIST.md`](file:///d:/Products/Workbench/docs/FEATURE_LIST.md)  
+📐 **Reference Design Document:** [`docs/REFERENCE_DESIGN_DOCUMENT.md`](file:///d:/Products/Workbench/docs/REFERENCE_DESIGN_DOCUMENT.md)
 
 ---
 
 ## 🌟 Key Features
 
-- **Dual-Pane Interface**:
-  - **Left Pane (Bookview)**: Opens O'Reilly Learning platform (`https://learning.oreilly.com/home/`).
-  - **Right Pane (AIView)**: Opens ChatGPT (`https://chatgpt.com/`).
-  - **Default Ratio**: 60% Bookview / 40% AIView.
-- **Ask AI (Highlight-to-AI Transfer)**:
-  - Highlight any text or code snippet in Bookview and click **"Ask AI ▾"** (or press `Ctrl+Shift+A`).
-  - Choose from presets:
-    - 💡 **Explain Concept**: Generates simple explanation with examples.
-    - 📝 **Summarize**: Extracts key takeaways.
-    - 💻 **Code Example**: Generates working code demo.
-    - ❓ **Quiz Me**: Generates 3 review questions with answers.
-    - 📋 **Paste Raw**: Transfers raw text into ChatGPT.
-    - ✏️ **Custom Prompt**: Allows entering your own prompt prefix.
-  - Automatically types into ChatGPT's prompt input, focuses the view, and copies to your clipboard as a backup.
-- **Dynamic Layout & Presets**:
-  - **Draggable Splitter**: Drag divider between panes (double-click to reset to 60:40).
-  - **Ratio Presets**: `60:40`, `50:50`, `70:30`, `40:60`, `Full Book`, `Full AI`.
-  - **Swap Button**: Switch left and right pane positions with one click.
-- **Independent Zoom & Navigation**:
-  - Zoom in/out independently on the book without magnifying ChatGPT.
-  - Independent Back, Forward, Reload, and Home buttons.
-- **Isolated Sessions & Persistence**:
-  - Partitions `persist:workbench-oreilly` and `persist:workbench-chatgpt` maintain cookies, theme settings, and logins across app restarts.
-  - Configured with modern Chrome desktop User-Agent to prevent SSO/OAuth blocking.
+- **Tri-Pane Technical Workspace**:
+  - **Left Pane (BookView)**: Web technical reading platforms (O'Reilly, Kindle Cloud Reader) and an offline universal document reader suite (EPUB, MOBI/Kindle, PDF, Word DOCX, Excel XLSX/CSV, code/markdown).
+  - **Top-Right Pane (ChatView)**: Multi-provider AI assistant interface (ChatGPT, Claude, Google Gemini, Perplexity, DeepSeek) with agentic action execution.
+  - **Bottom-Right Pane (NoteView)**: Knowledge repository supporting OneNote Web, local filesystem explorer, and automatic companion reading notes (`.notes.md`).
+- **Universal Local Document & E-Book Reader Suite**:
+  - Multi-line flex-wrapping document tabs (`.badge-epub`, `.badge-mobi`, `.badge-doc`, etc.).
+  - **EPUB Reader**: OPF package parsing, NCX/EPUB3 TOC navigation, offline base64 image inlining, Dark/Sepia/Light themes, and dynamic font scaling.
+  - **MOBI / Kindle Reader**: PalmDOC LZ77 decompression, KF8/Combo detection, internal `filepos` link normalization, anchor marker injection, and chapter offset tracking.
+  - **Word DOCX**: Mammoth semantic rendering and in-app editing.
+  - **Spreadsheets**: Multi-sheet `.xlsx` / `.csv` interactive grid viewer and editor.
+  - **PDF Reader**: In-app viewer and page-bounded text extraction.
+  - **Companion Reading Notes**: Auto-paired `<book>.notes.md` with reading templates, auto-save (`Ctrl+S`), and split-view modes.
+- **Workbench Action Model & Autonomous Agent Loop**:
+  - Autonomous feedback loop automatically executes AI tool calls (`render_docx`, `create_docx`, `extract_rfp`, `search_text`, `batch`, `run_script`, `read_pages`), returning structured results back to the chat model.
+  - Granular tool group selection and dynamic AI priming engine.
+- **Model Context Protocol (MCP)**:
+  - Built-in MCP client connecting desktop assistants to external stdio tool servers.
+- **Cross-Pane Intelligence Transfer ("Ask AI" & "Clip Selection")**:
+  - In-page floating action bubble on highlighted text (Explain, Summarize, Code, Quiz).
+  - 1-click citation-enriched clippings to Notes (`Ctrl+Shift+N`) with source title, chapter, URL, and timestamp.
+  - AI response, code block, and full session transcript exports.
+- **Native OS Drag & Drop and Windows Clipboard (`CF_HDROP`)**:
+  - Seamless file dropping from local explorer directly into chat or external applications.
 
 ---
 
