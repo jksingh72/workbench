@@ -155,6 +155,10 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:save-spreadsheet', params),
   readPdf: (params: string | { filePath: string; maxPages?: number }) =>
     ipcRenderer.invoke('workbench:read-pdf', params),
+  readEpub: (filePath: string) =>
+    ipcRenderer.invoke('workbench:read-epub', filePath),
+  readMobi: (filePath: string) =>
+    ipcRenderer.invoke('workbench:read-mobi', filePath),
   copyFilesToClipboard: (paths: string[], isCut?: boolean) =>
     ipcRenderer.invoke('workbench:copy-files-to-clipboard', { paths, isCut }),
   getClipboardFiles: () =>

@@ -112,6 +112,8 @@ export interface ElectronAPI {
     author?: string
     truncated?: boolean
   }>
+  readEpub?: (filePath: string) => Promise<EpubBookData>
+  readMobi?: (filePath: string) => Promise<EpubBookData>
   copyFilesToClipboard?: (paths: string[], isCut?: boolean) => Promise<{ success: boolean; count?: number; error?: string }>
   getClipboardFiles?: () => Promise<{ success: boolean; paths: string[]; error?: string }>
   startDragFile?: (filePath: string | string[]) => void
@@ -277,6 +279,40 @@ export interface PrimingPreviewResult {
   tokenEstimate: number
   detectedProvider: LLMProvider
   availableGroups: ToolGroup[]
+}
+
+export interface EpubChapter {
+  id: string
+  title: string
+  href: string
+  html: string
+  text: string
+  wordCount: number
+  startPos?: number
+  endPos?: number
+}
+
+export interface EpubTocItem {
+  title: string
+  href: string
+  chapterIndex: number
+}
+
+export interface EpubBookData {
+  success: boolean
+  filePath: string
+  fileName: string
+  title: string
+  author?: string
+  description?: string
+  publisher?: string
+  language?: string
+  coverDataUrl?: string
+  totalChapters: number
+  totalWords: number
+  chapters: EpubChapter[]
+  toc: EpubTocItem[]
+  error?: string
 }
 
 declare global {

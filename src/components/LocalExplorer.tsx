@@ -47,13 +47,14 @@ const SpreadsheetEditor = lazy(() => import('./editors/SpreadsheetEditor').then(
 const WordEditor = lazy(() => import('./editors/WordEditor').then((m) => ({ default: m.WordEditor })))
 const TextCodeEditor = lazy(() => import('./editors/TextCodeEditor').then((m) => ({ default: m.TextCodeEditor })))
 const PdfEditor = lazy(() => import('./editors/PdfEditor').then((m) => ({ default: m.PdfEditor })))
+const EpubEditor = lazy(() => import('./editors/EpubEditor').then((m) => ({ default: m.EpubEditor })))
 
 export interface OpenDocTab {
   id: string
   path: string
   name: string
   extension: string
-  type: 'markdown' | 'spreadsheet' | 'word' | 'code' | 'image' | 'pdf'
+  type: 'markdown' | 'spreadsheet' | 'word' | 'code' | 'image' | 'pdf' | 'epub' | 'mobi'
   content?: string
 }
 
@@ -211,6 +212,10 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
       type = 'word'
     } else if (['.pdf'].includes(ext)) {
       type = 'pdf'
+    } else if (['.epub'].includes(ext)) {
+      type = 'epub'
+    } else if (['.mobi', '.azw', '.prc'].includes(ext)) {
+      type = 'mobi'
     } else if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'].includes(ext)) {
       type = 'image'
     }
@@ -617,6 +622,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         '.xlsx', '.xls', '.csv', '.tsv',
         '.docx',
         '.pdf',
+        '.epub',
+        '.mobi', '.azw', '.prc',
         '.json', '.js', '.ts', '.py', '.html', '.css', '.yaml', '.yml', '.log', '.env', '.ini', '.sh', '.bat', '.ps1',
         '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'
       ]
@@ -941,6 +948,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
     if (['XLSX', 'XLS', 'CSV'].includes(ext)) return 'Excel Spreadsheet'
     if (['PPTX', 'PPT'].includes(ext)) return 'PowerPoint Presentation'
     if (ext === 'PDF') return 'PDF Document'
+    if (ext === 'EPUB') return 'EPUB Book'
+    if (['MOBI', 'AZW', 'PRC'].includes(ext)) return 'Kindle MOBI Book'
     if (['MD', 'TXT'].includes(ext)) return 'Text Note'
     if (['TS', 'JS', 'PY', 'JSON', 'HTML'].includes(ext)) return `${ext} Code`
     return ext ? `${ext} File` : 'File'
@@ -1336,6 +1345,12 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         return <span className="office-badge badge-powerpoint" title="PowerPoint">P</span>
       case '.pdf':
         return <span className="office-badge badge-pdf" title="Adobe PDF">PDF</span>
+      case '.epub':
+        return <span className="office-badge badge-epub" title="EPUB Book">EPUB</span>
+      case '.mobi':
+      case '.azw':
+      case '.prc':
+        return <span className="office-badge badge-mobi" title="Kindle MOBI Book">MOBI</span>
       case '.md':
       case '.txt':
         return <FileText size={18} className="file-icon text-purple" />
@@ -1451,6 +1466,8 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
               {tab.type === 'code' && <FileCode size={13} className="text-purple" />}
               {tab.type === 'image' && <FileImage size={13} className="text-pink" />}
               {tab.type === 'pdf' && <span className="office-badge badge-pdf" style={{ fontSize: '8px', padding: '1px 3px', lineHeight: '11px', height: '13px' }}>PDF</span>}
+              {tab.type === 'epub' && <span className="office-badge badge-epub" style={{ fontSize: '8px', padding: '1px 3px', lineHeight: '11px', height: '13px' }}>EPUB</span>}
+              {tab.type === 'mobi' && <span className="office-badge badge-mobi" style={{ fontSize: '8px', padding: '1px 3px', lineHeight: '11px', height: '13px' }}>MOBI</span>}
               <span className="wb-tab-title">{tab.name}</span>
               <button
                 className="wb-tab-ext"
@@ -1570,6 +1587,23 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 key={activeTab.id}
                 filePath={activeTab.path}
                 fileName={activeTab.name}
+                onNotify={onNotify}
+                onOpenOutside={() => window.electron?.openPath(activeTab.path)}
+                onShowInFolder={() => {
+                  selectTab('__explorer__')
+                  setSelectedPath(activeTab.path)
+                }}
+              />
+            )
+          }
+
+          if (activeTab.type === 'epub' || activeTab.type === 'mobi') {
+            return (
+              <EpubEditor
+                key={activeTab.id}
+                filePath={activeTab.path}
+                fileName={activeTab.name}
+                bookType={activeTab.type === 'mobi' ? 'mobi' : 'epub'}
                 onNotify={onNotify}
                 onOpenOutside={() => window.electron?.openPath(activeTab.path)}
                 onShowInFolder={() => {

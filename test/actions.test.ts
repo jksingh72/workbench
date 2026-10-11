@@ -22,6 +22,8 @@ import { writeFileAction } from '../electron/actions/writeFileAction.ts'
 import { copyFileAction } from '../electron/actions/fileOpsActions.ts'
 import { runScriptAction } from '../electron/actions/runScriptAction.ts'
 import { batchAction } from '../electron/actions/batchAction.ts'
+import { parseEpub } from '../electron/utils/epubParser.ts'
+import { parseMobi } from '../electron/utils/mobiParser.ts'
 
 describe('Workbench Document & RFP Actions Test Suite', () => {
   let tempTestDir: string
@@ -631,6 +633,96 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
       assert.ok(result.details?.stdout.includes('CWD exists: true'))
     })
   })
+
+  describe('10. EPUB Book Parsing & Offline Extraction', () => {
+    test('extracts metadata, TOC, and chapters with inlined images from .epub file', () => {
+      const epubPath = path.join(tempTestDir, 'test_system_book.epub')
+      const zip = new AdmZip()
+      zip.addFile(
+        'META-INF/container.xml',
+        Buffer.from(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>`)
+      )
+      zip.addFile(
+        'OEBPS/content.opf',
+        Buffer.from(`<?xml version="1.0"?><package version="2.0"><metadata><dc:title>Workbench Handbook</dc:title><dc:creator>Workbench Team</dc:creator></metadata><manifest><item id="c1" href="ch1.html" media-type="application/xhtml+xml"/><item id="diagram" href="img.png" media-type="image/png"/></manifest><spine><itemref idref="c1"/></spine></package>`)
+      )
+      zip.addFile(
+        'OEBPS/ch1.html',
+        Buffer.from(`<html><body><h1>Workbench Architecture</h1><p>Modern desktop engineering.</p><img src="img.png" alt="Arch"/></body></html>`)
+      )
+      zip.addFile('OEBPS/img.png', Buffer.from('TESTPNG123'))
+      zip.writeZip(epubPath)
+
+      const book = parseEpub(epubPath)
+      assert.strictEqual(book.success, true)
+      assert.strictEqual(book.title, 'Workbench Handbook')
+      assert.strictEqual(book.author, 'Workbench Team')
+      assert.strictEqual(book.totalChapters, 1)
+      assert.ok(book.chapters[0].html.includes('data:image/png;base64,'))
+      assert.ok(book.chapters[0].text.includes('Modern desktop engineering.'))
+    })
+  })
+
+  describe('11. MOBI Book Parsing & Extraction', () => {
+    test('parses synthetic MOBI book with PalmDOC compression and pagebreak chapters', () => {
+      const mobiPath = path.join(tempTestDir, 'test_kindle_book.mobi')
+      const title = 'Kindle Architecture Guide'
+      const titleBuf = Buffer.from(title, 'utf-8')
+
+      // Record 0
+      const rec0 = Buffer.alloc(300)
+      rec0.writeUInt16BE(2, 0) // PalmDOC compression
+      rec0.writeUInt32BE(500, 4)
+      rec0.writeUInt16BE(1, 8)
+      rec0.writeUInt16BE(4096, 10)
+      rec0.write('MOBI', 16, 'latin1')
+      rec0.writeUInt32BE(232, 20)
+
+      const titleOffset = 250
+      rec0.writeUInt32BE(titleOffset, 16 + 80)
+      rec0.writeUInt32BE(titleBuf.length, 16 + 84)
+      titleBuf.copy(rec0, titleOffset)
+
+      // Record 1 (Text with pagebreak)
+      const rawText = Buffer.from(
+        '<html><body><h1>Section 1</h1><p>Kindle reading experience.</p><mbp:pagebreak/><h1>Section 2</h1><p>In-depth annotations.</p></body></html>'
+      )
+      // PalmDOC compression helper
+      const out: number[] = []
+      let i = 0
+      while (i < rawText.length) {
+        const chunk = rawText.subarray(i, Math.min(i + 8, rawText.length))
+        out.push(chunk.length)
+        for (const b of chunk) out.push(b)
+        i += chunk.length
+      }
+      const rec1 = Buffer.from(out)
+
+      // PDB Header
+      const numRecords = 2
+      const headerSize = 78 + numRecords * 8
+      const pdb = Buffer.alloc(headerSize)
+      pdb.write('KindleBook', 0, 'latin1')
+      pdb.writeUInt16BE(numRecords, 76)
+
+      const rec0Offset = headerSize
+      const rec1Offset = rec0Offset + rec0.length
+
+      pdb.writeUInt32BE(rec0Offset, 78)
+      pdb.writeUInt32BE(rec1Offset, 78 + 8)
+
+      fs.writeFileSync(mobiPath, Buffer.concat([pdb, rec0, rec1]))
+
+      const mobiBook = parseMobi(mobiPath)
+      assert.strictEqual(mobiBook.success, true)
+      assert.strictEqual(mobiBook.title, 'Kindle Architecture Guide')
+      assert.strictEqual(mobiBook.totalChapters, 2)
+      assert.ok(mobiBook.chapters[0].text.includes('Kindle reading experience.'))
+      assert.ok(mobiBook.chapters[1].text.includes('In-depth annotations.'))
+    })
+  })
 })
+
+
 
 

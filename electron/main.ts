@@ -151,6 +151,25 @@ function createWindow() {
       mainWindow.show()
     }
   })
+  // Safety guard: prevent in-app links or arbitrary schemes from replacing the Workbench UI
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = mainWindow?.webContents.getURL() || ''
+    if (url === currentUrl) return
+    if (VITE_DEV_SERVER_URL && url.startsWith(VITE_DEV_SERVER_URL)) return
+
+    event.preventDefault()
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url).catch(() => {})
+    }
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url).catch(() => {})
+    }
+    return { action: 'deny' }
+  })
+
   // Fallback safety timer to ensure window appears even if ready-to-show event is missed
   setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
@@ -1661,6 +1680,26 @@ function registerIpcHandlers() {
     } catch (err: any) {
       console.error('[Main] read-pdf error:', err)
       return { success: false, error: err?.message || 'Failed to read PDF' }
+    }
+  })
+
+  ipcMain.handle('workbench:read-epub', async (_, filePath: string) => {
+    try {
+      const { parseEpub } = await import('./utils/epubParser')
+      return parseEpub(filePath)
+    } catch (err: any) {
+      console.error('[Main] read-epub error:', err)
+      return { success: false, error: err?.message || 'Failed to read EPUB book' }
+    }
+  })
+
+  ipcMain.handle('workbench:read-mobi', async (_, filePath: string) => {
+    try {
+      const { parseMobi } = await import('./utils/mobiParser')
+      return parseMobi(filePath)
+    } catch (err: any) {
+      console.error('[Main] read-mobi error:', err)
+      return { success: false, error: err?.message || 'Failed to read MOBI book' }
     }
   })
 
