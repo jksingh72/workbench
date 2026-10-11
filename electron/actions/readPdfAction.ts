@@ -21,8 +21,8 @@ export const readPdfAction: ActionDefinition = {
     maxLines: {
       type: 'number',
       required: false,
-      description: 'Maximum lines of text to return (default: 500)',
-      default: 500,
+      description: 'Maximum lines of text to return (default: 2500)',
+      default: 2500,
     },
     maxChars: {
       type: 'number',
@@ -46,7 +46,7 @@ export const readPdfAction: ActionDefinition = {
     const params = payload.params || {}
     const filePath = params.path ?? payload.path ?? params.file ?? payload.file
     const maxPages = Number(params.maxPages ?? payload.maxPages ?? 0)
-    const maxLines = Number(params.maxLines ?? payload.maxLines ?? 500)
+    const maxLines = Number(params.maxLines ?? payload.maxLines ?? 2500)
     const maxChars = Number(params.maxChars ?? payload.maxChars ?? 100000)
     const shouldOpen = Boolean(params.openInTab ?? payload.openInTab ?? false)
 
@@ -114,7 +114,7 @@ export const readPdfAction: ActionDefinition = {
     if (pdfParseModule.PDFParse) {
       // pdf-parse v2+
       const parser = new pdfParseModule.PDFParse({ data: buffer })
-      const textResult = await parser.getText(maxPages > 0 ? { first: maxPages } : { first: 20 })
+      const textResult = await parser.getText(maxPages > 0 ? { first: maxPages } : undefined)
       rawText = textResult.text || ''
       totalPages = textResult.total || 1
       pagesRead = maxPages > 0 ? Math.min(maxPages, totalPages) : totalPages
@@ -126,7 +126,7 @@ export const readPdfAction: ActionDefinition = {
     } else {
       // pdf-parse v1 fallback
       const parseFn = typeof pdfParseModule.default === 'function' ? pdfParseModule.default : pdfParseModule
-      const data = await parseFn(buffer, maxPages > 0 ? { max: maxPages } : { max: 20 })
+      const data = await parseFn(buffer, maxPages > 0 ? { max: maxPages } : undefined)
       rawText = data.text || ''
       totalPages = data.numpages || 1
       pagesRead = maxPages > 0 ? Math.min(maxPages, totalPages) : totalPages

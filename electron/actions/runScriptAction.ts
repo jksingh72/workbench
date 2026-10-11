@@ -3,7 +3,6 @@ import { exec } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import vm from 'node:vm'
 
 export const runScriptAction: ActionDefinition = {
   id: 'run_script',
@@ -77,75 +76,76 @@ console.log(JSON.stringify(report, null, 2));
     console.log(`[run_script:START] Executing ${language} script (CWD: "${targetCwd}", timeout: ${timeoutMs}ms)`)
     const startTime = performance.now()
 
-    // 1. JavaScript: Execute directly in-process via Node vm sandbox with hard Promise.race timeout
+    // 1. JavaScript (Node.js CommonJS via node CLI)
     if (language === 'javascript') {
+      const tempFileName = `.wb_script_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.cjs`
+      const tempFilePath = path.join(os.tmpdir(), tempFileName)
+
       try {
-        const logs: string[] = []
-        const customConsole = {
-          log: (...args: any[]) => logs.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a))).join(' ')),
-          error: (...args: any[]) => logs.push('[ERROR] ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a))).join(' ')),
-          warn: (...args: any[]) => logs.push('[WARN] ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a))).join(' ')),
-          info: (...args: any[]) => logs.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a))).join(' ')),
-        }
+        await fs.promises.writeFile(tempFilePath, script, 'utf-8')
+        const execPromise = new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+          const child = exec(
+            `node "${tempFilePath}"`,
+            {
+              cwd: targetCwd,
+              timeout: timeoutMs,
+              maxBuffer: 20 * 1024 * 1024,
+            },
+            (err, stdout, stderr) => {
+              if (err) {
+                ;(err as any).stdout = stdout || ''
+                ;(err as any).stderr = stderr || ''
+                reject(err)
+              } else {
+                resolve({ stdout: stdout || '', stderr: stderr || '' })
+              }
+            }
+          )
+          setTimeout(() => {
+            try {
+              if (!child.killed) child.kill('SIGKILL')
+            } catch (_) {}
+          }, timeoutMs + 500)
+        })
 
-        const sandbox: Record<string, any> = {
-          require: (mod: string) => {
-            return require(mod)
-          },
-          fs,
-          path,
-          os,
-          console: customConsole,
-          process: {
-            ...process,
-            cwd: () => targetCwd,
-          },
-          Buffer,
-          __dirname: targetCwd,
-          __filename: path.join(targetCwd, 'script.js'),
-        }
-
-        vm.createContext(sandbox)
-        const scriptWrapped = `(async () => {\n${script}\n})()`
-
-        const evalPromise = Promise.resolve(vm.runInContext(scriptWrapped, sandbox, { timeout: timeoutMs }))
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Script execution exceeded maximum timeout of ${timeoutMs}ms`)), timeoutMs)
-        )
-
-        const evalResult = await Promise.race([evalPromise, timeoutPromise])
+        const res = await execPromise
         const durationMs = Math.round(performance.now() - startTime)
         ctx.refreshExplorer(targetPane as any)
 
-        let finalOutput = logs.join('\n').trim()
-        if (!finalOutput && evalResult !== undefined) {
-          finalOutput = typeof evalResult === 'object' ? JSON.stringify(evalResult, null, 2) : String(evalResult)
-        }
-        if (!finalOutput) finalOutput = 'Script executed successfully with no output'
-
+        const output = (res.stdout || '').trim() || (res.stderr || '').trim() || 'Script completed with no output'
         return {
           success: true,
           action: 'run_script',
-          message: finalOutput,
+          message: output,
           details: {
-            stdout: finalOutput,
-            language: 'javascript (in-process)',
+            stdout: res.stdout,
+            stderr: res.stderr,
+            language: 'javascript',
             executionTimeMs: durationMs,
           },
         }
-      } catch (err: any) {
+      } catch (jsErr: any) {
         const durationMs = Math.round(performance.now() - startTime)
-        console.error(`[run_script:ERROR] In-process execution failed after ${durationMs}ms:`, err.message)
+        let errMsg = jsErr.message || 'JavaScript execution failed'
+        if (jsErr.killed || jsErr.signal === 'SIGKILL' || errMsg.includes('timed out')) {
+          errMsg = `⏱️ JavaScript execution exceeded maximum timeout of ${timeoutMs}ms and was safely terminated.`
+        }
+        const combined = [errMsg, jsErr.stdout, jsErr.stderr].filter(Boolean).join('\n')
         return {
           success: false,
           action: 'run_script',
-          message: `Script execution failed: ${err.message}`,
-          error: err.message,
+          message: combined,
+          error: errMsg,
           details: {
-            stack: err.stack,
+            stdout: jsErr.stdout || '',
+            stderr: jsErr.stderr || '',
             executionTimeMs: durationMs,
           },
         }
+      } finally {
+        try {
+          if (fs.existsSync(tempFilePath)) await fs.promises.unlink(tempFilePath)
+        } catch (_) {}
       }
     }
 

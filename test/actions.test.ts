@@ -13,9 +13,14 @@ import { createDocxAction } from '../electron/actions/createDocxAction.ts'
 import { extractRfpAction } from '../electron/actions/extractRfpAction.ts'
 import { searchTextAction } from '../electron/actions/searchTextAction.ts'
 import { readPagesAction } from '../electron/actions/readPagesAction.ts'
+import { readFileAction } from '../electron/actions/readFileAction.ts'
+import { readDocxAction } from '../electron/actions/readDocxAction.ts'
+import { readPdfAction } from '../electron/actions/readPdfAction.ts'
+import { listDirectoryAction } from '../electron/actions/listDirectoryAction.ts'
 import { createFolderAction } from '../electron/actions/createFolderAction.ts'
 import { writeFileAction } from '../electron/actions/writeFileAction.ts'
 import { copyFileAction } from '../electron/actions/fileOpsActions.ts'
+import { runScriptAction } from '../electron/actions/runScriptAction.ts'
 import { batchAction } from '../electron/actions/batchAction.ts'
 
 describe('Workbench Document & RFP Actions Test Suite', () => {
@@ -33,9 +38,14 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
     registry.register(extractRfpAction)
     registry.register(searchTextAction)
     registry.register(readPagesAction)
+    registry.register(readFileAction)
+    registry.register(readDocxAction)
+    registry.register(readPdfAction)
+    registry.register(listDirectoryAction)
     registry.register(createFolderAction)
     registry.register(writeFileAction)
     registry.register(copyFileAction)
+    registry.register(runScriptAction)
     registry.register(batchAction)
 
     mockContext = {
@@ -146,6 +156,60 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
 
       const extracted = await mammoth.extractRawText({ path: targetDocx })
       assert.ok(extracted.value.includes('Project Evaluation & Feasibility Study'))
+    })
+
+    test('render_docx strictly rejects unknown block types and writes no file', async () => {
+      const badDocxPath = path.join(tempTestDir, 'out_test', 'bad_block.docx')
+
+      const result = await mockContext.dispatch({
+        action: 'render_docx',
+        outPath: badDocxPath,
+        spec: {
+          title: 'Bad Block Test',
+          blocks: [
+            { type: 'paragraph', text: 'Valid paragraph' },
+            { type: 'notarealtype', text: 'Invalid block' } as any,
+          ],
+        },
+      })
+
+      assert.strictEqual(result.success, false)
+      assert.ok(result.error?.includes('Unknown block type "notarealtype" at position 2'))
+      assert.ok(result.error?.includes('Valid block types are:'))
+      assert.strictEqual(fs.existsSync(badDocxPath), false, 'Must not write any file to disk on error')
+    })
+
+    test('render_docx renders page breaks for pagebreak, page-break, page_break, and pageBreak aliases', async () => {
+      const aliases = [
+        { alias: 'pagebreak', file: 'pb_alias_1_lower.docx' },
+        { alias: 'page-break', file: 'pb_alias_2_hyphen.docx' },
+        { alias: 'page_break', file: 'pb_alias_3_underscore.docx' },
+        { alias: 'pageBreak', file: 'pb_alias_4_camel.docx' },
+      ]
+
+      for (const { alias, file } of aliases) {
+        const docxPath = path.join(tempTestDir, 'out_test', file)
+        const result = await mockContext.dispatch({
+          action: 'render_docx',
+          outPath: docxPath,
+          spec: {
+            title: '',
+            blocks: [
+              { type: 'paragraph', text: `Before ${alias}` },
+              { type: alias } as any,
+              { type: 'paragraph', text: `After ${alias}` },
+            ],
+          },
+        })
+
+        assert.ok(result.success, `Failed to render docx for alias "${alias}": ${result.error || result.message}`)
+        assert.ok(fs.existsSync(docxPath), `File must exist for alias "${alias}"`)
+
+        const zip = new AdmZip(docxPath)
+        const docXml = zip.readAsText('word/document.xml')
+        const pageBreakMatches = docXml.match(/w:type="page"/g)
+        assert.strictEqual(pageBreakMatches?.length, 1, `Expected exactly 1 page break for alias "${alias}"`)
+      }
     })
 
     test('create_docx returns full 64-char SHA-256 and target folder listing', async () => {
@@ -355,5 +419,218 @@ describe('Workbench Document & RFP Actions Test Suite', () => {
       assert.ok(result.message.includes('[Step 3/3: write_file'))
     })
   })
+
+  describe('6. read_pages CRLF handling & concise message formatting', () => {
+    test('extracts exact page ranges cleanly with Windows CRLF newlines without dumping full document', async () => {
+      const extractedDir = path.join(tempTestDir, '_extracted')
+      fs.mkdirSync(extractedDir, { recursive: true })
+
+      // Create a 5-page document with CRLF (\r\n) newlines
+      const sampleDoc = [
+        '-- page 1 --\r\nIntro page 1 content\r\nFirst paragraph',
+        '-- page 2 --\r\nPage 2 requirements\r\nLine A\r\nLine B',
+        '-- page 3 --\r\nPage 3 scope of work\r\nLine C\r\nLine D',
+        '-- page 4 --\r\nPage 4 pricing matrix\r\nLine E',
+        '-- page 5 --\r\nPage 5 terms and conditions\r\nLine F',
+      ].join('\r\n\r\n')
+
+      fs.writeFileSync(path.join(extractedDir, 'crlf_sample.pdf.txt'), sampleDoc, 'utf-8')
+
+      // Test extracting page 2 to 3
+      const result = await readPagesAction.execute(mockContext, {
+        file: 'crlf_sample.pdf',
+        fromPage: 2,
+        toPage: 3,
+      })
+
+      assert.ok(result.success)
+      assert.ok(result.message.startsWith('Read pages 2–3'), 'Message must be concise summary')
+      assert.ok(!result.message.includes('Intro page 1 content'), 'Message should NOT contain full text dump')
+
+      const content = result.details?.content || ''
+      assert.ok(content.includes('-- page 2 --'))
+      assert.ok(content.includes('Page 2 requirements'))
+      assert.ok(content.includes('-- page 3 --'))
+      assert.ok(content.includes('Page 3 scope of work'))
+      assert.ok(!content.includes('Intro page 1 content'), 'Page 1 must not be included')
+      assert.ok(!content.includes('Page 4 pricing matrix'), 'Page 4 must not be included')
+      assert.ok(!content.includes('Page 5 terms'), 'Page 5 must not be included')
+
+      // Test extracting page 1 only
+      const resultP1 = await readPagesAction.execute(mockContext, {
+        file: 'crlf_sample.pdf',
+        fromPage: 1,
+        toPage: 1,
+      })
+
+      assert.ok(resultP1.success)
+      const contentP1 = resultP1.details?.content || ''
+      assert.ok(contentP1.includes('Intro page 1 content'))
+      assert.ok(!contentP1.includes('Page 2 requirements'), 'Page 2 must not be in page 1 extraction')
+    })
+  })
+
+  describe('7. Default Action Caps (2500 lines / 100,000 chars)', () => {
+    test('read_file reads 1,200 lines without truncation using default maxLines', async () => {
+      const lines1200 = Array.from({ length: 1200 }, (_, i) => `Line ${i + 1}: Sample data line content`).join('\n')
+      const testFile = path.join(tempTestDir, 'large_text_file.txt')
+      fs.writeFileSync(testFile, lines1200, 'utf-8')
+
+      const result = await readFileAction.execute(mockContext, {
+        path: testFile,
+      })
+
+      assert.ok(result.success)
+      assert.strictEqual(result.details?.lineCount, 1200)
+      assert.strictEqual(result.details?.truncated, false)
+      assert.ok(!result.details?.content.includes('... [Truncated:'))
+    })
+  })
+
+  describe('8. AI View Handler & Batch Result Formatting', () => {
+    test('formatActionFeedback includes rich outputs for search_text, list_directory, and read_pages inside batch', async () => {
+      const { formatActionFeedback } = await import('../electron/utils/feedbackFormatter.ts')
+
+      const mockBatchResult = {
+        success: true,
+        action: 'batch',
+        message: 'Executed 3 actions successfully',
+        details: {
+          total: 3,
+          succeeded: 3,
+          failed: 0,
+          results: [
+            {
+              step: '1/3',
+              action: 'list_directory',
+              message: 'Directory Listing for "rfp_folder":\n📁 Subfolder 1\n📄 file1.pdf (250 KB)',
+              details: { folderCount: 1, fileCount: 1 },
+            },
+            {
+              step: '2/3',
+              action: 'search_text',
+              message: 'Found 2 matches across 1 document',
+              details: {
+                matches: [
+                  { file: 'exhibit_d.pdf.txt', page: 5, line: 12, text: '5.2.5 Cyber Liability Coverage' },
+                  { file: 'exhibit_d.pdf.txt', page: 6, line: 40, text: 'commercial cyber liability insurance' },
+                ],
+              },
+            },
+            {
+              step: '3/3',
+              action: 'read_pages',
+              message: 'Read pages 5–6 (1,200 characters, 45 lines)',
+              details: {
+                content: '-- page 5 --\n5.2.5 Cyber Liability Coverage\n-- page 6 --\ncommercial cyber liability insurance',
+              },
+            },
+          ],
+        },
+      }
+
+      const formatted = formatActionFeedback({ action: 'batch' }, mockBatchResult)
+
+      // Step 1: list_directory multiline message rendered
+      assert.ok(formatted.includes('Step 1/3 Details:'))
+      assert.ok(formatted.includes('📁 Subfolder 1'))
+
+      // Step 2: search_text matches rendered
+      assert.ok(formatted.includes('Step 2/3 Matches:'))
+      assert.ok(formatted.includes('Found 2 match(es):'))
+      assert.ok(formatted.includes('[exhibit_d.pdf.txt:Page 5, Line 12] 5.2.5 Cyber Liability Coverage'))
+
+      // Step 3: read_pages content rendered
+      assert.ok(formatted.includes('Step 3/3 Content:'))
+      assert.ok(formatted.includes('-- page 5 --'))
+    })
+
+    test('spills large result payloads (>100,000 chars) to temp file with 12,000 char preview', async () => {
+      const { formatActionFeedback } = await import('../electron/utils/feedbackFormatter.ts')
+
+      // Construct 120,000 character output
+      const largeText = 'A'.repeat(120000)
+      const mockResult = {
+        success: true,
+        action: 'read_file',
+        message: 'Read file',
+        details: {
+          content: largeText,
+        },
+      }
+
+      const formatted = formatActionFeedback({ action: 'read_file' }, mockResult)
+
+      // Verifies spill threshold
+      assert.ok(formatted.includes('full payload saved to:'))
+      assert.ok(formatted.includes('12,000 of') || formatted.includes('120,000 characters'))
+    })
+
+    test('formatActionFeedback outputs full step details even when a batch step fails', async () => {
+      const { formatActionFeedback } = await import('../electron/utils/feedbackFormatter.ts')
+
+      const mockFailedBatchResult = {
+        success: false,
+        action: 'batch',
+        message: 'Batch completed (2/3 succeeded):\n- [Step 1/3: render_docx] ❌ Unknown block type\n- [Step 2/3: write_file] ✅ OK\n- [Step 3/3: run_script] ✅ Line 1 from step 3',
+        error: 'Failed at step 1/3',
+        details: {
+          total: 3,
+          succeeded: 2,
+          failed: 1,
+          results: [
+            {
+              step: '1/3',
+              action: 'render_docx',
+              success: false,
+              error: 'Unknown block type',
+            },
+            {
+              step: '2/3',
+              action: 'write_file',
+              success: true,
+              message: 'Created file',
+            },
+            {
+              step: '3/3',
+              action: 'run_script',
+              success: true,
+              message: 'Line 1 from step 3\nLine 2 from step 3',
+              details: {
+                stdout: 'Line 1 from step 3\nLine 2 from step 3',
+              },
+            },
+          ],
+        },
+      }
+
+      const formatted = formatActionFeedback({ action: 'batch' }, mockFailedBatchResult)
+      assert.ok(formatted.includes('Step 3/3 Output:'), 'Must format Step 3 output section')
+      assert.ok(formatted.includes('Line 1 from step 3'), 'Must contain Line 1')
+      assert.ok(formatted.includes('Line 2 from step 3'), 'Must contain Line 2')
+    })
+  })
+
+  describe('9. run_script CommonJS require support', () => {
+    test('executes JavaScript script with CommonJS require("fs") and require("path")', async () => {
+      const scriptCode = `
+        const fs = require('fs');
+        const path = require('path');
+        const exists = fs.existsSync(process.cwd());
+        console.log('Path sep: ' + path.sep);
+        console.log('CWD exists: ' + exists);
+      `
+
+      const result = await runScriptAction.execute(mockContext, {
+        language: 'javascript',
+        script: scriptCode,
+      })
+
+      assert.ok(result.success, `run_script failed: ${result.error || result.message}`)
+      assert.ok(result.details?.stdout.includes('Path sep:'))
+      assert.ok(result.details?.stdout.includes('CWD exists: true'))
+    })
+  })
 })
+
 

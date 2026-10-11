@@ -22,8 +22,14 @@ export const readDocxAction: ActionDefinition = {
     maxLines: {
       type: 'number',
       required: false,
-      description: 'Maximum number of lines of content to return (default 500)',
-      default: 500,
+      description: 'Maximum number of lines of content to return (default 2500)',
+      default: 2500,
+    },
+    maxChars: {
+      type: 'number',
+      required: false,
+      description: 'Maximum characters of content to return (default 100000)',
+      default: 100000,
     },
     openInTab: {
       type: 'boolean',
@@ -41,7 +47,8 @@ export const readDocxAction: ActionDefinition = {
     const params = payload.params || {}
     const filePath = params.path ?? payload.path ?? params.file ?? payload.file
     const format = String(params.format ?? payload.format ?? 'markdown').toLowerCase()
-    const maxLines = Number(params.maxLines ?? payload.maxLines ?? 500)
+    const maxLines = Number(params.maxLines ?? payload.maxLines ?? 2500)
+    const maxChars = Number(params.maxChars ?? payload.maxChars ?? 100000)
     const shouldOpen = Boolean(params.openInTab ?? payload.openInTab ?? false)
 
     if (!filePath) {
@@ -91,12 +98,18 @@ export const readDocxAction: ActionDefinition = {
     }
 
     const allLines = content.split(/\r?\n/)
-    const truncated = allLines.length > maxLines
-    const lines = truncated ? allLines.slice(0, maxLines) : allLines
+    const lineTruncated = allLines.length > maxLines
+    const lines = lineTruncated ? allLines.slice(0, maxLines) : allLines
     let finalContent = lines.join('\n')
 
+    const charTruncated = finalContent.length > maxChars
+    if (charTruncated) {
+      finalContent = finalContent.slice(0, maxChars)
+    }
+
+    const truncated = lineTruncated || charTruncated
     if (truncated) {
-      finalContent += `\n\n... [Truncated: showing first ${maxLines} of ${allLines.length} lines] ...`
+      finalContent += `\n\n... [Truncated: showing ${lines.length} lines (${finalContent.length} characters)] ...`
     }
 
     console.log(`[read_docx:STEP 4] Document converted. Total lines: ${allLines.length}, Showing: ${lines.length}, Truncated: ${truncated}`)

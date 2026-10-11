@@ -15,8 +15,14 @@ export const readFileAction: ActionDefinition = {
     maxLines: {
       type: 'number',
       required: false,
-      description: 'Maximum number of lines to return (default 300)',
-      default: 300,
+      description: 'Maximum number of lines to return (default 2500)',
+      default: 2500,
+    },
+    maxChars: {
+      type: 'number',
+      required: false,
+      description: 'Maximum characters of text to return (default: 100000)',
+      default: 100000,
     },
   },
   example: {
@@ -26,7 +32,8 @@ export const readFileAction: ActionDefinition = {
   async execute(ctx: ActionContext, payload: any, targetPane = 'book'): Promise<ActionResult> {
     const params = payload.params || {}
     const filePath = params.path ?? payload.path ?? params.file ?? payload.file
-    const maxLines = Number(params.maxLines ?? payload.maxLines ?? 300)
+    const maxLines = Number(params.maxLines ?? payload.maxLines ?? 2500)
+    const maxChars = Number(params.maxChars ?? payload.maxChars ?? 100000)
 
     if (!filePath) {
       throw new Error('File path is required for read_file')
@@ -116,15 +123,21 @@ export const readFileAction: ActionDefinition = {
     console.log(`[read_file:STEP 4] Reading text content from disk...`)
     const rawContent = await fs.promises.readFile(resolvedPath, 'utf-8')
     const allLines = rawContent.split(/\r?\n/)
-    const truncated = allLines.length > maxLines
-    const lines = truncated ? allLines.slice(0, maxLines) : allLines
+    const lineTruncated = allLines.length > maxLines
+    const lines = lineTruncated ? allLines.slice(0, maxLines) : allLines
     let content = lines.join('\n')
 
-    if (truncated) {
-      content += `\n\n... [Truncated: showing first ${maxLines} of ${allLines.length} lines] ...`
+    const charTruncated = content.length > maxChars
+    if (charTruncated) {
+      content = content.slice(0, maxChars)
     }
 
-    const summary = `Read ${lines.length} lines (${stats.size} bytes) from "${path.basename(resolvedPath)}"`
+    const truncated = lineTruncated || charTruncated
+    if (truncated) {
+      content += `\n\n... [Truncated: showing ${lines.length} lines (${content.length} characters)] ...`
+    }
+
+    const summary = `Read ${lines.length} lines (${stats.size.toLocaleString()} bytes) from "${path.basename(resolvedPath)}"`
     console.log(`[read_file:STEP 5] Successfully read ${allLines.length} lines (Truncated: ${truncated}, returning: ${lines.length} lines)`)
     ctx.notify(`📖 ${summary}`)
 

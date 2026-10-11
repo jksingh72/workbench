@@ -23,6 +23,12 @@ export const readPagesAction: ActionDefinition = {
       required: true,
       description: 'Ending page number (1-based, inclusive).',
     },
+    maxChars: {
+      type: 'number',
+      required: false,
+      description: 'Maximum characters to return (default: 100000).',
+      default: 100000,
+    },
   },
   example: {
     action: 'read_pages',
@@ -35,6 +41,7 @@ export const readPagesAction: ActionDefinition = {
     const fileRaw = params.file ?? payload.file ?? params.path ?? payload.path
     const fromPage = Number(params.fromPage ?? payload.fromPage ?? 1)
     const toPage = Number(params.toPage ?? payload.toPage ?? fromPage)
+    const maxChars = Number(params.maxChars ?? payload.maxChars ?? 100000)
 
     if (!fileRaw) {
       throw new Error('Missing required parameter "file"')
@@ -109,26 +116,28 @@ export const readPagesAction: ActionDefinition = {
       throw new Error(`File not found: "${fileRaw}" (checked in "${resolvedFilePath}" and "_extracted/")`)
     }
 
-    // Parse out text between `-- page X --` markers
-    const lines = fullExtractedText.split('\n')
+    // Parse out text between `-- page X --` markers reliably across CRLF & LF
+    const lines = fullExtractedText.split(/\r?\n/)
+    const hasAnyPageMarkers = lines.some((l) => /^--\s*page\s+\d+\s*--/i.test(l.trim()))
+
     const extractedLines: string[] = []
     let currentPage = 1
     let inTargetRange = false
-    let foundAnyPage = false
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
-      const marker = line.match(/^--\s*page\s+(\d+)\s*--/i)
+      const trimmed = line.trim()
+      const marker = trimmed.match(/^--\s*page\s+(\d+)\s*--/i)
+
       if (marker) {
         currentPage = parseInt(marker[1], 10)
         if (currentPage >= fromPage && currentPage <= toPage) {
           inTargetRange = true
-          foundAnyPage = true
-          extractedLines.push(line)
+          extractedLines.push(trimmed)
         } else {
           inTargetRange = false
           if (currentPage > toPage) {
-            // Reached beyond target range
+            // Reached beyond requested target range
             break
           }
         }
@@ -140,12 +149,18 @@ export const readPagesAction: ActionDefinition = {
       }
     }
 
-    // Fallback if document has no page markers (e.g. single page doc)
-    if (!foundAnyPage && fromPage === 1) {
+    // Fallback only if document has zero page markers anywhere (e.g. single-page doc)
+    if (!hasAnyPageMarkers && fromPage === 1) {
       extractedLines.push(...lines)
     }
 
-    const outputText = extractedLines.join('\n').trim()
+    let outputText = extractedLines.join('\n').trim()
+
+    // Clamp by maxChars if exceeded
+    const truncated = outputText.length > maxChars
+    if (truncated) {
+      outputText = outputText.slice(0, maxChars) + `\n\n... [Truncated: showing first ${maxChars.toLocaleString()} characters] ...`
+    }
 
     if (!outputText) {
       return {
@@ -161,13 +176,13 @@ export const readPagesAction: ActionDefinition = {
       }
     }
 
-    const header = `### Extracted Pages ${fromPage}–${toPage} from ${baseName}:\n`
-    const message = `${header}\n${outputText}`
+    const summary = `Read pages ${fromPage}–${toPage} (${outputText.length.toLocaleString()} characters, ${extractedLines.length} lines) from "${baseName}"`
+    ctx.notify(`📄 ${summary}`)
 
     return {
       success: true,
       action: 'read_pages',
-      message,
+      message: summary,
       details: {
         file: baseName,
         fromPage,
@@ -175,6 +190,7 @@ export const readPagesAction: ActionDefinition = {
         charCount: outputText.length,
         lineCount: extractedLines.length,
         content: outputText,
+        truncated,
       },
     }
   },

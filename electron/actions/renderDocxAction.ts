@@ -6,6 +6,59 @@ import * as docx from 'docx'
 import mammoth from 'mammoth'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
 
+export const VALID_DOCX_BLOCK_TYPES = [
+  'title',
+  'heading',
+  'paragraph',
+  'bullets',
+  'numbered',
+  'table',
+  'pageBreak',
+  'divider',
+] as const
+
+export function normalizeBlockType(rawType: any): string {
+  if (typeof rawType !== 'string') return ''
+  const clean = rawType.trim().toLowerCase().replace(/[-_\s]/g, '')
+
+  switch (clean) {
+    case 'title':
+      return 'title'
+    case 'heading':
+    case 'h1':
+    case 'h2':
+    case 'h3':
+    case 'h4':
+      return 'heading'
+    case 'paragraph':
+    case 'p':
+    case 'para':
+    case 'text':
+      return 'paragraph'
+    case 'bullets':
+    case 'bullet':
+    case 'bulletlist':
+    case 'list':
+      return 'bullets'
+    case 'numbered':
+    case 'numberedlist':
+    case 'ordered':
+    case 'orderedlist':
+      return 'numbered'
+    case 'pagebreak':
+      return 'pageBreak'
+    case 'divider':
+    case 'hr':
+    case 'line':
+    case 'horizontalrule':
+      return 'divider'
+    case 'table':
+      return 'table'
+    default:
+      return ''
+  }
+}
+
 export interface DocxColumnSpec {
   header: string
   width?: number // Width in inches
@@ -13,24 +66,7 @@ export interface DocxColumnSpec {
 }
 
 export interface DocxBlockSpec {
-  type:
-    | 'title'
-    | 'heading'
-    | 'paragraph'
-    | 'bullets'
-    | 'bullet'
-    | 'bulletList'
-    | 'list'
-    | 'numbered'
-    | 'numberedList'
-    | 'ordered'
-    | 'orderedList'
-    | 'table'
-    | 'pageBreak'
-    | 'page_break'
-    | 'divider'
-    | 'hr'
-    | 'line'
+  type: string
   text?: string
   level?: number // 1 to 4 for headings
   items?: string[] // For bullets and numbered
@@ -271,9 +307,29 @@ export const renderDocxAction: ActionDefinition = {
     const leftMargin = inchesToDxa(pageSpec.margins?.left ?? 0.9)
     const rightMargin = inchesToDxa(pageSpec.margins?.right ?? 0.9)
 
+    // Strict validation: every block must be an object with a valid recognized type
+    for (let i = 0; i < spec.blocks.length; i++) {
+      const block = spec.blocks[i]
+      const position = i + 1
+      if (!block || typeof block !== 'object') {
+        throw new Error(`Invalid block at position ${position} (index ${i}): block must be an object.`)
+      }
+      if (!block.type || typeof block.type !== 'string' || !block.type.trim()) {
+        throw new Error(
+          `Missing or empty block "type" at position ${position} (index ${i}). Valid block types are: ${VALID_DOCX_BLOCK_TYPES.join(', ')}.`
+        )
+      }
+      const normalized = normalizeBlockType(block.type)
+      if (!normalized) {
+        throw new Error(
+          `Unknown block type "${block.type}" at position ${position} (index ${i}). Valid block types are: ${VALID_DOCX_BLOCK_TYPES.join(', ')} (and aliases: pagebreak, page_break, page-break, hr, line, bullet, ordered).`
+        )
+      }
+    }
+
     const docChildren: (docx.Paragraph | docx.Table)[] = []
 
-    if (spec.title && !spec.blocks?.some((b: any) => b?.type === 'title')) {
+    if (spec.title && !spec.blocks?.some((b: any) => normalizeBlockType(b?.type) === 'title')) {
       docChildren.push(
         new docx.Paragraph({
           spacing: { before: 240, after: 200, line: 280 },
@@ -290,10 +346,11 @@ export const renderDocxAction: ActionDefinition = {
       )
     }
 
-    for (const block of spec.blocks) {
-      if (!block || !block.type) continue
+    for (let i = 0; i < spec.blocks.length; i++) {
+      const block = spec.blocks[i]
+      const normalizedType = normalizeBlockType(block.type)
 
-      switch (block.type) {
+      switch (normalizedType) {
         case 'title': {
           docChildren.push(
             new docx.Paragraph({
@@ -357,10 +414,7 @@ export const renderDocxAction: ActionDefinition = {
           break
         }
 
-        case 'bullets':
-        case 'bullet':
-        case 'bulletList':
-        case 'list': {
+        case 'bullets': {
           const items = block.items || []
           for (const item of items) {
             docChildren.push(
@@ -374,10 +428,7 @@ export const renderDocxAction: ActionDefinition = {
           break
         }
 
-        case 'numbered':
-        case 'numberedList':
-        case 'ordered':
-        case 'orderedList': {
+        case 'numbered': {
           const items = block.items || []
           let num = 1
           for (const item of items) {
@@ -403,8 +454,7 @@ export const renderDocxAction: ActionDefinition = {
           break
         }
 
-        case 'pageBreak':
-        case 'page_break': {
+        case 'pageBreak': {
           docChildren.push(
             new docx.Paragraph({
               children: [new docx.PageBreak()],
@@ -545,6 +595,12 @@ export const renderDocxAction: ActionDefinition = {
             })
           )
           break
+        }
+
+        default: {
+          throw new Error(
+            `Unknown block type "${block.type}" at position ${i + 1} (index ${i}). Valid block types are: ${VALID_DOCX_BLOCK_TYPES.join(', ')}.`
+          )
         }
       }
     }
