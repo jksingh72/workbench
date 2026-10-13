@@ -1,6 +1,6 @@
 {
   "name": "workbench",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Desktop workbench for technical reading, AI synthesis, and notes",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -17,7 +17,7 @@
     "appId": "com.workbench.desktop",
     "productName": "Workbench",
     "directories": {
-      "output": "Releases/Release-Test V0.01"
+      "output": "Releases/Release-Test V0.02"
     },
     "files": [
       "dist/**/*",
