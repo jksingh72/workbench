@@ -37,7 +37,13 @@ import {
   Cloud,
   Bot,
   ClipboardCopy,
-  Table as TableIcon
+  Table as TableIcon,
+  ScanFace,
+  UserPlus,
+  UserCheck,
+  Loader2,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react'
 import { FileItem, SystemRootItem } from '../types/electron'
 
@@ -66,6 +72,7 @@ interface LocalExplorerProps {
   storageKey?: string
   target?: 'note' | 'book'
   zoomFactor?: number
+  isRekognition?: boolean
 }
 
 type SortColumn = 'name' | 'date' | 'type' | 'size'
@@ -116,6 +123,7 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   storageKey = DEFAULT_STORAGE_KEY,
   target = 'note',
   zoomFactor = 1.0,
+  isRekognition = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const persisted = useMemo(() => loadPersistedExplorerState(storageKey), [storageKey])
@@ -298,10 +306,118 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
   const [showClipModal, setShowClipModal] = useState(false)
   const [clipFileName, setClipFileName] = useState('Clipping.md')
 
+  // --- AWS Rekognition Modals State ---
+  const [showFaceAdditionModal, setShowFaceAdditionModal] = useState<boolean>(false)
+  const [showFaceCheckModal, setShowFaceCheckModal] = useState<boolean>(false)
+  const [faceCollectionId, setFaceCollectionId] = useState<string>('workbench-faces')
+  const [facePersonName, setFacePersonName] = useState<string>('')
+  const [faceMatchThreshold, setFaceMatchThreshold] = useState<number>(85)
+
+  const [isFaceAdding, setIsFaceAdding] = useState<boolean>(false)
+  const [faceAddResult, setFaceAddResult] = useState<any | null>(null)
+  const [faceAddError, setFaceAddError] = useState<string | null>(null)
+
+  const [isFaceChecking, setIsFaceChecking] = useState<boolean>(false)
+  const [faceCheckResult, setFaceCheckResult] = useState<any | null>(null)
+  const [faceCheckError, setFaceCheckError] = useState<string | null>(null)
+
+  const openFaceAdditionModal = () => {
+    window.electron?.setViewsVisible?.(false)
+    setFaceAddResult(null)
+    setFaceAddError(null)
+    setShowFaceAdditionModal(true)
+  }
+  const closeFaceAdditionModal = () => {
+    setShowFaceAdditionModal(false)
+    setFaceAddResult(null)
+    setFaceAddError(null)
+    window.electron?.setViewsVisible?.(true)
+  }
+
+  const openFaceCheckModal = () => {
+    window.electron?.setViewsVisible?.(false)
+    setFaceCheckResult(null)
+    setFaceCheckError(null)
+    setShowFaceCheckModal(true)
+  }
+  const closeFaceCheckModal = () => {
+    setShowFaceCheckModal(false)
+    setFaceCheckResult(null)
+    setFaceCheckError(null)
+    window.electron?.setViewsVisible?.(true)
+  }
+
+  const handleRegisterFace = async () => {
+    const targetPath = selectedPath || (items.find((i) => !i.isDirectory && ['.jpg', '.jpeg', '.png', '.webp'].includes(i.extension.toLowerCase()))?.path || '')
+    if (!targetPath) {
+      onNotify('⚠️ Please select an image file (.jpg, .png, .webp) in the explorer first')
+      return
+    }
+    setIsFaceAdding(true)
+    setFaceAddError(null)
+    setFaceAddResult(null)
+    try {
+      const res = await window.electron?.rekognitionAddFace?.({
+        imagePath: targetPath,
+        personName: facePersonName.trim() || undefined,
+        collectionId: faceCollectionId.trim() || 'workbench-faces',
+      })
+      if (res?.success && res.data) {
+        setFaceAddResult(res.data)
+        onNotify(`✨ Successfully registered face into collection "${res.data.collectionId}"!`)
+      } else {
+        setFaceAddError(res?.error || 'Failed to register face with Amazon Rekognition')
+      }
+    } catch (err: any) {
+      setFaceAddError(err?.message || 'Error occurred while registering face')
+    } finally {
+      setIsFaceAdding(false)
+    }
+  }
+
+  const handleCheckFace = async () => {
+    const targetPath = selectedPath || (items.find((i) => !i.isDirectory && ['.jpg', '.jpeg', '.png', '.webp'].includes(i.extension.toLowerCase()))?.path || '')
+    if (!targetPath) {
+      onNotify('⚠️ Please select a face image to query in the explorer first')
+      return
+    }
+    setIsFaceChecking(true)
+    setFaceCheckError(null)
+    setFaceCheckResult(null)
+    try {
+      const res = await window.electron?.rekognitionCheckFace?.({
+        imagePath: targetPath,
+        collectionId: faceCollectionId.trim() || 'workbench-faces',
+        matchThreshold: faceMatchThreshold,
+      })
+      if (res?.success && res.data) {
+        setFaceCheckResult(res.data)
+        if (res.data.hasMatch) {
+          onNotify(`🎯 Found ${res.data.matchCount} matching face(s) in collection!`)
+        } else {
+          onNotify(`🔍 No matching face found above ${faceMatchThreshold}% threshold`)
+        }
+      } else {
+        setFaceCheckError(res?.error || 'Failed to check face against Amazon Rekognition')
+      }
+    } catch (err: any) {
+      setFaceCheckError(err?.message || 'Error occurred while checking face')
+    } finally {
+      setIsFaceChecking(false)
+    }
+  }
+
   // --- Left Navigation Sidebar State ---
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     return localStorage.getItem('workbench_explorer_sidebar_open') !== 'false'
   })
+
+  // Ensure sidebar is open when in Rekognition mode so left menu options are immediately accessible
+  useEffect(() => {
+    if (isRekognition && !isSidebarOpen) {
+      setIsSidebarOpen(true)
+    }
+  }, [isRekognition])
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = localStorage.getItem('workbench_explorer_sidebar_width')
     return saved ? parseInt(saved, 10) : 190
@@ -1856,6 +1972,34 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
         {isSidebarOpen && (
           <>
             <div className="explorer-tree-sidebar" style={{ width: `${sidebarWidth}px` }}>
+              {isRekognition && (
+                <div className="rekognition-sidebar-group">
+                  <div className="sidebar-section-title rekognition-section-title">
+                    <ScanFace size={13} className="text-purple" />
+                    <span>Rekognition</span>
+                  </div>
+                  <div className="rekognition-menu-list">
+                    <button
+                      type="button"
+                      className="rekognition-menu-item"
+                      onClick={openFaceAdditionModal}
+                      title="Add a face to AWS Rekognition collection"
+                    >
+                      <UserPlus size={14} className="text-cyan" />
+                      <span className="sidebar-node-name">Face addition</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="rekognition-menu-item"
+                      onClick={openFaceCheckModal}
+                      title="Verify or search face against Rekognition collection"
+                    >
+                      <UserCheck size={14} className="text-green" />
+                      <span className="sidebar-node-name">Face Check</span>
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="sidebar-section-title">Quick Access</div>
               <div className="sidebar-tree-list">
                 {systemRoots
@@ -2748,6 +2892,368 @@ export const LocalExplorer: React.FC<LocalExplorerProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* AWS Rekognition: Face Addition Modal */}
+      {showFaceAdditionModal && (
+        <div className="pane-modal-backdrop" onClick={closeFaceAdditionModal}>
+          <div
+            className="pane-modal-container explorer-prompt-modal rekognition-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '460px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title-group">
+                <div className="modal-icon-badge badge-cyan">
+                  <UserPlus size={16} />
+                </div>
+                <div>
+                  <h3 className="modal-title">Face Addition</h3>
+                  <p className="modal-subtitle">Amazon Rekognition Indexing</p>
+                </div>
+              </div>
+              <button className="modal-close-btn" onClick={closeFaceAdditionModal}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '16px 20px' }}>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 14px 0', lineHeight: '1.5' }}>
+                Register and index facial vectors from your selected image into an Amazon Rekognition collection for face search and matching.
+              </p>
+
+              <div className="edit-field" style={{ marginBottom: '12px' }}>
+                <label>Face Image File</label>
+                <input
+                  type="text"
+                  value={selectedPath || (items.find((i) => !i.isDirectory && ['.jpg', '.jpeg', '.png', '.webp'].includes(i.extension.toLowerCase()))?.path || '')}
+                  readOnly
+                  placeholder="Select a face image file (.jpg, .png) in explorer..."
+                  style={{ opacity: 0.9, background: 'rgba(0,0,0,0.25)' }}
+                />
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  {selectedPath
+                    ? `Selected: ${selectedPath.split(/[/\\]/).pop()}`
+                    : 'Tip: Select an image file in the explorer to target it automatically'}
+                </span>
+              </div>
+
+              <div className="edit-field" style={{ marginBottom: '12px' }}>
+                <label>Person Name / External Image ID</label>
+                <input
+                  type="text"
+                  value={facePersonName}
+                  onChange={(e) => setFacePersonName(e.target.value)}
+                  placeholder="e.g. John Doe / user_001"
+                  autoFocus
+                />
+              </div>
+
+              <div className="edit-field" style={{ marginBottom: '12px' }}>
+                <label>Target Collection ID</label>
+                <input
+                  type="text"
+                  value={faceCollectionId}
+                  onChange={(e) => setFaceCollectionId(e.target.value)}
+                  placeholder="workbench-faces"
+                />
+              </div>
+
+              {/* Error Box */}
+              {faceAddError && (
+                <div className="rekognition-result-box error" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '14px' }}>
+                  <AlertCircle size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Face Indexing Failed</div>
+                    <div style={{ fontSize: '11px', opacity: 0.9, marginTop: '2px' }}>{faceAddError}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Success Box */}
+              {faceAddResult && (
+                <div className="rekognition-result-box success" style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, marginBottom: '6px' }}>
+                    <CheckCircle2 size={16} />
+                    <span>Face Successfully Indexed!</span>
+                  </div>
+                  <div style={{ fontSize: '11.5px', lineHeight: '1.6' }}>
+                    <div><strong>Person / ID:</strong> {faceAddResult.personName}</div>
+                    <div><strong>Collection:</strong> {faceAddResult.collectionId}</div>
+                    <div><strong>Faces Indexed:</strong> {faceAddResult.facesIndexed}</div>
+                    {faceAddResult.faceRecords?.[0]?.faceId && (
+                      <div style={{ wordBreak: 'break-all', marginTop: '4px', opacity: 0.9 }}>
+                        <strong>Face ID:</strong> <code style={{ color: '#86efac' }}>{faceAddResult.faceRecords[0].faceId}</code>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!faceAddResult && !faceAddError && (
+                <div
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.08)',
+                    border: '1px solid rgba(56, 189, 248, 0.22)',
+                    borderRadius: '6px',
+                    padding: '8px 12px',
+                    fontSize: '11.5px',
+                    color: '#7dd3fc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '14px',
+                  }}
+                >
+                  <Sparkles size={14} className="text-cyan" style={{ flexShrink: 0 }} />
+                  <span>Connected with AWS Rekognition collection & MCP tools.</span>
+                </div>
+              )}
+
+              <div className="edit-actions-right" style={{ marginTop: '18px' }}>
+                {faceAddResult ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-cancel-edit"
+                      onClick={() => {
+                        setFaceAddResult(null)
+                        setFacePersonName('')
+                      }}
+                    >
+                      Add Another Face
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-save-edit"
+                      onClick={closeFaceAdditionModal}
+                    >
+                      <CheckCircle2 size={13} />
+                      <span>Done</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-cancel-edit"
+                      onClick={closeFaceAdditionModal}
+                      disabled={isFaceAdding}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-save-edit"
+                      onClick={handleRegisterFace}
+                      disabled={isFaceAdding}
+                    >
+                      {isFaceAdding ? (
+                        <>
+                          <Loader2 size={13} className="spin" />
+                          <span>Registering...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus size={13} />
+                          <span>Register Face</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AWS Rekognition: Face Check Modal */}
+      {showFaceCheckModal && (
+        <div className="pane-modal-backdrop" onClick={closeFaceCheckModal}>
+          <div
+            className="pane-modal-container explorer-prompt-modal rekognition-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '460px' }}
+          >
+            <div className="modal-header">
+              <div className="modal-title-group">
+                <div className="modal-icon-badge badge-green">
+                  <UserCheck size={16} />
+                </div>
+                <div>
+                  <h3 className="modal-title">Face Check</h3>
+                  <p className="modal-subtitle">Amazon Rekognition Search & Verify</p>
+                </div>
+              </div>
+              <button className="modal-close-btn" onClick={closeFaceCheckModal}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '16px 20px' }}>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 14px 0', lineHeight: '1.5' }}>
+                Search and compare a query face against registered Amazon Rekognition collections to verify identity and match confidence.
+              </p>
+
+              <div className="edit-field" style={{ marginBottom: '12px' }}>
+                <label>Query Image</label>
+                <input
+                  type="text"
+                  value={selectedPath || (items.find((i) => !i.isDirectory && ['.jpg', '.jpeg', '.png', '.webp'].includes(i.extension.toLowerCase()))?.path || '')}
+                  readOnly
+                  placeholder="Select a face image file in explorer..."
+                  style={{ opacity: 0.9, background: 'rgba(0,0,0,0.25)' }}
+                />
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  {selectedPath
+                    ? `Selected: ${selectedPath.split(/[/\\]/).pop()}`
+                    : 'Tip: Select an image file in the explorer to target it automatically'}
+                </span>
+              </div>
+
+              <div className="edit-field" style={{ marginBottom: '12px' }}>
+                <label>Collection ID to Search</label>
+                <input
+                  type="text"
+                  value={faceCollectionId}
+                  onChange={(e) => setFaceCollectionId(e.target.value)}
+                  placeholder="workbench-faces"
+                  autoFocus
+                />
+              </div>
+
+              <div className="edit-field" style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ margin: 0 }}>Match Confidence Threshold</label>
+                  <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: 600 }}>{faceMatchThreshold}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="99"
+                  value={faceMatchThreshold}
+                  onChange={(e) => setFaceMatchThreshold(parseInt(e.target.value, 10))}
+                  style={{ width: '100%', cursor: 'pointer' }}
+                />
+              </div>
+
+              {/* Error Box */}
+              {faceCheckError && (
+                <div className="rekognition-result-box error" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '14px' }}>
+                  <AlertCircle size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Face Check Failed</div>
+                    <div style={{ fontSize: '11px', opacity: 0.9, marginTop: '2px' }}>{faceCheckError}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Result Box */}
+              {faceCheckResult && (
+                <div className={`rekognition-result-box ${faceCheckResult.hasMatch ? 'success' : 'info'}`} style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, marginBottom: '6px' }}>
+                    {faceCheckResult.hasMatch ? <CheckCircle2 size={16} /> : <Search size={16} />}
+                    <span>
+                      {faceCheckResult.hasMatch
+                        ? `Found ${faceCheckResult.matchCount} Matching Face${faceCheckResult.matchCount > 1 ? 's' : ''}!`
+                        : `No Matching Face Found`}
+                    </span>
+                  </div>
+
+                  {faceCheckResult.hasMatch ? (
+                    <div className="rekognition-match-list">
+                      {faceCheckResult.matches.map((m: any, idx: number) => (
+                        <div key={idx} className="rekognition-match-row">
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#ffffff' }}>{m.personName}</div>
+                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>ID: {m.faceId?.substring(0, 16)}...</div>
+                          </div>
+                          <span className="modal-icon-badge badge-green" style={{ width: 'auto', padding: '3px 8px', height: 'auto', fontSize: '11px', fontWeight: 700 }}>
+                            {m.similarity}% Match
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '11.5px', opacity: 0.9, marginTop: '4px', lineHeight: '1.5' }}>
+                      No facial vectors in collection <strong>{faceCheckResult.collectionId}</strong> met the {faceCheckResult.matchThreshold}% match threshold.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!faceCheckResult && !faceCheckError && (
+                <div
+                  style={{
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.22)',
+                    borderRadius: '6px',
+                    padding: '8px 12px',
+                    fontSize: '11.5px',
+                    color: '#86efac',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '14px',
+                  }}
+                >
+                  <Sparkles size={14} className="text-green" style={{ flexShrink: 0 }} />
+                  <span>Verifies query image face vectors against Amazon Rekognition collection.</span>
+                </div>
+              )}
+
+              <div className="edit-actions-right" style={{ marginTop: '18px' }}>
+                {faceCheckResult ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-cancel-edit"
+                      onClick={() => setFaceCheckResult(null)}
+                    >
+                      Search Again
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-save-edit"
+                      onClick={closeFaceCheckModal}
+                    >
+                      <CheckCircle2 size={13} />
+                      <span>Close</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-cancel-edit"
+                      onClick={closeFaceCheckModal}
+                      disabled={isFaceChecking}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-save-edit"
+                      onClick={handleCheckFace}
+                      disabled={isFaceChecking}
+                    >
+                      {isFaceChecking ? (
+                        <>
+                          <Loader2 size={13} className="spin" />
+                          <span>Searching...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserCheck size={13} />
+                          <span>Check Face</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

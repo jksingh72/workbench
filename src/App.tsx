@@ -72,6 +72,7 @@ export const App: React.FC = () => {
     { id: 'oreilly', name: "O'Reilly Learning", url: 'https://learning.oreilly.com/home/', isPreset: true },
     { id: 'kindle', name: 'Amazon Kindle', url: 'https://read.amazon.com/', isPreset: true },
     { id: 'local-books', name: 'Local Books', url: '', isPreset: true, isLocal: true },
+    { id: 'rekognition', name: 'Rekognition', url: '', isPreset: true, isLocal: true },
   ])
   const [activeBookSourceId, setActiveBookSourceId] = useState<string>('oreilly')
   const [isBookSourceModalOpen, setIsBookSourceModalOpen] = useState<boolean>(false)
@@ -356,9 +357,21 @@ export const App: React.FC = () => {
                 isLocal: true,
               })
             }
-            const normalized = sources.map((s) =>
-              s.id === 'local-books' ? { ...s, name: 'Local Books', isPreset: true, isLocal: true } : s
-            )
+            const hasRekognition = sources.some((s) => s.id === 'rekognition')
+            if (!hasRekognition) {
+              sources.push({
+                id: 'rekognition',
+                name: 'Rekognition',
+                url: '',
+                isPreset: true,
+                isLocal: true,
+              })
+            }
+            const normalized = sources.map((s) => {
+              if (s.id === 'local-books') return { ...s, name: 'Local Books', isPreset: true, isLocal: true }
+              if (s.id === 'rekognition') return { ...s, name: 'Rekognition', isPreset: true, isLocal: true }
+              return s
+            })
             setBookSources(normalized)
             setActiveBookSourceId(data.activeSourceId || normalized[0].id)
           }

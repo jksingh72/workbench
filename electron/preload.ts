@@ -314,4 +314,12 @@ contextBridge.exposeInMainWorld('electron', {
   // Error Log Management
   openErrorLog: () => ipcRenderer.invoke('workbench:open-error-log'),
   getLogPath: () => ipcRenderer.invoke('workbench:get-log-path'),
+
+  // AWS Rekognition APIs
+  rekognitionAddFace: (params: { imagePath: string; collectionId?: string; personName?: string }) =>
+    ipcRenderer.invoke('workbench:rekognition-add-face', params),
+  rekognitionCheckFace: (params: { imagePath: string; collectionId?: string; matchThreshold?: number }) =>
+    ipcRenderer.invoke('workbench:rekognition-check-face', params),
+  rekognitionListFaces: (params?: { collectionId?: string }) =>
+    ipcRenderer.invoke('workbench:rekognition-list-faces', params),
 })

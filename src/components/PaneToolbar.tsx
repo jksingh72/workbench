@@ -21,7 +21,8 @@ import {
   Settings2,
   Folder,
   Zap,
-  Power
+  Power,
+  ScanFace
 } from 'lucide-react'
 import { NavState, BookSource, AISource, NoteSource } from '../types/electron'
 
@@ -335,9 +336,11 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
 
   const isLocalNote = isLocalFolder
 
+  const isRekognition = isBook && activeSource.id === 'rekognition'
   const isLocalBook =
     isBook &&
-    (!!activeSource.isLocal ||
+    (isRekognition ||
+      !!activeSource.isLocal ||
       activeSource.id === 'local-books' ||
       activeSource.id === 'local' ||
       (!!activeSource.url && !activeSource.url.startsWith('http://') && !activeSource.url.startsWith('https://')))
@@ -365,9 +368,15 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                   onOpenBookSourceModal?.()
                 }
               }}
-              title="Click to switch reading platform (O'Reilly, Kindle, Local Books, etc.)"
+              title="Click to switch reading platform (O'Reilly, Kindle, Local Books, Rekognition, etc.)"
             >
-              {isLocalBook ? <Folder size={13} className="text-cyan" /> : <BookOpen size={13} />}
+              {isRekognition ? (
+                <ScanFace size={13} className="text-purple" />
+              ) : isLocalBook ? (
+                <Folder size={13} className="text-cyan" />
+              ) : (
+                <BookOpen size={13} />
+              )}
               <span className="tag-label" title={activeSource.name}>{activeSource.name}</span>
               <ChevronDown size={11} className="selector-chevron" />
             </button>
@@ -830,7 +839,9 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                 isLocalBook ? 'indicator-local' : 'indicator-cloud'
               }`}
             />
-            <span className="status-badge-text">{isLocalBook ? 'Local Books' : 'Connected'}</span>
+            <span className="status-badge-text">
+              {isRekognition ? 'Rekognition' : isLocalBook ? 'Local Books' : 'Connected'}
+            </span>
           </div>
         )}
 

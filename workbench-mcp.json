@@ -81,6 +81,17 @@
       ],
       "disabled": false,
       "description": "Playwright browser automation MCP server"
+    },
+    "aws_rekognition": {
+      "command": "node",
+      "args": [
+        "dist-electron/rekognitionServer.cjs"
+      ],
+      "env": {
+        "AWS_REGION": "us-east-1"
+      },
+      "disabled": false,
+      "description": "Amazon Rekognition: Face addition, face check/search, label detection, and OCR using AWS credentials."
     }
   }
 }

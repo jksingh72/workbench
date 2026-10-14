@@ -53,6 +53,7 @@
     }
   },
   "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.1151.0",
     "@modelcontextprotocol/sdk": "^1.32.0",
     "@tiptap/extension-image": "^3.31.3",
     "@tiptap/extension-table": "^3.31.3",

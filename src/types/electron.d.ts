@@ -158,6 +158,11 @@ export interface ElectronAPI {
   mcpConfigureServer?: (serverName: string, updates: any) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
   openErrorLog?: () => Promise<boolean>
   getLogPath?: () => Promise<string>
+
+  // AWS Rekognition APIs
+  rekognitionAddFace?: (params: { imagePath: string; collectionId?: string; personName?: string }) => Promise<{ success: boolean; data?: any; error?: string }>
+  rekognitionCheckFace?: (params: { imagePath: string; collectionId?: string; matchThreshold?: number }) => Promise<{ success: boolean; data?: any; error?: string }>
+  rekognitionListFaces?: (params?: { collectionId?: string }) => Promise<{ success: boolean; data?: any; error?: string }>
 }
 
 export interface McpServerInfo {

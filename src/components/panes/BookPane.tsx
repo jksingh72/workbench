@@ -42,9 +42,11 @@ export const BookPane: React.FC<BookPaneProps> = ({
     name: "O'Reilly Learning",
     url: '',
   }
+  const isRekognition = currentSource.id === 'rekognition'
   const isLocalFolder =
     currentSource.isLocal ||
     currentSource.id === 'local-books' ||
+    isRekognition ||
     (!!currentSource.url && !currentSource.url.startsWith('http://') && !currentSource.url.startsWith('https://'))
 
   const localBookSource = bookSources.find((s) => s.id === 'local-books' || s.isLocal)
@@ -69,7 +71,7 @@ export const BookPane: React.FC<BookPaneProps> = ({
         isAskingAI={isAskingAI}
       />
 
-      {/* 1. Local Explorer for Books/PDFs - kept mounted so folder, tabs, reader & scroll are 100% preserved */}
+      {/* 1. Local Explorer for Books/PDFs/Rekognition - kept mounted so folder, tabs, reader & scroll are 100% preserved */}
       <div
         className="local-explorer-wrapper"
         style={{
@@ -82,10 +84,11 @@ export const BookPane: React.FC<BookPaneProps> = ({
       >
         <LocalExplorer
           target="book"
-          storageKey="workbench_book_explorer_state"
+          storageKey={isRekognition ? 'workbench_rekognition_explorer_state' : 'workbench_book_explorer_state'}
           rootPath={localRootPath}
           onNotify={onNotify || (() => {})}
           zoomFactor={navState.zoomFactor}
+          isRekognition={isRekognition}
         />
       </div>
 

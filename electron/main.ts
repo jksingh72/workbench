@@ -1895,6 +1895,40 @@ function registerIpcHandlers() {
       return { success: false, error: err?.message || 'Failed to get system roots', roots: [] }
     }
   })
+
+  // AWS Rekognition IPC Handlers
+  ipcMain.handle('workbench:rekognition-add-face', async (_, params) => {
+    try {
+      const { RekognitionService } = await import('./services/rekognitionService')
+      const result = await RekognitionService.getInstance().addFace(params)
+      return { success: true, data: result }
+    } catch (err: any) {
+      console.error('[Main] rekognition-add-face error:', err)
+      return { success: false, error: err?.message || 'Failed to add face to Rekognition' }
+    }
+  })
+
+  ipcMain.handle('workbench:rekognition-check-face', async (_, params) => {
+    try {
+      const { RekognitionService } = await import('./services/rekognitionService')
+      const result = await RekognitionService.getInstance().checkFace(params)
+      return { success: true, data: result }
+    } catch (err: any) {
+      console.error('[Main] rekognition-check-face error:', err)
+      return { success: false, error: err?.message || 'Failed to check face against Rekognition' }
+    }
+  })
+
+  ipcMain.handle('workbench:rekognition-list-faces', async (_, params) => {
+    try {
+      const { RekognitionService } = await import('./services/rekognitionService')
+      const result = await RekognitionService.getInstance().listFaces(params?.collectionId)
+      return { success: true, data: result }
+    } catch (err: any) {
+      console.error('[Main] rekognition-list-faces error:', err)
+      return { success: false, error: err?.message || 'Failed to list faces from Rekognition' }
+    }
+  })
 }
 
 app.on('web-contents-created', (_event, contents) => {

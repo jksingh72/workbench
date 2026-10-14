@@ -29,6 +29,7 @@ const DEFAULT_PRESET_BOOK_URLS: Record<string, { name: string; url: string }> = 
   oreilly: { name: "O'Reilly Learning", url: 'https://learning.oreilly.com/home/' },
   kindle: { name: 'Amazon Kindle', url: 'https://read.amazon.com/' },
   'local-books': { name: 'Local Books', url: '' },
+  rekognition: { name: 'Rekognition', url: '' },
 }
 
 export const BookSourceModal: React.FC<BookSourceModalProps> = ({
@@ -40,7 +41,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   onSaveSources,
   onNotify,
 }) => {
-  // Ensure presets, especially Local Books, are always present, properly named and non-deletable
+  // Ensure presets, especially Local Books and Rekognition, are always present, properly named and non-deletable
   const displaySources = React.useMemo(() => {
     const list = [...sources]
     const hasLocal = list.some((s) => s.id === 'local-books')
@@ -53,11 +54,29 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
         isLocal: true,
       })
     }
+    const hasRekognition = list.some((s) => s.id === 'rekognition')
+    if (!hasRekognition) {
+      list.push({
+        id: 'rekognition',
+        name: 'Rekognition',
+        url: '',
+        isPreset: true,
+        isLocal: true,
+      })
+    }
     return list.map((s) => {
       if (s.id === 'local-books') {
         return {
           ...s,
           name: 'Local Books',
+          isPreset: true,
+          isLocal: true,
+        }
+      }
+      if (s.id === 'rekognition') {
+        return {
+          ...s,
+          name: 'Rekognition',
           isPreset: true,
           isLocal: true,
         }
@@ -141,7 +160,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
     if (preset) {
       setEditName(preset.name)
       setEditUrl(preset.url)
-      setEditIsLocal(sourceId === 'local-books')
+      setEditIsLocal(sourceId === 'local-books' || sourceId === 'rekognition')
       setEditError(null)
     }
   }
@@ -150,7 +169,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
     setEditError(null)
     const cleanName = editName.trim()
     let cleanUrl = editUrl.trim()
-    const isLocal = editIsLocal || sourceId === 'local-books'
+    const isLocal = editIsLocal || sourceId === 'local-books' || sourceId === 'rekognition'
 
     if (!cleanName) {
       setEditError('Name cannot be empty.')
@@ -187,15 +206,15 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
         s.id === sourceId
           ? {
               ...s,
-              name: s.id === 'local-books' ? 'Local Books' : cleanName,
+              name: s.id === 'local-books' ? 'Local Books' : s.id === 'rekognition' ? 'Rekognition' : cleanName,
               url: cleanUrl,
               isLocal,
-              isPreset: s.id === 'local-books' ? true : s.isPreset,
+              isPreset: s.id === 'local-books' || s.id === 'rekognition' ? true : s.isPreset,
             }
           : s
       )
       await onSaveSources(updatedSources, activeSourceId)
-      onNotify(`✏️ Updated "${sourceId === 'local-books' ? 'Local Books' : cleanName}" configuration.`)
+      onNotify(`✏️ Updated "${sourceId === 'local-books' ? 'Local Books' : sourceId === 'rekognition' ? 'Rekognition' : cleanName}" configuration.`)
       setEditingId(null)
     } catch (err: any) {
       setEditError(err.message || 'Failed to save changes.')
@@ -207,7 +226,6 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   const handleAddSource = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMsg(null)
-
     const cleanName = newName.trim()
     let cleanUrl = newUrl.trim()
     const isLocal = newSourceType === 'local'
@@ -264,7 +282,7 @@ export const BookSourceModal: React.FC<BookSourceModalProps> = ({
   }
 
   const handleDeleteSource = async (id: string, name: string) => {
-    if (id === 'oreilly' || id === 'kindle' || id === 'local-books') {
+    if (id === 'oreilly' || id === 'kindle' || id === 'local-books' || id === 'rekognition') {
       onNotify('⚠️ Preset reading sources cannot be deleted.')
       return
     }

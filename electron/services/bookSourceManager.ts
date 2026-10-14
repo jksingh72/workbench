@@ -36,6 +36,13 @@ export const DEFAULT_BOOK_SOURCES: BookSource[] = [
     isPreset: true,
     isLocal: true,
   },
+  {
+    id: 'rekognition',
+    name: 'Rekognition',
+    url: '',
+    isPreset: true,
+    isLocal: true,
+  },
 ]
 
 export class BookSourceManager {
@@ -62,13 +69,13 @@ export class BookSourceManager {
             if (!existingIds.has(preset.id)) {
               mergedSources.push({
                 ...preset,
-                url: preset.id === 'local-books' ? app.getPath('documents') : preset.url,
+                url: preset.id === 'local-books' || preset.id === 'rekognition' ? app.getPath('documents') : preset.url,
               })
               needsSave = true
             }
           }
 
-          // Auto-migrate legacy O'Reilly URLs and ensure local-books is preset & named 'Local Books'
+          // Auto-migrate legacy O'Reilly URLs and ensure local-books / rekognition are presets
           for (const s of mergedSources) {
             if (s.id === 'oreilly' && (s.url.includes('oreilly.com/member/login') || s.url.startsWith('http://'))) {
               s.url = 'https://learning.oreilly.com/home/'
@@ -77,6 +84,24 @@ export class BookSourceManager {
             if (s.id === 'local-books') {
               if (s.name !== 'Local Books') {
                 s.name = 'Local Books'
+                needsSave = true
+              }
+              if (!s.isPreset) {
+                s.isPreset = true
+                needsSave = true
+              }
+              if (!s.isLocal) {
+                s.isLocal = true
+                needsSave = true
+              }
+              if (!s.url || !fs.existsSync(s.url)) {
+                s.url = app.getPath('documents')
+                needsSave = true
+              }
+            }
+            if (s.id === 'rekognition') {
+              if (s.name !== 'Rekognition') {
+                s.name = 'Rekognition'
                 needsSave = true
               }
               if (!s.isPreset) {

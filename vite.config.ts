@@ -23,6 +23,14 @@ function buildPreloadsPlugin() {
       platform: 'node',
       external: ['electron'],
     })
+    esbuild.buildSync({
+      entryPoints: ['electron/mcp/rekognitionServer.ts'],
+      outfile: 'dist-electron/rekognitionServer.cjs',
+      bundle: true,
+      format: 'cjs',
+      platform: 'node',
+      external: ['electron', '@aws-sdk/client-rekognition', '@modelcontextprotocol/sdk'],
+    })
   }
 
   return {
@@ -31,7 +39,7 @@ function buildPreloadsPlugin() {
       rebuild()
     },
     handleHotUpdate({ file }) {
-      if (file.includes('preload') || file.includes('viewPreload')) {
+      if (file.includes('preload') || file.includes('viewPreload') || file.includes('rekognitionServer')) {
         rebuild()
       }
     },
