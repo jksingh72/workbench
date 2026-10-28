@@ -314,4 +314,30 @@ contextBridge.exposeInMainWorld('electron', {
   // Error Log Management
   openErrorLog: () => ipcRenderer.invoke('workbench:open-error-log'),
   getLogPath: () => ipcRenderer.invoke('workbench:get-log-path'),
+
+  // Astral uv Python Sandbox & Package Analyzer APIs
+  uvDetect: () => ipcRenderer.invoke('workbench:uv-detect'),
+  uvListEnvs: () => ipcRenderer.invoke('workbench:uv-list-envs'),
+  uvCreateEnv: (params: { name: string; pythonVersion?: string; streamId?: string }) =>
+    ipcRenderer.invoke('workbench:uv-create-env', params),
+  uvDeleteEnv: (params: { envId: string }) =>
+    ipcRenderer.invoke('workbench:uv-delete-env', params),
+  uvInstallPackage: (params: { envId: string; packageSpec: string; streamId?: string }) =>
+    ipcRenderer.invoke('workbench:uv-install-package', params),
+  uvAnalyzePackage: (params: { envId: string; packageName: string; streamId?: string }) =>
+    ipcRenderer.invoke('workbench:uv-analyze-package', params),
+  uvExecuteCode: (params: { envId: string; code: string; streamId?: string }) =>
+    ipcRenderer.invoke('workbench:uv-execute-code', params),
+  uvRunCommand: (params: { envId: string; command: string; streamId?: string }) =>
+    ipcRenderer.invoke('workbench:uv-run-command', params),
+  uvKillProcess: (params: { streamId: string }) =>
+    ipcRenderer.invoke('workbench:uv-kill-process', params),
+  onUvStreamData: (callback: (data: any) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:uv-stream-data', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:uv-stream-data', listener)
+    }
+  },
 })
+

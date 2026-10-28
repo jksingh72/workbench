@@ -16,6 +16,7 @@ import { ActionDispatcher } from './services/actionDispatcher'
 import { McpManager } from './services/mcpManager'
 import { PrimingOptions } from './actions'
 import { Logger } from './services/logger'
+import { UvPythonService } from './services/uvPythonService'
 
 process.on('uncaughtException', (err) => {
   Logger.error('Process', 'Uncaught Exception in Electron Main Process', err)
@@ -1894,6 +1895,50 @@ function registerIpcHandlers() {
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to get system roots', roots: [] }
     }
+  })
+
+  // Astral uv Python Sandbox & Package Analyzer IPC Handlers
+  const uvService = UvPythonService.getInstance()
+  uvService.addStreamListener((msg) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('workbench:uv-stream-data', msg)
+    }
+  })
+
+  ipcMain.handle('workbench:uv-detect', async () => {
+    return await uvService.detectUv()
+  })
+
+  ipcMain.handle('workbench:uv-list-envs', async () => {
+    return await uvService.listEnvs()
+  })
+
+  ipcMain.handle('workbench:uv-create-env', async (_, params: { name: string; pythonVersion?: string; streamId?: string }) => {
+    return await uvService.createVenv(params.name, params.pythonVersion, params.streamId)
+  })
+
+  ipcMain.handle('workbench:uv-delete-env', async (_, params: { envId: string }) => {
+    return await uvService.deleteVenv(params.envId)
+  })
+
+  ipcMain.handle('workbench:uv-install-package', async (_, params: { envId: string; packageSpec: string; streamId?: string }) => {
+    return await uvService.installPackage(params.envId, params.packageSpec, params.streamId)
+  })
+
+  ipcMain.handle('workbench:uv-analyze-package', async (_, params: { envId: string; packageName: string; streamId?: string }) => {
+    return await uvService.analyzePackage(params.envId, params.packageName, params.streamId)
+  })
+
+  ipcMain.handle('workbench:uv-execute-code', async (_, params: { envId: string; code: string; streamId?: string }) => {
+    return await uvService.executeCode(params.envId, params.code, params.streamId)
+  })
+
+  ipcMain.handle('workbench:uv-run-command', async (_, params: { envId: string; command: string; streamId?: string }) => {
+    return await uvService.runArbitraryCommand(params.envId, params.command, params.streamId)
+  })
+
+  ipcMain.handle('workbench:uv-kill-process', async (_, params: { streamId: string }) => {
+    return { success: uvService.killProcess(params.streamId) }
   })
 }
 

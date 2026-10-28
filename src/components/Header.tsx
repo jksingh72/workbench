@@ -6,7 +6,8 @@ import {
   Check,
   ArrowLeftRight,
   Sparkles,
-  Columns2
+  Columns2,
+  Terminal,
 } from 'lucide-react'
 
 export type PaneId = 'book' | 'ai' | 'note'
@@ -19,6 +20,8 @@ interface HeaderProps {
   notification: string | null
   activePanes: Record<PaneId, boolean>
   onTogglePane: (pane: PaneId) => void
+  isPythonDrawerOpen?: boolean
+  onTogglePythonDrawer?: () => void
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -29,6 +32,8 @@ export const Header: React.FC<HeaderProps> = ({
   notification,
   activePanes,
   onTogglePane,
+  isPythonDrawerOpen = false,
+  onTogglePythonDrawer,
 }) => {
   const activeCount = Object.values(activePanes).filter(Boolean).length
 
@@ -156,6 +161,19 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="header-right">
+        {onTogglePythonDrawer && (
+          <button
+            type="button"
+            className={`action-icon-btn python-drawer-chip ${isPythonDrawerOpen ? 'active' : ''}`}
+            onClick={onTogglePythonDrawer}
+            title={isPythonDrawerOpen ? "Close uv Python Sandbox (Ctrl+`)" : "Open uv Python Sandbox (Ctrl+`)"}
+          >
+            <Terminal size={14} className="python-icon" />
+            <span className="btn-label">Python</span>
+            <span className="uv-chip-badge">uv</span>
+          </button>
+        )}
+
         <button
           type="button"
           className={`action-icon-btn ${isSwapped ? 'swapped' : ''}`}

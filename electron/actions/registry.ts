@@ -95,7 +95,7 @@ export class ActionRegistry {
     const allActions = this.getAll()
     const coreIds = new Set(['create_folder', 'write_file', 'read_file', 'move_file', 'copy_file', 'rename_file', 'delete_file', 'open_file'])
     const bookIds = new Set(['inspect_folder', 'attach_file', 'read_pdf', 'read_docx', 'create_docx', 'render_docx', 'extract_rfp', 'search_text', 'read_pages', 'summarize_file'])
-    const scriptIds = new Set(['batch', 'run_script', 'create_project', 'download_file'])
+    const scriptIds = new Set(['batch', 'run_script', 'create_project', 'download_file', 'uv_create_env', 'uv_install_package', 'uv_analyze_package', 'uv_run_code'])
     const systemIds = new Set(['list_directory', 'get_workspace_folders', 'set_active_directory', 'list_actions', 'add_mcp_server', 'remove_mcp_server', 'configure_mcp_server', 'create_action', 'update_action'])
 
     const mcpServersMap = new Map<string, string[]>()

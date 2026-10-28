@@ -13,6 +13,7 @@ import { NoteSourceModal } from './components/NoteSourceModal'
 import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { ActionModeModal } from './components/ActionModeModal'
 import { PrimeChatModal } from './components/PrimeChatModal'
+import { UvPythonDrawer } from './components/UvPythonDrawer'
 import { NavState, BookSource, AISource, NoteSource } from './types/electron'
 import './App.css'
 
@@ -59,6 +60,26 @@ export const App: React.FC = () => {
   })
   const [isSwapped, setIsSwapped] = useState<boolean>(() => {
     return typeof persistedLayout.isSwapped === 'boolean' ? persistedLayout.isSwapped : false
+  })
+
+  // Astral uv Python Drawer state
+  const [isPythonDrawerOpen, setIsPythonDrawerOpen] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem('workbench_python_drawer_open')
+      if (raw) return JSON.parse(raw)
+    } catch (_) {}
+    return false
+  })
+
+  const [pythonDrawerHeight, setPythonDrawerHeight] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('workbench_python_drawer_height')
+      if (raw) {
+        const val = Number(raw)
+        if (val >= 180 && val <= 800) return val
+      }
+    } catch (_) {}
+    return 320
   })
   const [dragTarget, setDragTarget] = useState<'none' | 'column' | 'row'>('none')
   const [isAskingAI, setIsAskingAI] = useState<boolean>(false)
@@ -437,6 +458,22 @@ export const App: React.FC = () => {
     window.addEventListener('workbench:open-action-mode-modal', handleOpenActionModalEvent)
     window.addEventListener('workbench:open-prime-chat-modal', handleOpenPrimeChatEvent)
 
+    // Global shortcut Ctrl+` to toggle uv Python Drawer
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault()
+        setIsPythonDrawerOpen((prev) => {
+          const next = !prev
+          try {
+            localStorage.setItem('workbench_python_drawer_open', JSON.stringify(next))
+          } catch (_) {}
+          setTimeout(syncBounds, 50)
+          return next
+        })
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown)
+
     return () => {
       unsubscribeNav()
       unsubscribeAskAI?.()
@@ -449,8 +486,10 @@ export const App: React.FC = () => {
       window.removeEventListener('workbench:notification', handleCustomNotify)
       window.removeEventListener('workbench:open-action-mode-modal', handleOpenActionModalEvent)
       window.removeEventListener('workbench:open-prime-chat-modal', handleOpenPrimeChatEvent)
+      window.removeEventListener('keydown', handleGlobalKeyDown)
     }
-  }, [])
+  }, [syncBounds])
+
 
   // Sync Action Mode active directory for modal
   useEffect(() => {
@@ -1395,9 +1434,28 @@ export const App: React.FC = () => {
         notification={notification}
         activePanes={activePanes}
         onTogglePane={handleTogglePane}
+        isPythonDrawerOpen={isPythonDrawerOpen}
+        onTogglePythonDrawer={() => {
+          setIsPythonDrawerOpen((prev) => {
+            const next = !prev
+            try {
+              localStorage.setItem('workbench_python_drawer_open', JSON.stringify(next))
+            } catch (_) {}
+            setTimeout(syncBounds, 50)
+            return next
+          })
+        }}
       />
 
-      <div className="workspace-container" ref={workspaceRef}>
+      <div
+        className="workspace-container"
+        ref={workspaceRef}
+        style={
+          isPythonDrawerOpen
+            ? { height: `calc(100vh - var(--header-height) - ${pythonDrawerHeight}px)` }
+            : undefined
+        }
+      >
         {isTripleMode ? (
           !isSwapped ? (
             <React.Fragment>
@@ -1489,6 +1547,40 @@ export const App: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Dockable Astral uv Python Analyzer & Terminal Drawer */}
+      <UvPythonDrawer
+        isOpen={isPythonDrawerOpen}
+        height={pythonDrawerHeight}
+        onResizeHeight={(newHeight) => {
+          setPythonDrawerHeight(newHeight)
+          try {
+            localStorage.setItem('workbench_python_drawer_height', String(newHeight))
+          } catch (_) {}
+          syncBounds()
+        }}
+        onToggleOpen={() => {
+          setIsPythonDrawerOpen(false)
+          try {
+            localStorage.setItem('workbench_python_drawer_open', 'false')
+          } catch (_) {}
+          setTimeout(syncBounds, 50)
+        }}
+        onNotify={showNotification}
+        onAskAI={(prompt) => {
+          if (window.electron?.sendTextToAI) {
+            window.electron.sendTextToAI({ text: prompt })
+            showNotification('🤖 Forwarded package query to AI Chat')
+          } else {
+            navigator.clipboard.writeText(prompt)
+            showNotification('📋 Copied AI query to clipboard')
+          }
+        }}
+        onSendToNotes={(markdown) => {
+          navigator.clipboard.writeText(markdown)
+          showNotification('📋 Analysis report copied to clipboard. Ready to paste in Notes.')
+        }}
+      />
 
       {/* Splitter Drag Shield Overlay to prevent cursor capture loss */}
       {dragTarget !== 'none' && (

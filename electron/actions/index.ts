@@ -27,6 +27,12 @@ import { inspectFolderAction } from './inspectFolderAction'
 import { extractRfpAction } from './extractRfpAction'
 import { searchTextAction } from './searchTextAction'
 import { readPagesAction } from './readPagesAction'
+import {
+  uvCreateEnvAction,
+  uvInstallPackageAction,
+  uvAnalyzePackageAction,
+  uvRunCodeAction,
+} from './uvActions'
 
 export * from './types'
 export * from './registry'
@@ -58,6 +64,7 @@ export * from './inspectFolderAction'
 export * from './extractRfpAction'
 export * from './searchTextAction'
 export * from './readPagesAction'
+export * from './uvActions'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -96,6 +103,11 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(extractRfpAction)
   registry.register(searchTextAction)
   registry.register(readPagesAction)
+  registry.register(uvCreateEnvAction)
+  registry.register(uvInstallPackageAction)
+  registry.register(uvAnalyzePackageAction)
+  registry.register(uvRunCodeAction)
 
   return registry
 }
+

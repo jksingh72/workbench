@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "tsx --test test/actions.test.ts",
+    "test": "tsx --test test/actions.test.ts test/uv_service.test.ts",
     "preview": "vite preview",
     "package:win": "npm run build && electron-builder --win",
     "package:portable": "npm run build && electron-builder --win portable",

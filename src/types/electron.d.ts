@@ -158,6 +158,71 @@ export interface ElectronAPI {
   mcpConfigureServer?: (serverName: string, updates: any) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
   openErrorLog?: () => Promise<boolean>
   getLogPath?: () => Promise<string>
+
+  // Astral uv Python Sandbox & Package Analyzer APIs
+  uvDetect?: () => Promise<{ available: boolean; version?: string; path?: string; managedPythons?: string[] }>
+  uvListEnvs?: () => Promise<UvEnvInfo[]>
+  uvCreateEnv?: (params: { name: string; pythonVersion?: string; streamId?: string }) => Promise<{ success: boolean; env?: UvEnvInfo; error?: string }>
+  uvDeleteEnv?: (params: { envId: string }) => Promise<{ success: boolean; error?: string }>
+  uvInstallPackage?: (params: { envId: string; packageSpec: string; streamId?: string }) => Promise<{ success: boolean; output: string; error?: string }>
+  uvAnalyzePackage?: (params: { envId: string; packageName: string; streamId?: string }) => Promise<{ success: boolean; report?: PackageAnalysisReport; error?: string }>
+  uvExecuteCode?: (params: { envId: string; code: string; streamId?: string }) => Promise<{ success: boolean; output: string; stderr?: string; exitCode: number; executionTimeMs: number; error?: string }>
+  uvRunCommand?: (params: { envId: string; command: string; streamId?: string }) => Promise<{ success: boolean; exitCode: number; error?: string }>
+  uvKillProcess?: (params: { streamId: string }) => Promise<{ success: boolean }>
+  onUvStreamData?: (callback: (data: UvStreamMessage) => void) => () => void
+}
+
+export interface UvEnvInfo {
+  id: string
+  name: string
+  path: string
+  pythonVersion: string
+  createdDate: string
+  installedPackages: string[]
+}
+
+export interface PackageAnalysisReport {
+  package: string
+  metadata: {
+    name: string
+    version: string
+    summary: string
+    author: string
+    license: string
+    homepage: string
+    dependencies: string[]
+  }
+  modules: Array<{ name: string; isPackage: boolean }>
+  classes: Array<{
+    name: string
+    module: string
+    docstring: string
+    bases: string[]
+    methods: Array<{
+      name: string
+      signature: string
+      docstring: string
+      parameters: Array<{ name: string; kind: string; annotation: string; default: string }>
+      returnType: string
+    }>
+  }>
+  functions: Array<{
+    name: string
+    module: string
+    signature: string
+    docstring: string
+    parameters: Array<{ name: string; kind: string; annotation: string; default: string }>
+    returnType: string
+  }>
+  constants: Array<{ name: string; type: string; value: string }>
+  error?: string
+}
+
+export interface UvStreamMessage {
+  streamId: string
+  streamType: 'stdout' | 'stderr' | 'exit' | 'status'
+  chunk: string
+  exitCode?: number
 }
 
 export interface McpServerInfo {
