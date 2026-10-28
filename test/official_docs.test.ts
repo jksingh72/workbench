@@ -1,8 +1,11 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 import { ActionRegistry } from '../electron/actions/registry.ts'
 import { fetchOfficialDocsAction } from '../electron/actions/fetchOfficialDocsAction.ts'
 import { OfficialDocsResolver } from '../electron/services/officialDocsResolver.ts'
+import { OutputFormatService } from '../electron/services/outputFormatService.ts'
 import { ActionContext } from '../electron/actions/types.ts'
 
 describe('Documentation-First Package & Ecosystem Intelligence Test Suite', () => {
@@ -121,6 +124,68 @@ describe('Documentation-First Package & Ecosystem Intelligence Test Suite', () =
       assert.match(res.details.content, /Official Ecosystem Analysis: requests/i)
       assert.match(res.details.content, /Official Documentation/i)
       assert.match(res.details.content, /Import Module.*import requests/i)
+      assert.match(res.details.content, /Required Synthesis Format Specification/i)
+      assert.match(res.details.content, /1\. Brief Description/i)
+      assert.match(res.details.content, /2\. Architectural Details & Component Hierarchy/i)
+      assert.match(res.details.content, /3\. Production-Level Use Case & Code Implementation/i)
+      assert.match(res.details.content, /4\. Architectural Nuances & Critical Questions to Consider/i)
+    })
+  })
+
+  describe('6. File-Driven Output Format Template Service', () => {
+    test('discovers and loads package-architecture.format.md', () => {
+      const service = OutputFormatService.getInstance()
+      const format = service.getFormat('package-architecture')
+      assert.ok(format, 'Should find package-architecture format')
+      assert.equal(format?.id, 'package-architecture')
+      assert.match(format?.name || '', /Package Architecture/i)
+      assert.ok(format?.content.includes('Brief Description'))
+      assert.ok(format?.content.includes('Architectural Details & Component Hierarchy'))
+      assert.ok(format?.content.includes('Visual Architecture Diagram (Mermaid)'))
+    })
+
+    test('lists available formats', () => {
+      const service = OutputFormatService.getInstance()
+      const list = service.listFormats()
+      assert.ok(list.length > 0, 'Should find at least 1 format')
+      assert.ok(list.some((f) => f.id === 'package-architecture'))
+    })
+
+    test('renders guidance block with template instructions', () => {
+      const service = OutputFormatService.getInstance()
+      const guidance = service.renderGuidance('package-architecture')
+      assert.ok(guidance)
+      assert.match(guidance!, /### Required Synthesis Format Specification/i)
+      assert.match(guidance!, /1\. Brief Description/i)
+      assert.match(guidance!, /2\. Architectural Details & Component Hierarchy/i)
+      assert.match(guidance!, /Visual Architecture Diagram \(Mermaid\)/i)
+      assert.match(guidance!, /3\. Production-Level Use Case & Code Implementation/i)
+    })
+  })
+
+  describe('7. Optional NoteView Persistence (saveNote)', () => {
+    test('saves markdown note when saveNote: true', async () => {
+      const tempNotesDir = path.join(process.cwd(), 'notes')
+      const expectedNotePath = path.join(tempNotesDir, 'requests-architecture.md')
+
+      try {
+        const res = await fetchOfficialDocsAction.execute(mockContext, {
+          package: 'requests',
+          fetchDocs: false,
+          saveNote: true,
+        })
+        assert.equal(res.success, true)
+        assert.ok(res.details.savedNotePath)
+        assert.ok(fs.existsSync(expectedNotePath), 'Expected note file to be created on disk')
+        const noteContent = fs.readFileSync(expectedNotePath, 'utf-8')
+        assert.match(noteContent, /Official Ecosystem Analysis: requests/i)
+        assert.match(noteContent, /1\. Brief Description/i)
+        assert.match(noteContent, /2\. Architectural Details & Component Hierarchy/i)
+      } finally {
+        if (fs.existsSync(expectedNotePath)) {
+          fs.unlinkSync(expectedNotePath)
+        }
+      }
     })
   })
 })

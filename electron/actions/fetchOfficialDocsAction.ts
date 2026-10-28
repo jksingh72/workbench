@@ -1,5 +1,8 @@
+import path from 'node:path'
+import fs from 'node:fs'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
 import { OfficialDocsResolver } from '../services/officialDocsResolver'
+import { OutputFormatService } from '../services/outputFormatService'
 
 export const fetchOfficialDocsAction: ActionDefinition = {
   id: 'fetch_official_docs',
@@ -26,10 +29,25 @@ export const fetchOfficialDocsAction: ActionDefinition = {
         'Whether to fetch and scrape the official documentation site content. Defaults to true.',
       default: true,
     },
+    format: {
+      type: 'string',
+      required: false,
+      description:
+        'ID or name of the output format template to follow (e.g. "package-architecture"). Defaults to "package-architecture". Templates are loaded from .workbench/formats/ or templates/formats/.',
+      default: 'package-architecture',
+    },
+    saveNote: {
+      type: 'boolean',
+      required: false,
+      description:
+        'Whether to automatically save the generated architecture guide as a Markdown note in NoteView (e.g. notes/<package>-guide.md). Defaults to false.',
+      default: false,
+    },
   },
   example: {
     action: 'fetch_official_docs',
-    package: 'langchain',
+    package: 'fastapi',
+    format: 'package-architecture',
   },
   async execute(ctx: ActionContext, payload: any): Promise<ActionResult> {
     const params = payload.params || {}
@@ -91,22 +109,41 @@ export const fetchOfficialDocsAction: ActionDefinition = {
     if (ecosystem.satellitePackages.length > 0) {
       mdLines.push(`\n## Constituent & Satellite Packages (${ecosystem.satellitePackages.length} detected)`)
 
-      if (ecosystem.corePackages.length > 0) {
-        mdLines.push(`\n### Core / Foundation Packages (Where primary runtime abstractions live):`)
-        for (const cp of ecosystem.corePackages) {
-          const sat = ecosystem.satellitePackages.find((s) => s.name === cp)
-          mdLines.push(`- \`${cp}\`${sat?.constraint ? ` (${sat.constraint})` : ''} — Foundation abstractions`)
+      const coreList = ecosystem.satellitePackages.filter((p) => p.category === 'core')
+      const ecoToolsList = ecosystem.satellitePackages.filter((p) => p.category === 'ecosystem')
+      const integrationList = ecosystem.satellitePackages.filter((p) => p.category === 'integration')
+      const otherList = ecosystem.satellitePackages.filter(
+        (p) => p.category !== 'core' && p.category !== 'ecosystem' && p.category !== 'integration'
+      )
+
+      if (coreList.length > 0) {
+        mdLines.push(`\n### Core / Foundation Packages (Primary runtime abstractions):`)
+        for (const cp of coreList) {
+          mdLines.push(`- \`${cp.name}\`${cp.constraint ? ` (${cp.constraint})` : ''} — Foundation abstractions`)
         }
       }
 
-      if (ecosystem.integrationPackages.length > 0) {
-        mdLines.push(`\n### Official Provider Integrations:`)
-        for (const ip of ecosystem.integrationPackages.slice(0, 15)) {
-          const sat = ecosystem.satellitePackages.find((s) => s.name === ip)
-          mdLines.push(`- \`${ip}\`${sat?.constraint ? ` (${sat.constraint})` : ''}`)
+      if (ecoToolsList.length > 0) {
+        mdLines.push(`\n### Ecosystem Tools & Extensions:`)
+        for (const ep of ecoToolsList) {
+          mdLines.push(`- \`${ep.name}\`${ep.constraint ? ` (${ep.constraint})` : ''} — Official tools & extensions`)
         }
-        if (ecosystem.integrationPackages.length > 15) {
-          mdLines.push(`- ... (+${ecosystem.integrationPackages.length - 15} more provider integrations)`)
+      }
+
+      if (integrationList.length > 0) {
+        mdLines.push(`\n### Official Provider Integrations:`)
+        for (const ip of integrationList.slice(0, 15)) {
+          mdLines.push(`- \`${ip.name}\`${ip.constraint ? ` (${ip.constraint})` : ''}`)
+        }
+        if (integrationList.length > 15) {
+          mdLines.push(`- ... (+${integrationList.length - 15} more provider integrations)`)
+        }
+      }
+
+      if (otherList.length > 0 && coreList.length === 0 && ecoToolsList.length === 0 && integrationList.length === 0) {
+        mdLines.push(`\n### Related Dependencies:`)
+        for (const op of otherList.slice(0, 10)) {
+          mdLines.push(`- \`${op.name}\`${op.constraint ? ` (${op.constraint})` : ''}`)
         }
       }
     }
@@ -121,17 +158,57 @@ export const fetchOfficialDocsAction: ActionDefinition = {
       mdLines.push(`Official documentation is available at: ${ecosystem.officialDocsUrl}`)
     }
 
+    // Inject Output Format Guidance from Template File (e.g. package-architecture.format.md)
+    const formatId = (params.format || payload.format || 'package-architecture').trim()
+    const activeDir = ctx.getActiveDirectory?.() || process.cwd()
+    const formatService = OutputFormatService.getInstance()
+    const formatGuidance = formatService.renderGuidance(formatId, activeDir)
+    const formatMeta = formatService.getFormat(formatId, activeDir)
+
+    if (formatGuidance) {
+      mdLines.push(`\n${formatGuidance}`)
+    }
+
     const fullContent = mdLines.join('\n')
+
+    // Optional NoteView persistence
+    const shouldSaveNote = payload.saveNote === true || params.saveNote === true
+    let savedNotePath: string | undefined
+
+    if (shouldSaveNote) {
+      try {
+        const notesDir = path.join(activeDir, 'notes')
+        if (!fs.existsSync(notesDir)) {
+          fs.mkdirSync(notesDir, { recursive: true })
+        }
+        savedNotePath = path.join(notesDir, `${ecosystem.name}-architecture.md`)
+        fs.writeFileSync(savedNotePath, fullContent, 'utf-8')
+        ctx.notify(`📝 Saved architecture guide to: ${savedNotePath}`)
+        ctx.refreshExplorer?.()
+      } catch (err) {
+        console.warn('[fetch_official_docs] Failed to save note:', err)
+      }
+    }
 
     return {
       success: true,
       action: 'fetch_official_docs',
       message: `Resolved official documentation for "${ecosystem.name}" (v${ecosystem.version}): ${
         ecosystem.officialDocsUrl || 'Docs URL verified'
-      } with ${ecosystem.satellitePackages.length} satellite package(s).`,
+      } with ${ecosystem.satellitePackages.length} satellite package(s)${
+        formatMeta ? ` using format "${formatMeta.name}"` : ''
+      }.`,
       details: {
         ecosystem,
         docs: docsResult,
+        format: formatMeta
+          ? {
+              id: formatMeta.id,
+              name: formatMeta.name,
+              filePath: formatMeta.filePath,
+            }
+          : undefined,
+        savedNotePath,
         content: fullContent,
       },
     }

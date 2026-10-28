@@ -335,7 +335,7 @@ export class ActionRegistry {
         `3. **Collections & Folder Inspection:** NEVER use \`attach_file\` in a loop or batch! ALWAYS use \`inspect_folder\` (\`{"action": "inspect_folder", "path": ".", "filter": "books", "includeExcerpts": true}\`).`,
         `4. **Single Document Deep Dive:** Use \`attach_file\` ONLY for ONE specific document when the user explicitly asks to read or analyze that file (e.g. "Read paper.pdf").`,
         `5. **Organizing Files:** Use \`batch\` with \`create_folder\` and \`move_file\` actions.`,
-        `6. **Python Package & Ecosystem Analysis:** ALWAYS use \`fetch_official_docs\` (\`{"action": "fetch_official_docs", "package": "<name>"}\`) when asked to analyze, inspect, or explain Python packages or frameworks (e.g. langchain, pydantic, faststream). This retrieves verified official documentation, architecture, and satellite packages without installing anything locally.`,
+        `6. **Python Package & Ecosystem Analysis:** ALWAYS use \`fetch_official_docs\` (\`{"action": "fetch_official_docs", "package": "<name>"}\`) when asked to analyze, inspect, or explain Python packages or frameworks (e.g. crewai, langchain, pydantic, faststream, fastapi). This retrieves verified official documentation, architecture, and satellite packages without installing anything locally. ALWAYS structure your final synthesis strictly following the template format instructions (1. Brief Description (max 2 paragraphs), 2. Architectural Details & Component Hierarchy with a Mermaid diagram, 3. Production-Level Use Case & Code Implementation, 4. Architectural Nuances & Critical Questions to Consider, 5. Official Documentation Atlas) attached to the action result.`,
         ``,
         `### Available Workbench Actions:`,
       ]
@@ -378,7 +378,7 @@ export class ActionRegistry {
         `- Word Documents: Use \`render_docx\` (JSON blocks) to build Word docs with tables locally.`,
         `- RFP Processing: Use \`extract_rfp\` to unpack & extract text, \`search_text\` to query, and \`read_pages\` for page ranges.`,
         `- Folders & Books: ALWAYS use \`inspect_folder\` to scan metadata & excerpts in 1 turn. NEVER use attach_file in loops.`,
-        `- Python Packages & Ecosystems: Use \`fetch_official_docs\` to inspect verified official documentation and satellite packages without local installation.`,
+        `- Python Packages & Ecosystems: Use \`fetch_official_docs\` to inspect verified official docs without local install, adhering strictly to the template format (1. Brief Description (max 2 paras), 2. Architectural Details with Mermaid diagram, 3. Production Code Example, 4. Critical Questions, 5. Doc Atlas).`,
         `- Multi-Action Tasks: Use \`batch\` with actions array.`,
         ``,
         `### Available Actions:`,

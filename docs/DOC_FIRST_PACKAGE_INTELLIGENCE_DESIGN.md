@@ -62,10 +62,27 @@ sequenceDiagram
 
 ### 3.3. Action Registry & ChatView Tool Integration (`electron/actions/registry.ts`)
 * Exposes `fetch_official_docs` under the `⚡ Batch & Script Execution` group (`defaultSelected: true`).
-* Aliases: `analyze_package_ecosystem`, `inspect_package_docs`, `official_docs_lookup`.
+* Aliases: `analyze_package_ecosystem`, `inspect_package_docs`, `official_docs_lookup`, `package_docs`, `get_official_docs`.
 * Parameters:
-  * `package` (string, required): The package or ecosystem name (e.g. `"langchain"`, `"faststream"`, `"pydantic"`).
-  * `subTopic` (string, optional): Specific subtopic to focus on (e.g. `"architecture"`, `"quickstart"`, `"core"`).
+  * `package` (string, required): The package or ecosystem name (e.g. `"fastapi"`, `"langchain"`, `"pydantic"`).
+  * `format` (string, optional): ID of output format template to follow (default: `"package-architecture"`).
+  * `fetchDocs` (boolean, optional): Whether to scrape official docs content (default: `true`).
+  * `saveNote` (boolean, optional): Whether to persist the generated report to `notes/<package>-architecture.md` (default: `false`).
+
+### 3.4. File-Driven Output Format Template System (`electron/services/outputFormatService.ts`)
+Rather than hardcoding output schemas into TypeScript strings, format prescriptions are managed as standalone `.format.md` files:
+* **Template Search Precedence**:
+  1. `<workspace>/.workbench/formats/<id>.format.md` (User workspace overrides)
+  2. `<workspace>/templates/formats/<id>.format.md` (Repository template definitions)
+  3. `<cwd>/.workbench/formats` & `templates/formats`
+  4. App bundle default templates
+* **Live Inspection & Editing**: Users can open, edit, and create custom formats directly inside NoteView without recompiling TypeScript or restarting the app.
+* **Default Blueprint (`package-architecture.format.md`)**:
+  1. **Conceptual Anchor**: Application archetype, core boilerplate-reduction paradigm, and 5-stage runtime request journey.
+  2. **Component Hierarchy**: ASCII/Mermaid tree of nesting runtime elements from root application down to individual operations.
+  3. **Framework Nuances**: Concurrency execution rules (async vs sync threadpools), modern lifespan state management, scoping & state traps.
+  4. **Canonical Production Blueprint**: Modern, idiomatic Python code with lifespans, grouped routers, type contracts, and dependency injection.
+  5. **Documentation Deep-Links Atlas**: Direct chapter links to high-yield documentation topics.
 
 ---
 
