@@ -1,10 +1,23 @@
-import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ActionRegistry } from '../actions/registry'
 import { ActionDefinition, ActionContext, ActionResult, ActionParameter } from '../actions/types'
+
+function getUserDataPath(): string {
+  try {
+    const req = createRequire(import.meta.url)
+    const electron = req('electron')
+    if (electron?.app?.getPath) {
+      return electron.app.getPath('userData')
+    }
+  } catch {
+    // Non-electron test/script environment
+  }
+  return process.env.APPDATA || process.env.HOME || process.cwd()
+}
 
 export interface McpServerConfig {
   command: string
@@ -54,7 +67,7 @@ export class McpManager {
 
   private constructor() {
     const cwdConfig = path.join(process.cwd(), 'workbench-mcp.json')
-    const userConfig = path.join(app.getPath('userData'), 'workbench-mcp.json')
+    const userConfig = path.join(getUserDataPath(), 'workbench-mcp.json')
     this.configPath = fs.existsSync(cwdConfig) ? cwdConfig : userConfig
     this.ensureConfigFile()
   }

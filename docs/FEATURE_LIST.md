@@ -141,6 +141,7 @@ Workbench includes a specialized suite of high-reliability document engineering 
 | `batch` | Executes multiple actions in strict atomic sequence. Labels steps (`Step 1/N`, `Step 2/N`), supports `stopOnFailure`, and returns complete execution output for all steps even when a step fails. |
 | `run_script` | Safe multi-language script execution engine. Supports Python, Shell, PowerShell, and JavaScript (with full CommonJS `require('fs')` and `require('path')` support). Enforces execution timeouts and returns exit codes. |
 | `read_pages` | Bounded document extraction. Normalizes Windows CRLF and Unix LF newlines, extracts exact page ranges without dumping entire documents, and prevents context exhaustion. |
+| `fetch_official_docs` | Zero-install ecosystem & official documentation intelligence. Directly inspects PyPI metadata to resolve canonical documentation sites (`python.langchain.com`, `docs.pydantic.dev`), automatically maps satellite/core foundation packages (`requires_dist`), derives verified import identifiers, and extracts clean, boilerplate-free Markdown documentation without downloading or installing any packages locally. |
 
 ### System Safeguards & Output Caps
 - **Default Action Caps**: `read_file` and tool outputs default to a safe 2,500 lines / 100,000 characters to prevent crashing LLM context windows.

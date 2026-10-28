@@ -1,6 +1,15 @@
-import { app, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
+
+function getElectronModule(): { app?: any; shell?: any } {
+  try {
+    const req = createRequire(import.meta.url)
+    return req('electron') || {}
+  } catch {
+    return {}
+  }
+}
 
 export class Logger {
   private static logFilePath: string = ''
@@ -10,7 +19,8 @@ export class Logger {
   private static init(): void {
     if (this.logFilePath) return
     try {
-      const userData = app.getPath('userData')
+      const { app } = getElectronModule()
+      const userData = app?.getPath ? app.getPath('userData') : (process.env.APPDATA || process.env.HOME || process.cwd())
       this.logsDir = path.join(userData, 'logs')
       if (!fs.existsSync(this.logsDir)) {
         fs.mkdirSync(this.logsDir, { recursive: true })
@@ -32,12 +42,16 @@ export class Logger {
       if (!fs.existsSync(this.logFilePath)) {
         fs.writeFileSync(this.logFilePath, `=== Workbench Error Log Initialized ===\nCreated: ${new Date().toISOString()}\n\n`, 'utf-8')
       }
-      const err = await shell.openPath(this.logFilePath)
-      if (err) {
-        console.error('[Logger] Failed to open log file in external editor:', err)
-        return false
+      const { shell } = getElectronModule()
+      if (shell?.openPath) {
+        const err = await shell.openPath(this.logFilePath)
+        if (err) {
+          console.error('[Logger] Failed to open log file in external editor:', err)
+          return false
+        }
+        return true
       }
-      return true
+      return false
     } catch (e) {
       console.error('[Logger] Exception opening log file:', e)
       return false

@@ -95,7 +95,7 @@ export class ActionRegistry {
     const allActions = this.getAll()
     const coreIds = new Set(['create_folder', 'write_file', 'read_file', 'move_file', 'copy_file', 'rename_file', 'delete_file', 'open_file'])
     const bookIds = new Set(['inspect_folder', 'attach_file', 'read_pdf', 'read_docx', 'create_docx', 'render_docx', 'extract_rfp', 'search_text', 'read_pages', 'summarize_file'])
-    const scriptIds = new Set(['batch', 'run_script', 'create_project', 'download_file'])
+    const scriptIds = new Set(['batch', 'run_script', 'create_project', 'download_file', 'fetch_official_docs'])
     const systemIds = new Set(['list_directory', 'get_workspace_folders', 'set_active_directory', 'list_actions', 'add_mcp_server', 'remove_mcp_server', 'configure_mcp_server', 'create_action', 'update_action'])
 
     const mcpServersMap = new Map<string, string[]>()
@@ -335,6 +335,7 @@ export class ActionRegistry {
         `3. **Collections & Folder Inspection:** NEVER use \`attach_file\` in a loop or batch! ALWAYS use \`inspect_folder\` (\`{"action": "inspect_folder", "path": ".", "filter": "books", "includeExcerpts": true}\`).`,
         `4. **Single Document Deep Dive:** Use \`attach_file\` ONLY for ONE specific document when the user explicitly asks to read or analyze that file (e.g. "Read paper.pdf").`,
         `5. **Organizing Files:** Use \`batch\` with \`create_folder\` and \`move_file\` actions.`,
+        `6. **Python Package & Ecosystem Analysis:** ALWAYS use \`fetch_official_docs\` (\`{"action": "fetch_official_docs", "package": "<name>"}\`) when asked to analyze, inspect, or explain Python packages or frameworks (e.g. langchain, pydantic, faststream). This retrieves verified official documentation, architecture, and satellite packages without installing anything locally.`,
         ``,
         `### Available Workbench Actions:`,
       ]
@@ -377,6 +378,7 @@ export class ActionRegistry {
         `- Word Documents: Use \`render_docx\` (JSON blocks) to build Word docs with tables locally.`,
         `- RFP Processing: Use \`extract_rfp\` to unpack & extract text, \`search_text\` to query, and \`read_pages\` for page ranges.`,
         `- Folders & Books: ALWAYS use \`inspect_folder\` to scan metadata & excerpts in 1 turn. NEVER use attach_file in loops.`,
+        `- Python Packages & Ecosystems: Use \`fetch_official_docs\` to inspect verified official documentation and satellite packages without local installation.`,
         `- Multi-Action Tasks: Use \`batch\` with actions array.`,
         ``,
         `### Available Actions:`,

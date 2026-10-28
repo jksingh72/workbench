@@ -27,6 +27,7 @@ import { inspectFolderAction } from './inspectFolderAction'
 import { extractRfpAction } from './extractRfpAction'
 import { searchTextAction } from './searchTextAction'
 import { readPagesAction } from './readPagesAction'
+import { fetchOfficialDocsAction } from './fetchOfficialDocsAction'
 
 export * from './types'
 export * from './registry'
@@ -58,6 +59,7 @@ export * from './inspectFolderAction'
 export * from './extractRfpAction'
 export * from './searchTextAction'
 export * from './readPagesAction'
+export * from './fetchOfficialDocsAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -96,6 +98,7 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(extractRfpAction)
   registry.register(searchTextAction)
   registry.register(readPagesAction)
+  registry.register(fetchOfficialDocsAction)
 
   return registry
 }
