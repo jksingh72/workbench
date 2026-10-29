@@ -28,6 +28,7 @@ import { extractRfpAction } from './extractRfpAction'
 import { searchTextAction } from './searchTextAction'
 import { readPagesAction } from './readPagesAction'
 import { fetchOfficialDocsAction } from './fetchOfficialDocsAction'
+import { loadPromptAction } from './loadPromptAction'
 
 export * from './types'
 export * from './registry'
@@ -60,6 +61,7 @@ export * from './extractRfpAction'
 export * from './searchTextAction'
 export * from './readPagesAction'
 export * from './fetchOfficialDocsAction'
+export * from './loadPromptAction'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -99,6 +101,7 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(searchTextAction)
   registry.register(readPagesAction)
   registry.register(fetchOfficialDocsAction)
+  registry.register(loadPromptAction)
 
   return registry
 }

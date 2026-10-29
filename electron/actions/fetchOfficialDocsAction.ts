@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
 import { OfficialDocsResolver } from '../services/officialDocsResolver'
 import { OutputFormatService } from '../services/outputFormatService'
+import { PromptRegistryService } from '../services/promptRegistryService'
 
 export const fetchOfficialDocsAction: ActionDefinition = {
   id: 'fetch_official_docs',
@@ -14,7 +15,7 @@ export const fetchOfficialDocsAction: ActionDefinition = {
     'get_official_docs',
   ],
   description:
-    'Fetches verified official documentation, architecture guides, and satellite package maps for any Python package/ecosystem directly from official sources (PyPI metadata and project documentation sites). No local installation required.',
+    'Fetches verified official documentation, architecture guides, and satellite package maps for any Python package/ecosystem directly from official sources (PyPI metadata and project documentation sites) and attaches the modular package-analysis prompt.',
   parameters: {
     package: {
       type: 'string',
@@ -29,12 +30,19 @@ export const fetchOfficialDocsAction: ActionDefinition = {
         'Whether to fetch and scrape the official documentation site content. Defaults to true.',
       default: true,
     },
+    prompt: {
+      type: 'string',
+      required: false,
+      description:
+        'ID or path of the modular prompt in prompts/ to load for analysis (defaults to "package-analysis" at prompts/analysis/package-analysis.md).',
+      default: 'package-analysis',
+    },
     format: {
       type: 'string',
       required: false,
       description:
-        'ID or name of the output format template to follow (e.g. "package-architecture"). Defaults to "package-architecture". Templates are loaded from .workbench/formats/ or templates/formats/.',
-      default: 'package-architecture',
+        'Optional output format or prompt ID override (defaults to "package-analysis").',
+      default: 'package-analysis',
     },
     saveNote: {
       type: 'boolean',
@@ -47,7 +55,7 @@ export const fetchOfficialDocsAction: ActionDefinition = {
   example: {
     action: 'fetch_official_docs',
     package: 'fastapi',
-    format: 'package-architecture',
+    prompt: 'package-analysis',
   },
   async execute(ctx: ActionContext, payload: any): Promise<ActionResult> {
     const params = payload.params || {}
@@ -158,15 +166,42 @@ export const fetchOfficialDocsAction: ActionDefinition = {
       mdLines.push(`Official documentation is available at: ${ecosystem.officialDocsUrl}`)
     }
 
-    // Inject Output Format Guidance from Template File (e.g. package-architecture.format.md)
-    const formatId = (params.format || payload.format || 'package-architecture').trim()
+    // Inject Modular Prompt from prompts/ (default: prompts/analysis/package-analysis.md)
+    const requestedId = (params.prompt || payload.prompt || params.format || payload.format || 'package-analysis').trim()
     const activeDir = ctx.getActiveDirectory?.() || process.cwd()
+    const promptRegistry = PromptRegistryService.getInstance()
     const formatService = OutputFormatService.getInstance()
-    const formatGuidance = formatService.renderGuidance(formatId, activeDir)
-    const formatMeta = formatService.getFormat(formatId, activeDir)
 
-    if (formatGuidance) {
-      mdLines.push(`\n${formatGuidance}`)
+    let resolvedPromptMeta: { id: string; name: string; filePath: string; relativePath?: string } | undefined
+    let promptGuidance: string | null = null
+
+    // If explicitly requesting a legacy format that exists only in templates/formats, allow it; otherwise prefer prompts/
+    const promptDef = promptRegistry.getPrompt(requestedId, activeDir)
+    if (promptDef) {
+      promptGuidance = promptRegistry.renderGuidance(promptDef.id, activeDir, {
+        packageName: ecosystem.name,
+        package: ecosystem.name,
+      })
+      resolvedPromptMeta = {
+        id: promptDef.id,
+        name: promptDef.name,
+        filePath: promptDef.filePath,
+        relativePath: promptDef.relativePath,
+      }
+    } else {
+      const formatMeta = formatService.getFormat(requestedId, activeDir)
+      if (formatMeta) {
+        promptGuidance = formatService.renderGuidance(requestedId, activeDir)
+        resolvedPromptMeta = {
+          id: formatMeta.id,
+          name: formatMeta.name,
+          filePath: formatMeta.filePath,
+        }
+      }
+    }
+
+    if (promptGuidance) {
+      mdLines.push(`\n${promptGuidance}`)
     }
 
     const fullContent = mdLines.join('\n')
@@ -196,18 +231,13 @@ export const fetchOfficialDocsAction: ActionDefinition = {
       message: `Resolved official documentation for "${ecosystem.name}" (v${ecosystem.version}): ${
         ecosystem.officialDocsUrl || 'Docs URL verified'
       } with ${ecosystem.satellitePackages.length} satellite package(s)${
-        formatMeta ? ` using format "${formatMeta.name}"` : ''
+        resolvedPromptMeta ? ` using prompt "${resolvedPromptMeta.name}"` : ''
       }.`,
       details: {
         ecosystem,
         docs: docsResult,
-        format: formatMeta
-          ? {
-              id: formatMeta.id,
-              name: formatMeta.name,
-              filePath: formatMeta.filePath,
-            }
-          : undefined,
+        prompt: resolvedPromptMeta,
+        format: resolvedPromptMeta,
         savedNotePath,
         content: fullContent,
       },

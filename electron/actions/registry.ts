@@ -1,4 +1,5 @@
 import { ActionDefinition } from './types'
+import { PromptRegistryService } from '../services/promptRegistryService'
 
 export type LLMProvider = 'claude' | 'chatgpt' | 'perplexity' | 'gemini' | 'deepseek' | 'generic'
 
@@ -93,10 +94,41 @@ export class ActionRegistry {
    */
   public getAvailableToolGroups(): ToolGroup[] {
     const allActions = this.getAll()
-    const coreIds = new Set(['create_folder', 'write_file', 'read_file', 'move_file', 'copy_file', 'rename_file', 'delete_file', 'open_file'])
-    const bookIds = new Set(['inspect_folder', 'attach_file', 'read_pdf', 'read_docx', 'create_docx', 'render_docx', 'extract_rfp', 'search_text', 'read_pages', 'summarize_file'])
+    const coreIds = new Set([
+      'create_folder',
+      'write_file',
+      'read_file',
+      'load_prompt',
+      'move_file',
+      'copy_file',
+      'rename_file',
+      'delete_file',
+      'open_file',
+    ])
+    const bookIds = new Set([
+      'inspect_folder',
+      'attach_file',
+      'read_pdf',
+      'read_docx',
+      'create_docx',
+      'render_docx',
+      'extract_rfp',
+      'search_text',
+      'read_pages',
+      'summarize_file',
+    ])
     const scriptIds = new Set(['batch', 'run_script', 'create_project', 'download_file', 'fetch_official_docs'])
-    const systemIds = new Set(['list_directory', 'get_workspace_folders', 'set_active_directory', 'list_actions', 'add_mcp_server', 'remove_mcp_server', 'configure_mcp_server', 'create_action', 'update_action'])
+    const systemIds = new Set([
+      'list_directory',
+      'get_workspace_folders',
+      'set_active_directory',
+      'list_actions',
+      'add_mcp_server',
+      'remove_mcp_server',
+      'configure_mcp_server',
+      'create_action',
+      'update_action',
+    ])
 
     const mcpServersMap = new Map<string, string[]>()
 
@@ -114,7 +146,7 @@ export class ActionRegistry {
       {
         id: 'core',
         name: '📁 Core File Operations',
-        description: 'Create folders, write, read, move, copy, and delete files',
+        description: 'Create folders, write, read, move, copy, delete files, and load modular prompts',
         isMcp: false,
         defaultSelected: true,
         actionIds: allActions.filter((a) => coreIds.has(a.id)).map((a) => a.id),
@@ -179,6 +211,53 @@ export class ActionRegistry {
     }
 
     return groups
+  }
+
+  /**
+   * Builds the dynamic on-demand modular prompts section purely from `prompts/` metadata.
+   * Completely independent of prompt body content so prompts can be rewritten freely.
+   */
+  private buildModularPromptsHook(workspaceDir?: string, compact: boolean = false): string[] {
+    const prompts = PromptRegistryService.getInstance().listPrompts(workspaceDir)
+    if (prompts.length === 0) return []
+
+    if (compact) {
+      const lines: string[] = [
+        ``,
+        `### MODULAR TASK PROMPTS (LOAD ON-DEMAND ONLY):`,
+        `Task prompts live in \`prompts/\` and must ONLY be loaded when the user requests that specific task:`,
+      ]
+      for (const p of prompts) {
+        const alsoVia =
+          p.targetActions && p.targetActions.includes('fetch_official_docs')
+            ? `, or \`fetch_official_docs\` which loads official docs + this prompt`
+            : ''
+        lines.push(
+          `- **${p.id}** (\`${p.relativePath}\`): ${p.whenToUse} Load via \`{"action": "load_prompt", "prompt": "${p.id}"}\` (or \`read_file\` on \`"${p.relativePath}"\`${alsoVia}).`
+        )
+      }
+      return lines
+    }
+
+    const lines: string[] = [
+      ``,
+      `### 🧩 MODULAR TASK PROMPTS (ON-DEMAND LOADING ONLY):`,
+      `Specialized task prompts are stored modularly inside \`prompts/\` so they are loaded ONLY when needed. Do NOT apply them to unrelated tasks. When the user's request matches a trigger below, you MUST first read/load that prompt and follow its instructions:`,
+    ]
+
+    for (const p of prompts) {
+      const alsoVia =
+        p.targetActions && p.targetActions.includes('fetch_official_docs')
+          ? ` (or via \`fetch_official_docs\`, which fetches verified official documentation and loads \`${p.relativePath}\` automatically)`
+          : ''
+      lines.push(
+        `- **${p.name}** (ID: \`${p.id}\`, File: \`${p.relativePath}\`):`,
+        `  - **When to load**: ${p.whenToUse}`,
+        `  - **How to load**: Read the prompt via \`{"action": "load_prompt", "prompt": "${p.id}"}\` or \`{"action": "read_file", "path": "${p.relativePath}"}\`${alsoVia}, then follow all instructions in the loaded prompt.`
+      )
+    }
+
+    return lines
   }
 
   /**
@@ -261,6 +340,7 @@ export class ActionRegistry {
         `- RFP Packages: Use \`extract_rfp\` to unpack & extract text, \`search_text\` to query, and \`read_pages\` to read page ranges.`,
         `- Multi-step tasks: use \`batch\` (array of actions) or \`run_script\`.`,
         `- Respond briefly with the action JSON.`,
+        ...this.buildModularPromptsHook(activeDirDisplay, true),
         ``,
         `### AVAILABLE ACTIONS:`,
       ]
@@ -297,6 +377,7 @@ export class ActionRegistry {
         `2. RFP & Document Processing: Use \`extract_rfp\` to unpack & index documents, \`search_text\` to find requirements, and \`read_pages\` to read targeted page ranges.`,
         `3. Collections & Books: ALWAYS use \`inspect_folder\` to scan catalogs in one turn. NEVER use attach_file in loops.`,
         `4. Multi-Action Execution: Use \`batch\` to execute multiple operations sequentially in one shot.`,
+        ...this.buildModularPromptsHook(activeDirDisplay, false),
         ``,
         `### Available Actions:`,
       ]
@@ -335,7 +416,7 @@ export class ActionRegistry {
         `3. **Collections & Folder Inspection:** NEVER use \`attach_file\` in a loop or batch! ALWAYS use \`inspect_folder\` (\`{"action": "inspect_folder", "path": ".", "filter": "books", "includeExcerpts": true}\`).`,
         `4. **Single Document Deep Dive:** Use \`attach_file\` ONLY for ONE specific document when the user explicitly asks to read or analyze that file (e.g. "Read paper.pdf").`,
         `5. **Organizing Files:** Use \`batch\` with \`create_folder\` and \`move_file\` actions.`,
-        `6. **Python Package & Ecosystem Analysis:** ALWAYS use \`fetch_official_docs\` (\`{"action": "fetch_official_docs", "package": "<name>"}\`) when asked to analyze, inspect, or explain Python packages or frameworks (e.g. crewai, langchain, pydantic, faststream, fastapi). This retrieves verified official documentation, architecture, and satellite packages without installing anything locally. ALWAYS structure your final synthesis strictly following the template format instructions (1. Brief Description (max 2 paragraphs), 2. Architectural Details & Component Hierarchy with a Mermaid diagram, 3. Production-Level Use Case & Code Implementation, 4. Architectural Nuances & Critical Questions to Consider, 5. Official Documentation Atlas) attached to the action result.`,
+        ...this.buildModularPromptsHook(activeDirDisplay, false),
         ``,
         `### Available Workbench Actions:`,
       ]
@@ -360,7 +441,7 @@ export class ActionRegistry {
     }
 
     // =========================================================================
-    // 4. CLAUDE CORE (Concise, High-Signal, Non-Attachment: < 1,600 characters)
+    // 4. CLAUDE CORE (Concise, High-Signal, Non-Attachment)
     // =========================================================================
     if (provider === 'claude') {
       const lines: string[] = [
@@ -378,8 +459,8 @@ export class ActionRegistry {
         `- Word Documents: Use \`render_docx\` (JSON blocks) to build Word docs with tables locally.`,
         `- RFP Processing: Use \`extract_rfp\` to unpack & extract text, \`search_text\` to query, and \`read_pages\` for page ranges.`,
         `- Folders & Books: ALWAYS use \`inspect_folder\` to scan metadata & excerpts in 1 turn. NEVER use attach_file in loops.`,
-        `- Python Packages & Ecosystems: Use \`fetch_official_docs\` to inspect verified official docs without local install, adhering strictly to the template format (1. Brief Description (max 2 paras), 2. Architectural Details with Mermaid diagram, 3. Production Code Example, 4. Critical Questions, 5. Doc Atlas).`,
         `- Multi-Action Tasks: Use \`batch\` with actions array.`,
+        ...this.buildModularPromptsHook(activeDirDisplay, true),
         ``,
         `### Available Actions:`,
       ]
@@ -427,6 +508,7 @@ export class ActionRegistry {
       `3. **Folder Inspection:** ALWAYS use \`inspect_folder\` as your FIRST CHOICE to inspect books or documents in a folder in one shot.`,
       `4. **Multi-Action Batches:** ALWAYS use \`batch\` (\`{"action": "batch", "actions": [...]}\`) to run multiple actions sequentially.`,
       `5. **Custom Scripts:** Use \`run_script\` (JavaScript, PowerShell, or Python) for in-process calculations or custom tasks.`,
+      ...this.buildModularPromptsHook(activeDirDisplay, false),
       ``,
       `### 📎 CRITICAL: Reading Individual Documents vs. Cataloging/Grouping Folders:`,
       `1. **Single Document Deep Dive:**`,

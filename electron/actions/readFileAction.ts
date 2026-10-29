@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { ActionDefinition, ActionContext, ActionResult } from './types'
+import { PromptRegistryService } from '../services/promptRegistryService'
 
 export const readFileAction: ActionDefinition = {
   id: 'read_file',
@@ -40,7 +41,24 @@ export const readFileAction: ActionDefinition = {
     }
 
     console.log(`[read_file:STEP 1] Resolving path: "${filePath}" (maxLines: ${maxLines}, TargetPane: "${targetPane}")`)
-    const resolvedPath = ctx.resolveSafePath(filePath, targetPane)
+    let resolvedPath = ctx.resolveSafePath(filePath, targetPane)
+
+    // Fallback for modular prompts in prompts/ when active directory is a different folder
+    if (!fs.existsSync(resolvedPath)) {
+      const cleanRel = String(filePath).trim().replace(/^[/\\]+/, '').replace(/\\/g, '/')
+      if (cleanRel.toLowerCase().startsWith('prompts/')) {
+        const promptEntry = PromptRegistryService.getInstance().getPrompt(cleanRel, ctx.getActiveDirectory?.())
+        if (promptEntry && fs.existsSync(promptEntry.filePath)) {
+          resolvedPath = promptEntry.filePath
+        } else {
+          const cwdFallback = path.resolve(process.cwd(), cleanRel)
+          if (fs.existsSync(cwdFallback)) {
+            resolvedPath = cwdFallback
+          }
+        }
+      }
+    }
+
     console.log(`[read_file:STEP 2] Resolved file path: "${resolvedPath}"`)
 
     if (!fs.existsSync(resolvedPath)) {

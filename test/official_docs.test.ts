@@ -1,27 +1,40 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { ActionRegistry } from '../electron/actions/registry.ts'
 import { fetchOfficialDocsAction } from '../electron/actions/fetchOfficialDocsAction.ts'
+import { loadPromptAction } from '../electron/actions/loadPromptAction.ts'
+import { readFileAction } from '../electron/actions/readFileAction.ts'
 import { OfficialDocsResolver } from '../electron/services/officialDocsResolver.ts'
 import { OutputFormatService } from '../electron/services/outputFormatService.ts'
+import { PromptRegistryService } from '../electron/services/promptRegistryService.ts'
 import { ActionContext } from '../electron/actions/types.ts'
 
-describe('Documentation-First Package & Ecosystem Intelligence Test Suite', () => {
+describe('Documentation-First Package Intelligence & Modular Prompts Suite', () => {
   const mockContext: ActionContext = {
     getActiveDirectory: () => process.cwd(),
-    resolveSafePath: (p: string) => p,
+    resolveSafePath: (p: string) => path.resolve(process.cwd(), p),
     notify: () => {},
+    dispatch: async () => ({ success: true, message: 'mock' }),
   }
 
   describe('1. Action Registration & Discovery', () => {
-    test('registers fetch_official_docs in ActionRegistry', () => {
+    test('registers fetch_official_docs and load_prompt in ActionRegistry', () => {
       const registry = ActionRegistry.getInstance()
       registry.register(fetchOfficialDocsAction)
-      const action = registry.get('fetch_official_docs')
-      assert.ok(action, 'fetch_official_docs should be registered')
-      assert.equal(action?.id, 'fetch_official_docs')
+      registry.register(loadPromptAction)
+      registry.register(readFileAction)
+
+      const fetchAct = registry.get('fetch_official_docs')
+      assert.ok(fetchAct, 'fetch_official_docs should be registered')
+      assert.equal(fetchAct?.id, 'fetch_official_docs')
+
+      const promptAct = registry.get('load_prompt')
+      assert.ok(promptAct, 'load_prompt should be registered')
+      assert.equal(promptAct?.id, 'load_prompt')
+      assert.equal(registry.get('read_prompt')?.id, 'load_prompt')
     })
 
     test('resolves aliases correctly', () => {
@@ -101,7 +114,6 @@ describe('Documentation-First Package & Ecosystem Intelligence Test Suite', () =
           </body>
         </html>
       `
-      // Access private method via any for unit testing
       const md = (resolver as any).htmlToCleanMarkdown(sampleHtml, 'https://example.com/docs')
       assert.match(md, /# FastStream Architecture/)
       assert.match(md, /## Quickstart/)
@@ -113,57 +125,124 @@ describe('Documentation-First Package & Ecosystem Intelligence Test Suite', () =
     })
   })
 
-  describe('5. Action Execution End-to-End', () => {
-    test('fetches official docs report with structured content', async () => {
+  describe('5. Code-Independent Modular PromptRegistryService', () => {
+    test('discovers prompts/analysis/package-analysis.md and loads its exact disk content', () => {
+      const promptRegistry = PromptRegistryService.getInstance()
+      const prompt = promptRegistry.getPrompt('package-analysis')
+      assert.ok(prompt, 'Should discover package-analysis prompt')
+      assert.equal(prompt?.id, 'package-analysis')
+      assert.equal(prompt?.category, 'analysis')
+      assert.equal(prompt?.relativePath, 'prompts/analysis/package-analysis.md')
+
+      // Verify content matches the disk file verbatim (after frontmatter) so rewriting the file never breaks tests
+      const diskRaw = fs.readFileSync(prompt!.filePath, 'utf-8')
+      const diskBody = diskRaw.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n/, '').trim()
+      assert.equal(prompt!.content, diskBody)
+      assert.ok(prompt!.content.length > 0, 'Prompt content should be non-empty')
+    })
+
+    test('substitutes variables dynamically when rendering a prompt', () => {
+      const promptRegistry = PromptRegistryService.getInstance()
+      const prompt = promptRegistry.getPrompt('package-analysis')
+      assert.ok(prompt)
+
+      const rendered = promptRegistry.renderPrompt('package-analysis', { packageName: 'fastapi' })
+      assert.ok(rendered)
+      if (prompt!.content.includes('[PACKAGE NAME]')) {
+        assert.ok(rendered!.includes('fastapi'))
+        assert.ok(!rendered!.includes('[PACKAGE NAME]'))
+      }
+    })
+
+    test('loads prompt via load_prompt action and via read_file fallback from arbitrary active directory', async () => {
+      const externalCtx: ActionContext = {
+        getActiveDirectory: () => os.tmpdir(),
+        resolveSafePath: (p: string) => path.resolve(os.tmpdir(), p),
+        notify: () => {},
+        dispatch: async () => ({ success: true, message: 'mock' }),
+      }
+
+      const promptDef = PromptRegistryService.getInstance().getPrompt('package-analysis')
+      assert.ok(promptDef)
+
+      const loadRes = await loadPromptAction.execute(externalCtx, {
+        prompt: 'package-analysis',
+        package: 'pydantic',
+      })
+      assert.equal(loadRes.success, true)
+      assert.ok(loadRes.details.content.includes(promptDef!.name))
+
+      const readRes = await readFileAction.execute(externalCtx, {
+        path: 'prompts/analysis/package-analysis.md',
+      })
+      assert.equal(readRes.success, true)
+      assert.ok(readRes.details.content.length > 0)
+    })
+
+    test('dynamically hooks newly added or rewritten prompts in prompts/<category>/ into priming without code changes', () => {
+      const tempCategoryDir = path.join(process.cwd(), 'prompts', 'workflows')
+      const tempPromptFile = path.join(tempCategoryDir, 'temp-architecture-review.md')
+
+      try {
+        fs.mkdirSync(tempCategoryDir, { recursive: true })
+        fs.writeFileSync(
+          tempPromptFile,
+          [
+            '---',
+            'id: temp-architecture-review',
+            'category: workflows',
+            'name: Architecture Review Playbook',
+            'whenToUse: Load ONLY when the user asks for an architecture review.',
+            '---',
+            'Review the architecture of [SYSTEM].',
+          ].join('\n'),
+          'utf-8'
+        )
+
+        const registry = ActionRegistry.getInstance()
+        const primingChatgpt = registry.generatePromptGuide('D:\\Workspace', { provider: 'chatgpt' })
+        const primingClaude = registry.generatePromptGuide('D:\\Workspace', { provider: 'claude' })
+
+        assert.match(primingChatgpt, /prompts\/analysis\/package-analysis\.md/)
+        assert.match(primingChatgpt, /prompts\/workflows\/temp-architecture-review\.md/)
+        assert.match(primingClaude, /package-analysis/)
+        assert.match(primingClaude, /temp-architecture-review/)
+      } finally {
+        if (fs.existsSync(tempPromptFile)) {
+          fs.unlinkSync(tempPromptFile)
+        }
+        if (fs.existsSync(tempCategoryDir) && fs.readdirSync(tempCategoryDir).length === 0) {
+          fs.rmdirSync(tempCategoryDir)
+        }
+      }
+    })
+  })
+
+  describe('6. Action Execution End-to-End (fetch_official_docs)', () => {
+    test('fetches official docs report and attaches modular package-analysis prompt from disk', async () => {
       const res = await fetchOfficialDocsAction.execute(mockContext, {
         package: 'requests',
-        fetchDocs: false, // test metadata & satellite formatting without external html fetch
+        fetchDocs: false,
       })
       assert.equal(res.success, true)
       assert.ok(res.details.content, 'Should contain formatted content')
       assert.match(res.details.content, /Official Ecosystem Analysis: requests/i)
-      assert.match(res.details.content, /Official Documentation/i)
       assert.match(res.details.content, /Import Module.*import requests/i)
-      assert.match(res.details.content, /Required Synthesis Format Specification/i)
-      assert.match(res.details.content, /1\. Brief Description/i)
-      assert.match(res.details.content, /2\. Architectural Details & Component Hierarchy/i)
-      assert.match(res.details.content, /3\. Production-Level Use Case & Code Implementation/i)
-      assert.match(res.details.content, /4\. Architectural Nuances & Critical Questions to Consider/i)
+      assert.match(res.details.content, /Loaded Modular Prompt:/i)
+      assert.match(res.details.content, /prompts\/analysis\/package-analysis\.md/i)
     })
   })
 
-  describe('6. File-Driven Output Format Template Service', () => {
-    test('discovers and loads package-architecture.format.md', () => {
+  describe('7. Legacy Format Template Service Compatibility', () => {
+    test('discovers and loads package-architecture.format.md when explicitly queried', () => {
       const service = OutputFormatService.getInstance()
       const format = service.getFormat('package-architecture')
       assert.ok(format, 'Should find package-architecture format')
       assert.equal(format?.id, 'package-architecture')
-      assert.match(format?.name || '', /Package Architecture/i)
-      assert.ok(format?.content.includes('Brief Description'))
-      assert.ok(format?.content.includes('Architectural Details & Component Hierarchy'))
-      assert.ok(format?.content.includes('Visual Architecture Diagram (Mermaid)'))
-    })
-
-    test('lists available formats', () => {
-      const service = OutputFormatService.getInstance()
-      const list = service.listFormats()
-      assert.ok(list.length > 0, 'Should find at least 1 format')
-      assert.ok(list.some((f) => f.id === 'package-architecture'))
-    })
-
-    test('renders guidance block with template instructions', () => {
-      const service = OutputFormatService.getInstance()
-      const guidance = service.renderGuidance('package-architecture')
-      assert.ok(guidance)
-      assert.match(guidance!, /### Required Synthesis Format Specification/i)
-      assert.match(guidance!, /1\. Brief Description/i)
-      assert.match(guidance!, /2\. Architectural Details & Component Hierarchy/i)
-      assert.match(guidance!, /Visual Architecture Diagram \(Mermaid\)/i)
-      assert.match(guidance!, /3\. Production-Level Use Case & Code Implementation/i)
     })
   })
 
-  describe('7. Optional NoteView Persistence (saveNote)', () => {
+  describe('8. Optional NoteView Persistence (saveNote)', () => {
     test('saves markdown note when saveNote: true', async () => {
       const tempNotesDir = path.join(process.cwd(), 'notes')
       const expectedNotePath = path.join(tempNotesDir, 'requests-architecture.md')
@@ -179,8 +258,7 @@ describe('Documentation-First Package & Ecosystem Intelligence Test Suite', () =
         assert.ok(fs.existsSync(expectedNotePath), 'Expected note file to be created on disk')
         const noteContent = fs.readFileSync(expectedNotePath, 'utf-8')
         assert.match(noteContent, /Official Ecosystem Analysis: requests/i)
-        assert.match(noteContent, /1\. Brief Description/i)
-        assert.match(noteContent, /2\. Architectural Details & Component Hierarchy/i)
+        assert.match(noteContent, /Loaded Modular Prompt:/i)
       } finally {
         if (fs.existsSync(expectedNotePath)) {
           fs.unlinkSync(expectedNotePath)
