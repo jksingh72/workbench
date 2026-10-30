@@ -2,10 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electron', {
   updateBounds: (bounds: any) => ipcRenderer.send('workbench:update-bounds', bounds),
-  setSplit: (params: { ratio: number; isSwapped: boolean }) => ipcRenderer.send('workbench:set-split', params),
-  showAskAIMenu: () => ipcRenderer.send('workbench:show-ask-ai-menu'),
+  setSplit: (params: { ratio: number; isSwapped: boolean; activePanes?: { book: boolean; ai: boolean; note: boolean } }) => ipcRenderer.send('workbench:set-split', params),
+  showAskAIMenu: (params?: any) => ipcRenderer.send('workbench:show-ask-ai-menu', params),
   navAction: (action: any) => ipcRenderer.send('workbench:nav-action', action),
   askAI: (options: any) => ipcRenderer.invoke('workbench:ask-ai', options),
+  onOpenAskAITemplateModal: (callback: (data?: { mode?: 'custom' | 'manage'; initialText?: string }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:open-ask-ai-template-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-ask-ai-template-modal', listener)
+    }
+  },
   onNavStateChange: (callback: (target: 'book' | 'ai' | 'note', state: any) => void) => {
     const listener = (_: any, target: 'book' | 'ai' | 'note', state: any) => {
       callback(target, state)

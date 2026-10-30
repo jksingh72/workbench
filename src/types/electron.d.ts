@@ -14,6 +14,14 @@ export interface NavState {
   zoomFactor: number
 }
 
+export interface AskAITemplate {
+  id: string
+  name: string
+  description: string
+  prompt: string
+  isPreset?: boolean
+}
+
 export interface AskAIResult {
   success: boolean
   text?: string
@@ -23,21 +31,23 @@ export interface AskAIResult {
 }
 
 export interface ElectronAPI {
-  updateBounds: (bounds: { book?: Bounds; ai?: Bounds; note?: Bounds }) => void
-  setSplit: (params: { ratio: number; isSwapped: boolean }) => void
-  showAskAIMenu: () => void
+  updateBounds: (bounds: { book?: Bounds; ai?: Bounds; note?: Bounds; activePanes?: { book: boolean; ai: boolean; note: boolean } }) => void
+  setSplit: (params: { ratio: number; isSwapped: boolean; activePanes?: { book: boolean; ai: boolean; note: boolean } }) => void
+  showAskAIMenu: (params?: { templates?: AskAITemplate[]; defaultTemplateId?: string; rendererSelection?: string }) => void
   navAction: (action: {
     target: 'book' | 'ai' | 'note'
     command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset'
     url?: string
   }) => void
   askAI: (options: {
-    templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom'
+    templateKey: string
     customPrompt?: string
+    rendererSelection?: string
   }) => Promise<AskAIResult>
   onNavStateChange: (
     callback: (target: 'book' | 'ai' | 'note', state: Partial<NavState>) => void
   ) => () => void
+  onOpenAskAITemplateModal?: (callback: (data?: { mode?: 'custom' | 'manage'; initialText?: string }) => void) => () => void
   onAskAIResult: (callback: (result: AskAIResult) => void) => () => void
   openExternal: (url: string) => void
   clearSession: (target: 'book' | 'ai' | 'note', scope?: 'current' | 'all' | string) => Promise<{ success: boolean; error?: string }>

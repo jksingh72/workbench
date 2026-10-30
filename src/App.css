@@ -504,9 +504,80 @@
   color: var(--text-primary);
 }
 
-/* Ask AI Button & Dropdown */
+/* Ask AI Split Button & Dropdown */
 .ask-ai-wrapper {
   position: relative;
+}
+
+.ask-ai-split-group {
+  display: inline-flex;
+  align-items: stretch;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.4);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.ask-ai-split-group:hover {
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.6);
+  transform: translateY(-1px);
+}
+
+.ask-ai-split-group.active {
+  background: linear-gradient(135deg, #1e40af, #5b21b6);
+}
+
+.ask-ai-split-group.pulsing {
+  animation: pulse 1s infinite;
+}
+
+.ask-ai-primary-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ask-ai-primary-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ask-ai-primary-btn .sparkle-icon {
+  color: #fde047;
+}
+
+.ask-ai-chevron-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.15);
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ask-ai-chevron-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.ask-ai-chevron-btn .chevron {
+  transition: transform 0.2s ease;
+}
+
+.ask-ai-chevron-btn .chevron.open {
+  transform: rotate(180deg);
 }
 
 .ask-ai-btn {

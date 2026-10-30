@@ -9,7 +9,9 @@ export interface BookPaneProps {
   anchorRef: React.RefObject<HTMLDivElement | null>
   navState: NavState
   onNavAction: (cmd: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset') => void
-  onAskAI: (templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom', customPrompt?: string) => void
+  onAskAI: (templateKey?: string, customPrompt?: string) => void
+  defaultAskAITemplateName?: string
+  onOpenAskAITemplateModal?: () => void
   onShowNativeMenu: () => void
   onClipToNote: () => void
   bookSources: BookSource[]
@@ -27,6 +29,8 @@ export const BookPane: React.FC<BookPaneProps> = ({
   navState,
   onNavAction,
   onAskAI,
+  defaultAskAITemplateName,
+  onOpenAskAITemplateModal,
   onShowNativeMenu,
   onClipToNote,
   bookSources,
@@ -59,6 +63,8 @@ export const BookPane: React.FC<BookPaneProps> = ({
         navState={navState}
         onNavAction={onNavAction}
         onAskAI={onAskAI}
+        defaultAskAITemplateName={defaultAskAITemplateName}
+        onOpenAskAITemplateModal={onOpenAskAITemplateModal}
         onShowNativeMenu={onShowNativeMenu}
         onOpenSessionModal={onOpenDeleteLogin}
         onClipToNote={onClipToNote}

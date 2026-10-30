@@ -13,10 +13,13 @@ import { NoteSourceModal } from './components/NoteSourceModal'
 import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { ActionModeModal } from './components/ActionModeModal'
 import { PrimeChatModal } from './components/PrimeChatModal'
-import { NavState, BookSource, AISource, NoteSource } from './types/electron'
+import { AskAITemplateModal, DEFAULT_ASK_AI_TEMPLATES } from './components/AskAITemplateModal'
+import { NavState, BookSource, AISource, NoteSource, AskAITemplate } from './types/electron'
 import './App.css'
 
 const LAYOUT_STORAGE_KEY = 'workbench_workspace_layout'
+const ASK_AI_TEMPLATES_KEY = 'workbench_ask_ai_templates'
+const ASK_AI_DEFAULT_ID_KEY = 'workbench_ask_ai_default_id'
 
 interface PersistedLayout {
   activePanes?: Record<PaneId, boolean>
@@ -96,6 +99,44 @@ export const App: React.FC = () => {
   const [isNoteSourceModalOpen, setIsNoteSourceModalOpen] = useState<boolean>(false)
   const [isActionModeModalOpen, setIsActionModeModalOpen] = useState<boolean>(false)
   const [isPrimeChatModalOpen, setIsPrimeChatModalOpen] = useState<boolean>(false)
+  const [isAskAITemplateModalOpen, setIsAskAITemplateModalOpen] = useState<boolean>(false)
+  const [askAIModalMode, setAskAIModalMode] = useState<'custom' | 'manage'>('manage')
+  const [askAIInitialSelection, setAskAIInitialSelection] = useState<string>('')
+  const [askAITemplates, setAskAITemplates] = useState<AskAITemplate[]>(() => {
+    try {
+      const raw = localStorage.getItem(ASK_AI_TEMPLATES_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Ensure core presets exist
+          const merged = [...parsed]
+          for (const preset of DEFAULT_ASK_AI_TEMPLATES) {
+            if (!merged.some((t) => t.id === preset.id)) {
+              merged.push(preset)
+            }
+          }
+          return merged
+        }
+      }
+    } catch (_) {}
+    return DEFAULT_ASK_AI_TEMPLATES
+  })
+  const [defaultAskAITemplateId, setDefaultAskAITemplateId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(ASK_AI_DEFAULT_ID_KEY) || 'explain'
+    } catch (_) {
+      return 'explain'
+    }
+  })
+
+  const handleSaveAskAITemplates = useCallback((templates: AskAITemplate[], defaultId: string) => {
+    setAskAITemplates(templates)
+    setDefaultAskAITemplateId(defaultId)
+    try {
+      localStorage.setItem(ASK_AI_TEMPLATES_KEY, JSON.stringify(templates))
+      localStorage.setItem(ASK_AI_DEFAULT_ID_KEY, defaultId)
+    } catch (_) {}
+  }, [])
   const [actionMode, setActionMode] = useState<boolean>(() => {
     try {
       return localStorage.getItem('workbench:action-mode') === 'true'
@@ -224,10 +265,12 @@ export const App: React.FC = () => {
       showNotification('⚠️ At least two panes must remain active')
       return
     }
-    setActivePanes((prev) => ({
-      ...prev,
-      [pane]: !prev[pane],
-    }))
+    const nextPanes = {
+      ...activePanes,
+      [pane]: !activePanes[pane],
+    }
+    setActivePanes(nextPanes)
+    window.electron?.setSplit({ ratio: splitRatio, isSwapped, activePanes: nextPanes })
     setTimeout(syncBounds, 50)
   }
 
@@ -239,7 +282,8 @@ export const App: React.FC = () => {
     isAISourceModalOpen ||
     isNoteSourceModalOpen ||
     isActionModeModalOpen ||
-    isPrimeChatModalOpen
+    isPrimeChatModalOpen ||
+    isAskAITemplateModalOpen
 
   const isAnyModalOpenRef = useRef(isAnyModalOpen)
   isAnyModalOpenRef.current = isAnyModalOpen
@@ -263,7 +307,14 @@ export const App: React.FC = () => {
           book: { x: 0, y: 0, width: 0, height: 0 },
           ai: { x: 0, y: 0, width: 0, height: 0 },
           note: { x: 0, y: 0, width: 0, height: 0 },
+          activePanes,
         })
+        return
+      }
+
+      // Guard against measuring 0x0 bounds when window is minimized
+      const wsRect = workspaceRef.current?.getBoundingClientRect()
+      if (!wsRect || wsRect.width <= 0 || wsRect.height <= 0) {
         return
       }
 
@@ -304,7 +355,7 @@ export const App: React.FC = () => {
           }
         : { x: 0, y: 0, width: 0, height: 0 }
 
-      window.electron?.updateBounds({ book, ai, note })
+      window.electron?.updateBounds({ book, ai, note, activePanes })
     })
   }, [
     activePanes,
@@ -487,13 +538,13 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (isAnyModalOpen) return
     if (dragTarget === 'none') {
-      window.electron?.setSplit({ ratio: splitRatio, isSwapped })
+      window.electron?.setSplit({ ratio: splitRatio, isSwapped, activePanes })
       window.electron?.setVerticalSplit({ ratio: verticalSplitRatio })
       syncBounds()
       const timer = setTimeout(syncBounds, 50)
       return () => clearTimeout(timer)
     }
-  }, [splitRatio, verticalSplitRatio, isSwapped, dragTarget, isAnyModalOpen, syncBounds])
+  }, [splitRatio, verticalSplitRatio, isSwapped, activePanes, dragTarget, isAnyModalOpen, syncBounds])
 
   // Save workspace layout whenever panes, ratios, or swap states change
   useEffect(() => {
@@ -512,13 +563,25 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer)
   }, [activeNoteSourceId, activeBookSourceId, activeAISourceId, syncBounds])
 
-  // Window & workspace resize listener
+  // Window & workspace resize and visibility/focus listener
   useEffect(() => {
+    let restoreTimer: any = null
     const handleResize = () => {
       if (isAnyModalOpenRef.current) return
       syncBounds()
+      if (restoreTimer) clearTimeout(restoreTimer)
+      restoreTimer = setTimeout(syncBounds, 60)
+    }
+    const handleVisibilityChange = () => {
+      if (!document.hidden && !isAnyModalOpenRef.current) {
+        syncBounds()
+        if (restoreTimer) clearTimeout(restoreTimer)
+        restoreTimer = setTimeout(syncBounds, 60)
+      }
     }
     window.addEventListener('resize', handleResize)
+    window.addEventListener('focus', handleResize)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     let observer: ResizeObserver | null = null
     if (typeof ResizeObserver !== 'undefined') {
@@ -533,7 +596,10 @@ export const App: React.FC = () => {
     }
 
     return () => {
+      if (restoreTimer) clearTimeout(restoreTimer)
       window.removeEventListener('resize', handleResize)
+      window.removeEventListener('focus', handleResize)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       observer?.disconnect()
     }
   }, [syncBounds, activePanes])
@@ -587,7 +653,7 @@ export const App: React.FC = () => {
 
       // Approach B: Snap to the new size on mouse release!
       setSplitRatio(finalRatio)
-      window.electron?.setSplit({ ratio: finalRatio, isSwapped })
+      window.electron?.setSplit({ ratio: finalRatio, isSwapped, activePanes })
       window.electron?.setViewsDragging?.(false)
       setTimeout(syncBounds, 50)
     }
@@ -678,7 +744,7 @@ export const App: React.FC = () => {
       if (dragTargetRef.current === 'column') {
         const finalRatio = previewColumnRatioRef.current ?? splitRatio
         setSplitRatio(finalRatio)
-        window.electron?.setSplit({ ratio: finalRatio, isSwapped })
+        window.electron?.setSplit({ ratio: finalRatio, isSwapped, activePanes })
       } else if (dragTargetRef.current === 'row') {
         const finalRatio = previewRowRatioRef.current ?? verticalSplitRatio
         setVerticalSplitRatio(finalRatio)
@@ -1161,15 +1227,30 @@ export const App: React.FC = () => {
     const unsubAskAIWithText = window.electron?.onAskAIWithText?.((data) => {
       setActivePanes((prev) => (!prev.ai ? { ...prev, ai: true } : prev))
       if (window.electron?.sendTextToAI) {
-        window.electron.sendTextToAI({ text: data.text, templateKey: data.templateKey })
+        const matchedTemplate = askAITemplates.find((t) => t.id === data.templateKey)
+        const customPrompt =
+          matchedTemplate && matchedTemplate.id !== 'raw' ? matchedTemplate.prompt : undefined
+        window.electron.sendTextToAI({
+          text: data.text,
+          templateKey: data.templateKey,
+          customPrompt,
+        })
         const labelMap: Record<string, string> = {
           explain: '💡 Transferred excerpt to AI (Explain)!',
           code: '💻 Transferred excerpt to AI (Code Example)!',
           quiz: '❓ Transferred excerpt to AI (Quiz)!',
           raw: '✨ Transferred selection to AI Chat!',
         }
-        showNotification(labelMap[data.templateKey] || '✨ Transferred selection to AI Chat!')
+        showNotification(labelMap[data.templateKey] || `✨ Transferred excerpt to AI (${matchedTemplate?.name || 'Template'})!`)
       }
+    })
+
+    const unsubOpenAskAIModal = window.electron?.onOpenAskAITemplateModal?.((data) => {
+      const fallbackSelection = window.getSelection()?.toString().trim() || ''
+      setAskAIModalMode(data?.mode || 'manage')
+      setAskAIInitialSelection(data?.initialText || fallbackSelection)
+      setIsAskAITemplateModalOpen(true)
+      window.electron?.setViewsVisible(false)
     })
 
     const unsubNotify = window.electron?.onNotification?.((msg) => {
@@ -1189,15 +1270,31 @@ export const App: React.FC = () => {
       unsubCode?.()
       unsubTranscript?.()
       unsubAskAIWithText?.()
+      unsubOpenAskAIModal?.()
       unsubNotify?.()
       window.removeEventListener('keydown', handleGlobalShortcuts)
     }
-  }, [activeNoteSourceId, activePanes, handleSaveAIToNote, handleExtractAICode, handleExportAITranscript])
+  }, [activeNoteSourceId, activePanes, askAITemplates, handleSaveAIToNote, handleExtractAICode, handleExportAITranscript])
+
+  const handleOpenAskAITemplateModal = (mode: 'custom' | 'manage' = 'manage') => {
+    const selection = window.getSelection()?.toString().trim() || ''
+    setAskAIModalMode(mode)
+    setAskAIInitialSelection(selection)
+    setIsAskAITemplateModalOpen(true)
+    window.electron?.setViewsVisible(false)
+  }
+
+  const handleCloseAskAITemplateModal = () => {
+    setIsAskAITemplateModalOpen(false)
+    window.electron?.setViewsVisible(true)
+    setTimeout(syncBounds, 50)
+  }
 
   // Ask AI handler
   const handleAskAI = async (
-    templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom',
-    customPrompt?: string
+    templateKey?: string,
+    customPrompt?: string,
+    explicitSelection?: string
   ) => {
     if (!activePanes.ai) {
       showNotification('🤖 Chatview is currently disabled. Enable Chatview in the top bar to ask AI.')
@@ -1205,11 +1302,26 @@ export const App: React.FC = () => {
     }
     if (!window.electron?.askAI) return
 
+    const effectiveKey = templateKey || defaultAskAITemplateId || 'explain'
+    const matchedTemplate = askAITemplates.find((t) => t.id === effectiveKey)
+    const effectiveCustomPrompt =
+      customPrompt ?? (effectiveKey !== 'raw' && matchedTemplate ? matchedTemplate.prompt : undefined)
+    const rendererSelection =
+      explicitSelection !== undefined
+        ? explicitSelection
+        : window.getSelection()?.toString().trim() || ''
+
     setIsAskingAI(true)
     try {
-      const result = await window.electron.askAI({ templateKey, customPrompt })
+      const result = await window.electron.askAI({
+        templateKey: effectiveKey,
+        customPrompt: effectiveCustomPrompt,
+        rendererSelection,
+      })
       if (result.success) {
-        showNotification('✨ Transferred highlighted text to ChatGPT!')
+        const activeAIName = aiSources.find((s) => s.id === activeAISourceId)?.name || 'AI Chat'
+        const tplLabel = customPrompt ? 'Custom Prompt' : matchedTemplate?.name || 'Template'
+        showNotification(`✨ Sent highlighted text to ${activeAIName} (${tplLabel})!`)
       } else {
         showNotification(`⚠️ ${result.error || 'No text selected'}`)
       }
@@ -1227,7 +1339,7 @@ export const App: React.FC = () => {
         const key = e.key.toLowerCase()
         if (key === 'a') {
           e.preventDefault()
-          handleAskAI('explain')
+          handleAskAI()
         } else if (key === 'n' || key === 'c') {
           e.preventDefault()
           handleClipToNote('book')
@@ -1236,7 +1348,7 @@ export const App: React.FC = () => {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activePanes, activeNoteSourceId])
+  }, [activePanes, activeNoteSourceId, defaultAskAITemplateId, askAITemplates])
 
   // Calculate widths for columns (Left Pane vs Right Pane)
   const leftPercent = splitRatio
@@ -1293,7 +1405,17 @@ export const App: React.FC = () => {
       navState={bookNavState}
       onNavAction={(cmd) => handleNavAction('book', cmd)}
       onAskAI={handleAskAI}
-      onShowNativeMenu={() => window.electron?.showAskAIMenu()}
+      defaultAskAITemplateName={
+        askAITemplates.find((t) => t.id === defaultAskAITemplateId)?.name || 'Explain Concept'
+      }
+      onOpenAskAITemplateModal={() => handleOpenAskAITemplateModal('manage')}
+      onShowNativeMenu={() =>
+        window.electron?.showAskAIMenu({
+          templates: askAITemplates,
+          defaultTemplateId: defaultAskAITemplateId,
+          rendererSelection: window.getSelection()?.toString().trim() || '',
+        })
+      }
       onClipToNote={handleClipToNote}
       bookSources={bookSources}
       activeBookSourceId={activeBookSourceId}
@@ -1403,13 +1525,13 @@ export const App: React.FC = () => {
         splitRatio={splitRatio}
         onSetSplitRatio={(ratio) => {
           setSplitRatio(ratio)
-          window.electron?.setSplit({ ratio, isSwapped })
+          window.electron?.setSplit({ ratio, isSwapped, activePanes })
           setTimeout(syncBounds, 50)
         }}
         onSwapPanes={() => {
           const next = !isSwapped
           setIsSwapped(next)
-          window.electron?.setSplit({ ratio: splitRatio, isSwapped: next })
+          window.electron?.setSplit({ ratio: splitRatio, isSwapped: next, activePanes })
           requestAnimationFrame(() => {
             syncBounds()
             setTimeout(syncBounds, 50)
@@ -1433,7 +1555,7 @@ export const App: React.FC = () => {
                 onPointerUp={handleColumnPointerUp}
                 onDoubleClick={() => {
                   setSplitRatio(60)
-                  window.electron?.setSplit({ ratio: 60, isSwapped })
+                  window.electron?.setSplit({ ratio: 60, isSwapped, activePanes })
                   setTimeout(syncBounds, 50)
                 }}
                 isDragging={dragTarget === 'column'}
@@ -1450,7 +1572,7 @@ export const App: React.FC = () => {
                 onPointerUp={handleColumnPointerUp}
                 onDoubleClick={() => {
                   setSplitRatio(60)
-                  window.electron?.setSplit({ ratio: 60, isSwapped })
+                  window.electron?.setSplit({ ratio: 60, isSwapped, activePanes })
                   setTimeout(syncBounds, 50)
                 }}
                 isDragging={dragTarget === 'column'}
@@ -1471,7 +1593,7 @@ export const App: React.FC = () => {
                   onPointerUp={handleColumnPointerUp}
                   onDoubleClick={() => {
                     setSplitRatio(50)
-                    window.electron?.setSplit({ ratio: 50, isSwapped })
+                    window.electron?.setSplit({ ratio: 50, isSwapped, activePanes })
                     setTimeout(syncBounds, 50)
                   }}
                   isDragging={dragTarget === 'column'}
@@ -1488,7 +1610,7 @@ export const App: React.FC = () => {
                   onPointerUp={handleColumnPointerUp}
                   onDoubleClick={() => {
                     setSplitRatio(50)
-                    window.electron?.setSplit({ ratio: 50, isSwapped })
+                    window.electron?.setSplit({ ratio: 50, isSwapped, activePanes })
                     setTimeout(syncBounds, 50)
                   }}
                   isDragging={dragTarget === 'column'}
@@ -1612,6 +1734,20 @@ export const App: React.FC = () => {
         onSuccess={() => {
           setActionMode(true)
         }}
+      />
+
+      <AskAITemplateModal
+        isOpen={isAskAITemplateModalOpen}
+        initialMode={askAIModalMode}
+        initialSelectionText={askAIInitialSelection}
+        templates={askAITemplates}
+        defaultTemplateId={defaultAskAITemplateId}
+        onClose={handleCloseAskAITemplateModal}
+        onSaveTemplates={handleSaveAskAITemplates}
+        onRunTemplate={(templateKey, customPromptText, textToUse) => {
+          handleAskAI(templateKey, customPromptText, textToUse)
+        }}
+        onNotify={showNotification}
       />
 
       {/* Ambient Floating Notification Toast */}

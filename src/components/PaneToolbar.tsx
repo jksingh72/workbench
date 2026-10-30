@@ -29,7 +29,9 @@ interface PaneToolbarProps {
   target: 'book' | 'ai' | 'note'
   navState: NavState
   onNavAction: (command: 'back' | 'forward' | 'reload' | 'home' | 'zoom-in' | 'zoom-out' | 'zoom-reset') => void
-  onAskAI?: (templateKey: 'explain' | 'summarize' | 'code' | 'quiz' | 'raw' | 'custom', customPrompt?: string) => void
+  onAskAI?: (templateKey?: string, customPrompt?: string) => void
+  defaultAskAITemplateName?: string
+  onOpenAskAITemplateModal?: () => void
   onShowNativeMenu?: () => void
   onOpenSessionModal?: (target: 'book' | 'ai' | 'note') => void
   onClipToNote?: () => void
@@ -61,6 +63,8 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   navState,
   onNavAction,
   onAskAI,
+  defaultAskAITemplateName = 'Explain Concept',
+  onOpenAskAITemplateModal,
   onShowNativeMenu,
   onOpenSessionModal,
   onClipToNote,
@@ -535,23 +539,32 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
         {isBook && (
           <>
 
-            {/* "Ask AI" Action Dropdown */}
+            {/* "Ask AI" 1-Click Split Button & Action Dropdown */}
             <div className="ask-ai-wrapper" ref={dropdownRef}>
-              <button
-                className={`ask-ai-btn ${dropdownOpen ? 'active' : ''} ${isAskingAI ? 'pulsing' : ''}`}
-                onClick={() => {
-                  if (onShowNativeMenu) {
-                    onShowNativeMenu()
-                  } else {
-                    setDropdownOpen(!dropdownOpen)
-                  }
-                }}
-                title="Send highlighted text to ChatGPT with a preset prompt"
-              >
-                <Sparkles size={13} className="sparkle-icon" />
-                <span className="btn-text">Ask AI</span>
-                <ChevronDown size={12} className={`chevron ${dropdownOpen ? 'open' : ''}`} />
-              </button>
+              <div className={`ask-ai-split-group ${dropdownOpen ? 'active' : ''} ${isAskingAI ? 'pulsing' : ''}`}>
+                <button
+                  className="ask-ai-primary-btn"
+                  onClick={() => onAskAI?.()}
+                  title={`1-Click Ask AI (${defaultAskAITemplateName}) — Ctrl+Shift+A`}
+                >
+                  <Sparkles size={13} className="sparkle-icon" />
+                  <span className="btn-text">Ask AI</span>
+                </button>
+                <button
+                  className="ask-ai-chevron-btn"
+                  onClick={() => {
+                    if (onShowNativeMenu) {
+                      onShowNativeMenu()
+                    } else {
+                      setDropdownOpen(!dropdownOpen)
+                    }
+                  }}
+                  title="Choose Ask AI prompt template or customize templates"
+                  aria-label="Ask AI Templates Menu"
+                >
+                  <ChevronDown size={11} className={`chevron ${dropdownOpen ? 'open' : ''}`} />
+                </button>
+              </div>
 
               {dropdownOpen && (
                 <div className="ask-ai-dropdown">
@@ -633,10 +646,17 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
                   ) : (
                     <button
                       className="dropdown-item custom-trigger"
-                      onClick={() => setShowCustomInput(true)}
+                      onClick={() => {
+                        if (onOpenAskAITemplateModal) {
+                          setDropdownOpen(false)
+                          onOpenAskAITemplateModal()
+                        } else {
+                          setShowCustomInput(true)
+                        }
+                      }}
                     >
                       <Sparkles size={13} className="item-icon" />
-                      <span>Custom Prompt...</span>
+                      <span>Custom Prompt / Templates...</span>
                     </button>
                   )}
                 </div>

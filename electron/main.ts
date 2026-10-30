@@ -229,10 +229,12 @@ function createWindow() {
   // Set initial bounds (handlers manage attaching their own views)
   layoutManager.applyBounds()
 
-  // Window resize listeners
+  // Window resize & restore listeners
   mainWindow.on('resize', () => layoutManager?.applyBounds())
   mainWindow.on('maximize', () => layoutManager?.applyBounds())
   mainWindow.on('unmaximize', () => layoutManager?.applyBounds())
+  mainWindow.on('restore', () => layoutManager?.applyBounds())
+  mainWindow.on('show', () => layoutManager?.applyBounds())
 
   // Register IPC dispatchers to modular handlers
   registerIpcHandlers()
@@ -251,8 +253,8 @@ function registerIpcHandlers() {
     layoutManager?.updateMeasuredBounds(bounds)
   })
 
-  ipcMain.on('workbench:set-split', (_, { ratio, isSwapped }) => {
-    layoutManager?.setSplit(ratio, isSwapped)
+  ipcMain.on('workbench:set-split', (_, { ratio, isSwapped, activePanes }) => {
+    layoutManager?.setSplit(ratio, isSwapped, activePanes)
   })
 
   ipcMain.on('workbench:set-vertical-split', (_, { ratio }) => {
@@ -288,14 +290,30 @@ function registerIpcHandlers() {
   })
 
   // AI Prompts & Native Menu
-  ipcMain.handle('workbench:ask-ai', async (_, { templateKey, customPrompt }) => {
+  ipcMain.handle('workbench:ask-ai', async (_, { templateKey, customPrompt, rendererSelection }) => {
     if (!aiHandler || !bookHandler) return { success: false, error: 'Handlers not initialized' }
-    return await aiHandler.doAskAI(templateKey, customPrompt, () => bookHandler!.extractSelection())
+    return await aiHandler.doAskAI(templateKey, customPrompt, async () => {
+      if (rendererSelection && String(rendererSelection).trim()) {
+        return String(rendererSelection).trim()
+      }
+      return await bookHandler!.extractSelection()
+    })
   })
 
-  ipcMain.on('workbench:show-ask-ai-menu', () => {
+  ipcMain.on('workbench:show-ask-ai-menu', (_, params?: { templates?: any[]; defaultTemplateId?: string; rendererSelection?: string }) => {
     if (!aiHandler || !bookHandler) return
-    aiHandler.showAskAIMenu(() => bookHandler!.extractSelection())
+    aiHandler.showAskAIMenu(
+      async () => {
+        if (params?.rendererSelection && String(params.rendererSelection).trim()) {
+          return String(params.rendererSelection).trim()
+        }
+        return await bookHandler!.extractSelection()
+      },
+      {
+        templates: params?.templates,
+        defaultTemplateId: params?.defaultTemplateId,
+      }
+    )
   })
 
   function formatBookCitation(

@@ -481,27 +481,30 @@ export class AIViewHandler {
       }
 
       let prompt = ''
-      switch (templateKey) {
-        case 'explain':
-          prompt = `Please explain the following concept clearly in simple terms with practical examples:\n\n"${text}"`
-          break
-        case 'summarize':
-          prompt = `Please summarize the key takeaways of the following excerpt:\n\n"${text}"`
-          break
-        case 'code':
-          prompt = `Please provide a clean, practical code example demonstrating the following concept:\n\n"${text}"`
-          break
-        case 'quiz':
-          prompt = `Based on the following text, create 3 review questions with detailed answers to test my understanding:\n\n"${text}"`
-          break
-        case 'raw':
-          prompt = text
-          break
-        case 'custom':
-          prompt = customPrompt ? `${customPrompt}\n\n"${text}"` : text
-          break
-        default:
-          prompt = `Please explain the following concept clearly:\n\n"${text}"`
+      if (templateKey === 'raw') {
+        prompt = text
+      } else if (customPrompt && customPrompt.trim()) {
+        const trimmedCustom = customPrompt.trim()
+        prompt = trimmedCustom.includes('{text}')
+          ? trimmedCustom.split('{text}').join(text)
+          : `${trimmedCustom}\n\n"${text}"`
+      } else {
+        switch (templateKey) {
+          case 'explain':
+            prompt = `Please explain the following concept clearly in simple terms with practical examples:\n\n"${text}"`
+            break
+          case 'summarize':
+            prompt = `Please summarize the key takeaways of the following excerpt:\n\n"${text}"`
+            break
+          case 'code':
+            prompt = `Please provide a clean, practical code example demonstrating the following concept:\n\n"${text}"`
+            break
+          case 'quiz':
+            prompt = `Based on the following text, create 3 review questions with detailed answers to test my understanding:\n\n"${text}"`
+            break
+          default:
+            prompt = `Please explain the following concept clearly:\n\n"${text}"`
+        }
       }
 
       // Put into system clipboard as backup
@@ -526,48 +529,92 @@ export class AIViewHandler {
     }
   }
 
-  public showAskAIMenu(extractSelection: () => Promise<string>) {
+  public showAskAIMenu(
+    extractSelection: () => Promise<string>,
+    options?: {
+      templates?: Array<{ id: string; name: string; description?: string; prompt: string; isPreset?: boolean }>
+      defaultTemplateId?: string
+    }
+  ) {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
 
-    const menu = Menu.buildFromTemplate([
-      {
-        label: '💡 Explain Concept',
-        click: async () => {
-          const res = await this.doAskAI('explain', undefined, extractSelection)
-          this.mainWindow.webContents.send('workbench:ask-ai-result', res)
-        },
-      },
-      {
-        label: '📝 Summarize Key Takeaways',
-        click: async () => {
-          const res = await this.doAskAI('summarize', undefined, extractSelection)
-          this.mainWindow.webContents.send('workbench:ask-ai-result', res)
-        },
-      },
-      {
-        label: '💻 Provide Code Example',
-        click: async () => {
-          const res = await this.doAskAI('code', undefined, extractSelection)
-          this.mainWindow.webContents.send('workbench:ask-ai-result', res)
-        },
-      },
-      {
-        label: '❓ Quiz Me (3 Questions)',
-        click: async () => {
-          const res = await this.doAskAI('quiz', undefined, extractSelection)
-          this.mainWindow.webContents.send('workbench:ask-ai-result', res)
-        },
-      },
+    const defaultId = options?.defaultTemplateId || 'explain'
+    const iconMap: Record<string, string> = {
+      explain: '💡',
+      summarize: '📝',
+      code: '💻',
+      quiz: '❓',
+      raw: '📋',
+    }
+
+    const activeTemplates =
+      options?.templates && options.templates.length > 0
+        ? options.templates
+        : [
+            { id: 'explain', name: 'Explain Concept', prompt: 'Please explain the following concept clearly in simple terms with practical examples:', isPreset: true },
+            { id: 'summarize', name: 'Summarize Key Takeaways', prompt: 'Please summarize the key takeaways of the following excerpt:', isPreset: true },
+            { id: 'code', name: 'Provide Code Example', prompt: 'Please provide a clean, practical code example demonstrating the following concept:', isPreset: true },
+            { id: 'quiz', name: 'Quiz Me (3 Questions)', prompt: 'Based on the following text, create 3 review questions with detailed answers to test my understanding:', isPreset: true },
+            { id: 'raw', name: 'Paste Raw Selection', prompt: '{text}', isPreset: true },
+          ]
+
+    const presetItems = activeTemplates.filter((t) => t.id !== 'raw')
+    const rawItem = activeTemplates.find((t) => t.id === 'raw')
+
+    const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+      { label: 'Transfer Highlighted Text to AI:', enabled: false },
+      { type: 'separator' },
+      ...presetItems.map((t) => {
+        const icon = iconMap[t.id] || '✨'
+        const isDefault = t.id === defaultId
+        return {
+          label: `${icon} ${t.name}${isDefault ? '  ★ (1-Click Default)' : ''}`,
+          click: async () => {
+            const res = await this.doAskAI(t.id, t.prompt, extractSelection)
+            this.mainWindow.webContents.send('workbench:ask-ai-result', res)
+          },
+        }
+      }),
+    ]
+
+    if (rawItem) {
+      menuTemplate.push(
+        { type: 'separator' },
+        {
+          label: `📋 ${rawItem.name}${rawItem.id === defaultId ? '  ★ (1-Click Default)' : ''}`,
+          click: async () => {
+            const res = await this.doAskAI('raw', undefined, extractSelection)
+            this.mainWindow.webContents.send('workbench:ask-ai-result', res)
+          },
+        }
+      )
+    }
+
+    menuTemplate.push(
       { type: 'separator' },
       {
-        label: '📋 Paste Raw Selection',
+        label: '✨ Custom Prompt with Selection...',
         click: async () => {
-          const res = await this.doAskAI('raw', undefined, extractSelection)
-          this.mainWindow.webContents.send('workbench:ask-ai-result', res)
+          const initialText = await extractSelection().catch(() => '')
+          this.mainWindow.webContents.send('workbench:open-ask-ai-template-modal', {
+            mode: 'custom',
+            initialText,
+          })
         },
       },
-    ])
+      {
+        label: '⚙️ Customize Ask AI Templates...',
+        click: async () => {
+          const initialText = await extractSelection().catch(() => '')
+          this.mainWindow.webContents.send('workbench:open-ask-ai-template-modal', {
+            mode: 'manage',
+            initialText,
+          })
+        },
+      }
+    )
 
+    const menu = Menu.buildFromTemplate(menuTemplate)
     menu.popup({ window: this.mainWindow })
   }
 
