@@ -151,6 +151,36 @@ function createWindow() {
       mainWindow.show()
     }
   })
+
+  // Lock outer shell (mainWindow.webContents) to 1.0 zoom (100% DIPs) so DOM getBoundingClientRect()
+  // always matches Electron WebContentsView physical coordinates 1:1 across restarts.
+  const enforceShellZoom = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    try {
+      if (mainWindow.webContents.getZoomFactor() !== 1.0) {
+        mainWindow.webContents.setZoomFactor(1.0)
+      }
+      mainWindow.webContents.setZoomLevel(0)
+      mainWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {})
+    } catch (_) {}
+  }
+  mainWindow.webContents.on('dom-ready', enforceShellZoom)
+  mainWindow.webContents.on('did-finish-load', () => {
+    enforceShellZoom()
+    layoutManager?.applyBounds()
+  })
+  mainWindow.webContents.on('zoom-changed', (event) => {
+    event.preventDefault()
+    enforceShellZoom()
+  })
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if ((input.control || input.meta) && !input.alt) {
+      if (input.key === '+' || input.key === '-' || input.key === '=' || input.key === '_' || input.key === '0') {
+        event.preventDefault()
+        enforceShellZoom()
+      }
+    }
+  })
   // Safety guard: prevent in-app links or arbitrary schemes from replacing the Workbench UI
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const currentUrl = mainWindow?.webContents.getURL() || ''

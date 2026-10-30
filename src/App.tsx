@@ -249,7 +249,10 @@ export const App: React.FC = () => {
   // Calculate and sync bounds of native WebContentsViews using RAF batching to eliminate layout thrashing
   const syncBounds = useCallback(() => {
     if (!window.electron?.updateBounds) return
-    if (syncBoundsRafRef.current !== null) return
+    if (syncBoundsRafRef.current !== null) {
+      cancelAnimationFrame(syncBoundsRafRef.current)
+      syncBoundsRafRef.current = null
+    }
 
     syncBoundsRafRef.current = requestAnimationFrame(() => {
       syncBoundsRafRef.current = null
@@ -509,15 +512,31 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer)
   }, [activeNoteSourceId, activeBookSourceId, activeAISourceId, syncBounds])
 
-  // Window resize listener
+  // Window & workspace resize listener
   useEffect(() => {
     const handleResize = () => {
       if (isAnyModalOpenRef.current) return
       syncBounds()
     }
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [syncBounds])
+
+    let observer: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        if (isAnyModalOpenRef.current) return
+        syncBounds()
+      })
+      if (workspaceRef.current) observer.observe(workspaceRef.current)
+      if (bookAnchorRef.current) observer.observe(bookAnchorRef.current)
+      if (aiAnchorRef.current) observer.observe(aiAnchorRef.current)
+      if (noteAnchorRef.current) observer.observe(noteAnchorRef.current)
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      observer?.disconnect()
+    }
+  }, [syncBounds, activePanes])
 
   // Drag splitter handling: Column (Left pane vs Right column) - Approach B: Preview Bar
   const handleColumnPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1225,6 +1244,7 @@ export const App: React.FC = () => {
 
   const leftColumnStyle: React.CSSProperties = {
     width: `calc(${leftPercent}% - 4.5px)`,
+    minWidth: 0,
     display: leftPercent <= 0 ? 'none' : 'flex',
     flexDirection: 'column',
     height: '100%',
@@ -1235,6 +1255,7 @@ export const App: React.FC = () => {
 
   const rightColumnStyle: React.CSSProperties = {
     width: `calc(${rightPercent}% - 4.5px)`,
+    minWidth: 0,
     display: rightPercent <= 0 ? 'none' : 'flex',
     flexDirection: 'column',
     height: '100%',
@@ -1244,6 +1265,8 @@ export const App: React.FC = () => {
   }
 
   const chatSubPaneStyle: React.CSSProperties = {
+    width: '100%',
+    minWidth: 0,
     height: `calc(${verticalSplitRatio}% - 4.5px)`,
     display: verticalSplitRatio <= 0 ? 'none' : 'flex',
     flexDirection: 'column',
@@ -1253,6 +1276,8 @@ export const App: React.FC = () => {
   }
 
   const noteSubPaneStyle: React.CSSProperties = {
+    width: '100%',
+    minWidth: 0,
     height: `calc(${100 - verticalSplitRatio}% - 4.5px)`,
     display: verticalSplitRatio >= 100 ? 'none' : 'flex',
     flexDirection: 'column',

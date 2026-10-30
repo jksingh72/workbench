@@ -39,6 +39,7 @@ export class LayoutManager {
   public setSplit(ratio: number, isSwapped?: boolean) {
     if (typeof ratio === 'number') this.currentSplitRatio = ratio
     if (typeof isSwapped === 'boolean') this.currentIsSwapped = isSwapped
+    this.lastMeasuredBounds = null
     if (!this.isDraggingSplitter) {
       this.applyBounds()
     }
@@ -46,6 +47,7 @@ export class LayoutManager {
 
   public setVerticalSplit(ratio: number) {
     if (typeof ratio === 'number') this.currentVerticalSplitRatio = ratio
+    this.lastMeasuredBounds = null
     if (!this.isDraggingSplitter) {
       this.applyBounds()
     }
@@ -91,52 +93,73 @@ export class LayoutManager {
       this.bookHandler.setVisible(true)
       this.aiHandler.setVisible(true)
       this.noteHandler.setVisible(true)
-      this.applyBounds()
+      if (this.lastMeasuredBounds) {
+        this.updateMeasuredBounds(this.lastMeasuredBounds)
+      } else {
+        this.applyBounds()
+      }
     }
   }
 
+  private normalizeAndClampRect(
+    raw: DOMBounds,
+    contentWidth: number,
+    contentHeight: number,
+    scale: number
+  ): Rectangle {
+    const x = Math.max(0, Math.min(contentWidth, Math.round(raw.x * scale)))
+    const y = Math.max(0, Math.min(contentHeight, Math.round(raw.y * scale)))
+    const width = Math.max(0, Math.min(contentWidth - x, Math.round(raw.width * scale)))
+    const height = Math.max(0, Math.min(contentHeight - y, Math.round(raw.height * scale)))
+    return { x, y, width, height }
+  }
+
   public updateMeasuredBounds(bounds: { book?: DOMBounds; ai?: DOMBounds; note?: DOMBounds }) {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
     this.lastMeasuredBounds = bounds
     if (this.isModalOpen || this.isDraggingSplitter) return
+
+    const contentBounds = this.mainWindow.contentView.getBounds()
+    const contentWidth = Math.max(0, contentBounds.width)
+    const contentHeight = Math.max(0, contentBounds.height)
+
+    let scale = 1.0
+    try {
+      const zoomFactor = this.mainWindow.webContents.getZoomFactor()
+      if (zoomFactor > 0 && Math.abs(zoomFactor - 1.0) > 0.001) {
+        scale = zoomFactor
+        // Reset mainWindow shell zoom back to 1.0 so DOM CSS pixels match physical DIPs 1:1
+        this.mainWindow.webContents.setZoomFactor(1.0)
+        this.mainWindow.webContents.setZoomLevel(0)
+      }
+    } catch (_) {}
 
     const { book, ai, note } = bounds
 
     if (book && typeof book.x === 'number') {
-      const isVisible = book.width > 0 && book.height > 0 && !this.modalHidden.book
+      const rect = this.normalizeAndClampRect(book, contentWidth, contentHeight, scale)
+      const isVisible = rect.width > 0 && rect.height > 0 && !this.modalHidden.book
       this.bookHandler.setVisible(isVisible)
       if (isVisible) {
-        this.bookHandler.setBounds({
-          x: Math.round(book.x),
-          y: Math.round(book.y),
-          width: Math.max(0, Math.round(book.width)),
-          height: Math.max(0, Math.round(book.height)),
-        })
+        this.bookHandler.setBounds(rect)
       }
     }
 
     if (ai && typeof ai.x === 'number') {
-      const isVisible = ai.width > 0 && ai.height > 0 && !this.modalHidden.ai
+      const rect = this.normalizeAndClampRect(ai, contentWidth, contentHeight, scale)
+      const isVisible = rect.width > 0 && rect.height > 0 && !this.modalHidden.ai
       this.aiHandler.setVisible(isVisible)
       if (isVisible) {
-        this.aiHandler.setBounds({
-          x: Math.round(ai.x),
-          y: Math.round(ai.y),
-          width: Math.max(0, Math.round(ai.width)),
-          height: Math.max(0, Math.round(ai.height)),
-        })
+        this.aiHandler.setBounds(rect)
       }
     }
 
     if (note && typeof note.x === 'number') {
-      const isVisible = note.width > 0 && note.height > 0 && !this.modalHidden.note
+      const rect = this.normalizeAndClampRect(note, contentWidth, contentHeight, scale)
+      const isVisible = rect.width > 0 && rect.height > 0 && !this.modalHidden.note
       this.noteHandler.setVisible(isVisible)
       if (isVisible) {
-        this.noteHandler.setBounds({
-          x: Math.round(note.x),
-          y: Math.round(note.y),
-          width: Math.max(0, Math.round(note.width)),
-          height: Math.max(0, Math.round(note.height)),
-        })
+        this.noteHandler.setBounds(rect)
       }
     }
   }
@@ -144,11 +167,6 @@ export class LayoutManager {
   public applyBounds() {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
     if (this.isModalOpen || this.isDraggingSplitter) return
-
-    if (this.lastMeasuredBounds) {
-      this.updateMeasuredBounds(this.lastMeasuredBounds)
-      return
-    }
 
     const bounds = this.mainWindow.contentView.getBounds()
     const headerHeight = 44
