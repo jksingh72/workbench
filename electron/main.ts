@@ -238,6 +238,7 @@ function createWindow() {
 
   // Register IPC dispatchers to modular handlers
   registerIpcHandlers()
+  setupApplicationMenu()
 
   // Load UI in main window
   if (VITE_DEV_SERVER_URL) {
@@ -245,6 +246,170 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+}
+
+function setupApplicationMenu() {
+  const sendToRenderer = (channel: string, payload?: any) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, payload)
+    }
+  }
+
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Configure Book Sources...',
+          click: () => sendToRenderer('workbench:open-book-source-modal'),
+        },
+        {
+          label: 'Configure AI Chat Sources...',
+          click: () => sendToRenderer('workbench:open-ai-source-modal'),
+        },
+        {
+          label: 'Configure Note Sources...',
+          click: () => sendToRenderer('workbench:open-note-source-modal'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Open Error Log',
+          click: () => {
+            Logger.openLogFile().catch(() => {})
+          },
+        },
+        { type: 'separator' },
+        { role: 'quit', label: 'Exit Workbench' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Toggle Book Pane',
+          click: () => sendToRenderer('workbench:menu-layout-command', { command: 'toggle-pane', pane: 'book' }),
+        },
+        {
+          label: 'Toggle AI Chat Pane',
+          click: () => sendToRenderer('workbench:menu-layout-command', { command: 'toggle-pane', pane: 'ai' }),
+        },
+        {
+          label: 'Toggle Note Pane',
+          click: () => sendToRenderer('workbench:menu-layout-command', { command: 'toggle-pane', pane: 'note' }),
+        },
+        { type: 'separator' },
+        {
+          label: 'Swap Left / Right Panes',
+          click: () => sendToRenderer('workbench:menu-layout-command', { command: 'swap-panes' }),
+        },
+        {
+          label: 'Split Ratio 60 : 40',
+          click: () => sendToRenderer('workbench:menu-layout-command', { command: 'set-ratio', ratio: 60 }),
+        },
+        {
+          label: 'Split Ratio 50 : 50',
+          click: () => sendToRenderer('workbench:menu-layout-command', { command: 'set-ratio', ratio: 50 }),
+        },
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'MCP & Tools',
+      submenu: [
+        {
+          label: '🔌 Manage & Discover MCP Servers...',
+          accelerator: 'CmdOrCtrl+Shift+M',
+          click: () => sendToRenderer('workbench:open-mcp-modal', { initialTab: 'installed' }),
+        },
+        {
+          label: '🌐 Find MCP Servers Online...',
+          click: () => sendToRenderer('workbench:open-mcp-modal', { initialTab: 'discover' }),
+        },
+        {
+          label: '➕ Add / Paste New MCP Server...',
+          click: () => sendToRenderer('workbench:open-mcp-modal', { initialTab: 'custom' }),
+        },
+        { type: 'separator' },
+        {
+          label: '🚀 Prime AI Chat & Select Tool Groups...',
+          accelerator: 'CmdOrCtrl+Shift+P',
+          click: () => sendToRenderer('workbench:open-prime-chat-modal'),
+        },
+        {
+          label: '⚡ Action Mode & Target Settings...',
+          click: () => sendToRenderer('workbench:open-action-mode-modal'),
+        },
+        {
+          label: '💬 Ask AI Prompt Templates...',
+          click: () => sendToRenderer('workbench:open-ask-ai-template-modal', { mode: 'manage' }),
+        },
+        { type: 'separator' },
+        {
+          label: '🔄 Reload All MCP Servers',
+          click: async () => {
+            const manager = McpManager.getInstance()
+            const status = await manager.reload()
+            const totalTools = status.reduce((sum, s) => sum + (s.toolCount || 0), 0)
+            sendToRenderer('workbench:notify', `🔄 MCP reloaded: ${status.filter((s) => s.connected).length} server(s) active (${totalTools} tools)`)
+          },
+        },
+        {
+          label: '📂 Open workbench-mcp.json in Explorer',
+          click: () => {
+            const cfgPath = McpManager.getInstance().getConfigPath()
+            if (fs.existsSync(cfgPath)) {
+              shell.showItemInFolder(cfgPath)
+            }
+          },
+        },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { role: 'close' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Official MCP Server Registry (Web)',
+          click: () => {
+            shell.openExternal('https://registry.modelcontextprotocol.io').catch(() => {})
+          },
+        },
+        {
+          label: 'Model Context Protocol Documentation',
+          click: () => {
+            shell.openExternal('https://modelcontextprotocol.io').catch(() => {})
+          },
+        },
+      ],
+    },
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
 }
 
 function registerIpcHandlers() {
@@ -848,6 +1013,21 @@ function registerIpcHandlers() {
     return { ...result, status: manager.getStatus() }
   })
 
+  ipcMain.handle('workbench:mcp-upsert-server', async (_, { serverName, config }: { serverName: string; config: any }) => {
+    const manager = McpManager.getInstance()
+    const result = await manager.upsertServer(serverName, config)
+    ActionDispatcher.getInstance().reprimeActiveChat(false).catch(() => {})
+    return { ...result, status: manager.getStatus() }
+  })
+
+  ipcMain.handle('workbench:mcp-search-online', async (_, query: string) => {
+    try {
+      const results = await McpManager.getInstance().searchOnlineServers(query || '')
+      return { success: true, results }
+    } catch (err: any) {
+      return { success: false, results: [], error: err?.message || 'Online search failed' }
+    }
+  })
   // Cross-Pane: Native File Drag & Drop (OS-level drag to external apps, AI view, or folders)
   ipcMain.on('workbench:start-drag-file', (event, filePath: string | string[]) => {
     try {

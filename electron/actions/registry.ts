@@ -1,5 +1,6 @@
 import { ActionDefinition } from './types'
 import { PromptRegistryService } from '../services/promptRegistryService'
+import { McpManager } from '../services/mcpManager'
 
 export type LLMProvider = 'claude' | 'chatgpt' | 'perplexity' | 'gemini' | 'deepseek' | 'generic'
 
@@ -91,6 +92,7 @@ export class ActionRegistry {
 
   /**
    * Groups all registered actions into logical selection groups for priming.
+   * 100% config-driven for MCP servers via workbench-mcp.json.
    */
   public getAvailableToolGroups(): ToolGroup[] {
     const allActions = this.getAll()
@@ -130,15 +132,41 @@ export class ActionRegistry {
       'update_action',
     ])
 
-    const mcpServersMap = new Map<string, string[]>()
+    const mcpManager = McpManager.getInstance()
+    const mcpConfig = mcpManager.readConfig().mcpServers || {}
+    const mcpServersMap = mcpManager.getRegisteredActionIdsByServer()
 
+    // Track any action IDs already mapped by McpManager
+    const mappedActionIds = new Set<string>()
+    for (const ids of mcpServersMap.values()) {
+      for (const id of ids) mappedActionIds.add(id)
+    }
+
+    // Fallback for any mcp_ actions registered outside McpManager (e.g. unit tests)
     for (const act of allActions) {
-      if (act.id.startsWith('mcp_')) {
-        const parts = act.id.split('_')
-        const serverName = parts[1] || 'custom'
-        const existing = mcpServersMap.get(serverName) || []
+      if (act.id.startsWith('mcp_') && !mappedActionIds.has(act.id)) {
+        // Match against configured server names first (handles underscores in serverName)
+        let matchedServer = ''
+        for (const cfgName of Object.keys(mcpConfig)) {
+          if (act.id.startsWith(`mcp_${cfgName.toLowerCase()}_`)) {
+            matchedServer = cfgName
+            break
+          }
+        }
+        if (!matchedServer) {
+          const parts = act.id.split('_')
+          matchedServer = parts[1] || 'custom'
+        }
+        const existing = mcpServersMap.get(matchedServer) || []
         existing.push(act.id)
-        mcpServersMap.set(serverName, existing)
+        mcpServersMap.set(matchedServer, existing)
+      }
+    }
+
+    // Also include enabled servers from workbench-mcp.json so they appear in PrimeChatModal for selection/omission
+    for (const [serverName, cfg] of Object.entries(mcpConfig)) {
+      if (!cfg.disabled && !mcpServersMap.has(serverName)) {
+        mcpServersMap.set(serverName, [])
       }
     }
 
@@ -178,34 +206,17 @@ export class ActionRegistry {
     ]
 
     for (const [serverName, actionIds] of mcpServersMap.entries()) {
-      let displayName = `🔌 MCP: ${serverName}`
-      let desc = `${actionIds.length} tool(s) provided by "${serverName}" server`
-      if (serverName === 'fetch') {
-        displayName = '🌐 MCP: Web Fetch'
-        desc = 'Fetch live web URLs and documentation directly into chat'
-      } else if (serverName === 'sqlite') {
-        displayName = '🗄️ MCP: SQLite Database'
-        desc = 'Execute queries, inspect tables, and analyze database records'
-      } else if (serverName === 'playwright') {
-        displayName = '🎭 MCP: Playwright Browser'
-        desc = 'Full browser automation (navigate, click, snapshot, screenshot)'
-      } else if (serverName === 'awsbrowser') {
-        displayName = '☁️ MCP: AWS Browser'
-        desc = 'Separate isolated Playwright browser for AWS Console'
-      } else if (serverName === 'twitter-mcp') {
-        displayName = '🐦 MCP: Twitter / X'
-        desc = 'Twitter trends, timeline, search, profile, and topic analysis'
-      } else if (serverName === 'filesystem') {
-        displayName = '📂 MCP: External Filesystem'
-        desc = 'Extended filesystem operations across allowed host directories'
-      }
+      const cfg = mcpConfig[serverName]
+      const displayName = cfg?.displayName || `🔌 MCP: ${serverName}`
+      const desc = cfg?.description || `${actionIds.length} tool(s) provided by "${serverName}" server`
+      const defaultSelected = cfg?.defaultSelected !== undefined ? Boolean(cfg.defaultSelected) : serverName === 'fetch'
 
       groups.push({
         id: `mcp_${serverName}`,
         name: displayName,
         description: desc,
         isMcp: true,
-        defaultSelected: serverName === 'fetch',
+        defaultSelected,
         actionIds,
       })
     }

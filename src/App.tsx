@@ -13,6 +13,7 @@ import { NoteSourceModal } from './components/NoteSourceModal'
 import { NoteDeleteModal } from './components/NoteDeleteModal'
 import { ActionModeModal } from './components/ActionModeModal'
 import { PrimeChatModal } from './components/PrimeChatModal'
+import { McpManagerModal } from './components/McpManagerModal'
 import { AskAITemplateModal, DEFAULT_ASK_AI_TEMPLATES } from './components/AskAITemplateModal'
 import { NavState, BookSource, AISource, NoteSource, AskAITemplate } from './types/electron'
 import './App.css'
@@ -99,6 +100,8 @@ export const App: React.FC = () => {
   const [isNoteSourceModalOpen, setIsNoteSourceModalOpen] = useState<boolean>(false)
   const [isActionModeModalOpen, setIsActionModeModalOpen] = useState<boolean>(false)
   const [isPrimeChatModalOpen, setIsPrimeChatModalOpen] = useState<boolean>(false)
+  const [isMcpModalOpen, setIsMcpModalOpen] = useState<boolean>(false)
+  const [mcpModalInitialTab, setMcpModalInitialTab] = useState<'installed' | 'discover' | 'custom'>('installed')
   const [isAskAITemplateModalOpen, setIsAskAITemplateModalOpen] = useState<boolean>(false)
   const [askAIModalMode, setAskAIModalMode] = useState<'custom' | 'manage'>('manage')
   const [askAIInitialSelection, setAskAIInitialSelection] = useState<string>('')
@@ -283,7 +286,8 @@ export const App: React.FC = () => {
     isNoteSourceModalOpen ||
     isActionModeModalOpen ||
     isPrimeChatModalOpen ||
-    isAskAITemplateModalOpen
+    isAskAITemplateModalOpen ||
+    isMcpModalOpen
 
   const isAnyModalOpenRef = useRef(isAnyModalOpen)
   isAnyModalOpenRef.current = isAnyModalOpen
@@ -1029,6 +1033,60 @@ export const App: React.FC = () => {
     window.electron?.setViewsVisible(false)
   }
 
+  const handleOpenMcpModal = (tab: 'installed' | 'discover' | 'custom' = 'installed') => {
+    setMcpModalInitialTab(tab)
+    setIsMcpModalOpen(true)
+    window.electron?.setViewsVisible(false)
+  }
+
+  const handleCloseMcpModal = () => {
+    setIsMcpModalOpen(false)
+    window.electron?.setViewsVisible(true)
+    setTimeout(syncBounds, 50)
+  }
+
+  // Listen to native Top Application Menu bar commands from Electron main process
+  useEffect(() => {
+    const unsubMcp = window.electron?.onOpenMcpModal?.((data) => {
+      handleOpenMcpModal(data?.tab || 'installed')
+    })
+    const unsubAction = window.electron?.onOpenActionModeModal?.(() => {
+      handleOpenActionModeModal()
+    })
+    const unsubPrime = window.electron?.onOpenPrimeChatModal?.(() => {
+      handleOpenPrimeChatModal()
+    })
+    const unsubLayout = window.electron?.onMenuLayoutCommand?.((data) => {
+      if (!data) return
+      if (data.type === 'toggle-pane' && data.pane) {
+        handleTogglePane(data.pane)
+      } else if (data.type === 'split-ratio' && typeof data.ratio === 'number') {
+        setSplitRatio(data.ratio)
+        window.electron?.setSplit({ ratio: data.ratio, isSwapped, activePanes })
+        setTimeout(syncBounds, 50)
+      } else if (data.type === 'swap-panes') {
+        const next = !isSwapped
+        setIsSwapped(next)
+        window.electron?.setSplit({ ratio: splitRatio, isSwapped: next, activePanes })
+        setTimeout(syncBounds, 50)
+      }
+    })
+    const handleKeyShortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        handleOpenMcpModal('installed')
+      }
+    }
+    window.addEventListener('keydown', handleKeyShortcut)
+    return () => {
+      unsubMcp?.()
+      unsubAction?.()
+      unsubPrime?.()
+      unsubLayout?.()
+      window.removeEventListener('keydown', handleKeyShortcut)
+    }
+  }, [activePanes, isSwapped, splitRatio, syncBounds])
+
   const handleClosePrimeChatModal = () => {
     setIsPrimeChatModalOpen(false)
     window.electron?.setViewsVisible(true)
@@ -1542,6 +1600,7 @@ export const App: React.FC = () => {
         notification={notification}
         activePanes={activePanes}
         onTogglePane={handleTogglePane}
+        onOpenMcpModal={() => handleOpenMcpModal('installed')}
       />
 
       <div className="workspace-container" ref={workspaceRef}>
@@ -1722,11 +1781,13 @@ export const App: React.FC = () => {
         activeDirectory={activeActionDirectory}
         onNotify={showNotification}
         onOpenPrimeChatModal={handleOpenPrimeChatModal}
+        onOpenMcpModal={() => handleOpenMcpModal('installed')}
       />
 
       <PrimeChatModal
         isOpen={isPrimeChatModalOpen}
         onClose={handleClosePrimeChatModal}
+        onOpenMcpModal={() => handleOpenMcpModal('discover')}
         onNotify={showNotification}
         customInstructions={customInstructions}
         onSaveCustomInstructions={handleSaveCustomInstructions}
@@ -1748,6 +1809,17 @@ export const App: React.FC = () => {
           handleAskAI(templateKey, customPromptText, textToUse)
         }}
         onNotify={showNotification}
+      />
+
+      <McpManagerModal
+        isOpen={isMcpModalOpen}
+        initialTab={mcpModalInitialTab}
+        onClose={handleCloseMcpModal}
+        onNotify={showNotification}
+        onOpenPrimeChatModal={() => {
+          handleCloseMcpModal()
+          handleOpenPrimeChatModal()
+        }}
       />
 
       {/* Ambient Floating Notification Toast */}

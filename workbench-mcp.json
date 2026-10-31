@@ -1,14 +1,17 @@
 {
   "mcpServers": {
     "fetch": {
+      "displayName": "🌐 MCP: Web Fetch",
       "command": "uvx",
       "args": [
         "mcp-server-fetch"
       ],
       "disabled": false,
-      "description": "Web Fetch & HTML Scraper: Allows Claude/ChatGPT to fetch URLs and inspect live web documentation."
+      "defaultSelected": true,
+      "description": "Web Fetch & HTML Scraper: Fetch live web URLs and documentation directly into chat."
     },
     "sqlite": {
+      "displayName": "🗄️ MCP: SQLite Database",
       "command": "uvx",
       "args": [
         "--with",
@@ -18,9 +21,11 @@
         "./workspace.db"
       ],
       "disabled": false,
-      "description": "Local SQLite Database: Allows Claude/ChatGPT to query, create tables, and manage SQLite databases."
+      "defaultSelected": false,
+      "description": "Local SQLite Database: Execute queries, inspect tables, and analyze database records."
     },
     "github": {
+      "displayName": "🐙 MCP: GitHub",
       "command": "npx",
       "args": [
         "-y",
@@ -30,9 +35,11 @@
         "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
       },
       "disabled": true,
-      "description": "GitHub Integration: Set your GITHUB_PERSONAL_ACCESS_TOKEN and change disabled to false to activate."
+      "defaultSelected": false,
+      "description": "GitHub Integration: Manage repositories, issues, PRs, and search code. Set GITHUB_PERSONAL_ACCESS_TOKEN to activate."
     },
     "brave_search": {
+      "displayName": "🦁 MCP: Brave Web Search",
       "command": "npx",
       "args": [
         "-y",
@@ -42,9 +49,11 @@
         "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
       },
       "disabled": true,
-      "description": "Brave Web Search: Set your BRAVE_API_KEY and change disabled to false to activate."
+      "defaultSelected": false,
+      "description": "Brave Web Search: Live web and local search via Brave Search API. Set BRAVE_API_KEY to activate."
     },
     "filesystem": {
+      "displayName": "📂 MCP: External Filesystem",
       "command": "npx",
       "args": [
         "-y",
@@ -52,18 +61,22 @@
         "C:\\"
       ],
       "disabled": false,
-      "description": "Filesystem MCP server with access to the C drive"
+      "defaultSelected": false,
+      "description": "Extended filesystem operations across allowed host directories."
     },
     "twitter-mcp": {
+      "displayName": "🐦 MCP: Twitter / X",
       "command": "npx",
       "args": [
         "-y",
         "@enescinar/twitter-mcp"
       ],
       "disabled": true,
-      "description": "Twitter/X search, trends, timeline, profile, and topic analysis MCP server (requires API keys)"
+      "defaultSelected": false,
+      "description": "Twitter/X search, trends, timeline, profile, and topic analysis MCP server (requires API keys)."
     },
     "awsbrowser": {
+      "displayName": "☁️ MCP: AWS Browser",
       "command": "npx",
       "args": [
         "-y",
@@ -71,16 +84,175 @@
         "--isolated"
       ],
       "disabled": false,
-      "description": "Separate isolated Playwright browser for AWS Console"
+      "defaultSelected": false,
+      "description": "Separate isolated Playwright browser for AWS Console."
     },
     "playwright": {
+      "displayName": "🎭 MCP: Playwright Browser",
       "command": "npx",
       "args": [
         "-y",
         "@playwright/mcp@latest"
       ],
       "disabled": false,
-      "description": "Playwright browser automation MCP server"
+      "defaultSelected": false,
+      "description": "Full browser automation (navigate, click, snapshot, screenshot)."
+    },
+    "oreilly": {
+      "displayName": "📚 MCP: O'Reilly Books",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.oreilly.com/api/search/v1/mcp"
+      ],
+      "url": "https://api.oreilly.com/api/search/v1/mcp",
+      "disabled": false,
+      "defaultSelected": true,
+      "description": "Official O'Reilly Search MCP Server: Search O'Reilly books, chapters, and expert technical content."
     }
-  }
+  },
+  "catalog": [
+    {
+      "id": "oreilly",
+      "displayName": "📚 MCP: O'Reilly Books",
+      "description": "Official O'Reilly Search MCP Server: Search O'Reilly books, chapters, and expert technical content.",
+      "transport": "remote",
+      "url": "https://api.oreilly.com/api/search/v1/mcp",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.oreilly.com/api/search/v1/mcp"],
+      "publisher": "O'Reilly Media",
+      "homepage": "https://www.oreilly.com",
+      "defaultSelected": true
+    },
+    {
+      "id": "fetch",
+      "displayName": "🌐 MCP: Web Fetch",
+      "description": "Official MCP web fetch server to retrieve and convert web pages into markdown for LLMs.",
+      "transport": "uvx",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": true
+    },
+    {
+      "id": "playwright",
+      "displayName": "🎭 MCP: Playwright Browser",
+      "description": "Official Microsoft Playwright MCP server for browser automation, DOM snapshots, and web interaction.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "publisher": "Microsoft",
+      "homepage": "https://github.com/microsoft/playwright-mcp",
+      "defaultSelected": false
+    },
+    {
+      "id": "memory",
+      "displayName": "🧠 MCP: Knowledge Graph Memory",
+      "description": "Persistent memory system using a local knowledge graph so AI chats remember entities and relationships across sessions.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "sequential-thinking",
+      "displayName": "🧩 MCP: Sequential Thinking",
+      "description": "Dynamic and reflective problem-solving tool through structured sequential thought chains.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "sqlite",
+      "displayName": "🗄️ MCP: SQLite Database",
+      "description": "Query, inspect schemas, and manage local SQLite database files.",
+      "transport": "uvx",
+      "command": "uvx",
+      "args": ["--with", "mcp<2", "mcp-server-sqlite", "--db-path", "./workspace.db"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "postgres",
+      "displayName": "🐘 MCP: PostgreSQL Database",
+      "description": "Read-only database inspection and schema querying for PostgreSQL databases.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "github",
+      "displayName": "🐙 MCP: GitHub",
+      "description": "Repository management, file operations, issue & PR creation, and code search via GitHub API.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+      },
+      "requiredEnvKeys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "brave_search",
+      "displayName": "🦁 MCP: Brave Web Search",
+      "description": "Web and local search using Brave's Search API.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
+      },
+      "requiredEnvKeys": ["BRAVE_API_KEY"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "git",
+      "displayName": "🌿 MCP: Git Repository Tools",
+      "description": "Tools to read, search, diff, commit, and inspect local Git repositories.",
+      "transport": "uvx",
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "time",
+      "displayName": "🕒 MCP: Time & Timezone",
+      "description": "Time and timezone conversion capabilities using IANA timezone names.",
+      "transport": "uvx",
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "publisher": "Model Context Protocol",
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "defaultSelected": false
+    },
+    {
+      "id": "context7",
+      "displayName": "📖 MCP: Context7 Live Code Docs",
+      "description": "Up-to-date, version-specific official documentation and code examples for thousands of libraries.",
+      "transport": "npx",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "publisher": "Upstash",
+      "homepage": "https://github.com/upstash/context7",
+      "defaultSelected": false
+    }
+  ]
 }

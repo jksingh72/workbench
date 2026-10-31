@@ -12,6 +12,8 @@ import {
   ChevronUp,
   Cpu,
   Eye,
+  Globe,
+  Server,
 } from 'lucide-react'
 import { LLMProvider, ToolGroup, PrimingOptions } from '../types/electron'
 
@@ -23,6 +25,7 @@ interface PrimeChatModalProps {
   onSaveCustomInstructions: (instructions: string) => void
   activeDirectory: string
   onSuccess?: () => void
+  onOpenMcpModal?: () => void
 }
 
 const PROVIDERS: Array<{
@@ -84,6 +87,7 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
   onSaveCustomInstructions,
   activeDirectory,
   onSuccess,
+  onOpenMcpModal,
 }) => {
   const [provider, setProvider] = useState<LLMProvider>('generic')
   const [detectedProvider, setDetectedProvider] = useState<LLMProvider>('generic')
@@ -97,6 +101,27 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
   const [isPriming, setIsPriming] = useState<boolean>(false)
   const [copied, setCopied] = useState<boolean>(false)
   const [activePreset, setActivePreset] = useState<'custom' | 'books' | 'full' | 'minimal'>('books')
+
+  // Refresh preview whenever provider, selected groups, or instructions change
+  const refreshPreview = useCallback(
+    async (p: LLMProvider, sel: Set<string>, inst: string) => {
+      try {
+        const res = await window.electron?.getPrimingPreview?.({
+          provider: p,
+          selectedGroups: Array.from(sel),
+          customInstructions: inst.trim(),
+        })
+        if (res) {
+          setPreviewPrompt(res.prompt || '')
+          setCharCount(res.charCount || 0)
+          setTokenEstimate(res.tokenEstimate || 0)
+        }
+      } catch (err) {
+        console.error('Error refreshing preview:', err)
+      }
+    },
+    []
+  )
 
   // Load initial available groups & detected provider
   useEffect(() => {
@@ -120,18 +145,31 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
         let initialGroups = new Set(available.filter((g) => g.defaultSelected).map((g) => g.id))
         try {
           const saved = localStorage.getItem('workbench:action-selected-groups')
+          const knownMcpRaw = localStorage.getItem('workbench:action-known-mcp-groups')
+          const knownMcp = new Set<string>(knownMcpRaw ? JSON.parse(knownMcpRaw) : [])
+
           if (saved) {
             const parsed = JSON.parse(saved)
             if (Array.isArray(parsed) && parsed.length > 0) {
               initialGroups = new Set(parsed)
+              // Auto-include any newly added MCP server that has defaultSelected=true
+              for (const g of available) {
+                if (g.isMcp && !knownMcp.has(g.id) && g.defaultSelected) {
+                  initialGroups.add(g.id)
+                }
+              }
             }
           }
+
+          const currentMcpIds = available.filter((g) => g.isMcp).map((g) => g.id)
+          localStorage.setItem('workbench:action-known-mcp-groups', JSON.stringify(currentMcpIds))
         } catch (_) {}
         setSelectedGroupIds(initialGroups)
 
         setPreviewPrompt(preview.prompt || '')
         setCharCount(preview.charCount || 0)
         setTokenEstimate(preview.tokenEstimate || 0)
+        refreshPreview(detected, initialGroups, instructions)
       } catch (err) {
         console.error('Failed to initialize priming preview:', err)
       }
@@ -143,27 +181,6 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
       isMounted = false
     }
   }, [isOpen])
-
-  // Refresh preview whenever provider, selected groups, or instructions change
-  const refreshPreview = useCallback(
-    async (p: LLMProvider, sel: Set<string>, inst: string) => {
-      try {
-        const res = await window.electron?.getPrimingPreview?.({
-          provider: p,
-          selectedGroups: Array.from(sel),
-          customInstructions: inst.trim(),
-        })
-        if (res) {
-          setPreviewPrompt(res.prompt || '')
-          setCharCount(res.charCount || 0)
-          setTokenEstimate(res.tokenEstimate || 0)
-        }
-      } catch (err) {
-        console.error('Error refreshing preview:', err)
-      }
-    },
-    []
-  )
 
   const handleProviderChange = (newProvider: LLMProvider) => {
     setProvider(newProvider)
@@ -195,10 +212,12 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
     let newSelected = new Set<string>()
 
     if (presetKey === 'books') {
-      // Core + Books & Docs + MCP Fetch (if present)
+      // Core + Books & Docs + any MCP group flagged defaultSelected in workbench-mcp.json
       newSelected = new Set(['core', 'books'])
-      if (groups.some((g) => g.id === 'mcp_fetch')) {
-        newSelected.add('mcp_fetch')
+      for (const g of groups) {
+        if (g.isMcp && (g.defaultSelected || g.id === 'mcp_fetch' || g.id === 'mcp_oreilly')) {
+          newSelected.add(g.id)
+        }
       }
     } else if (presetKey === 'full') {
       // All groups
@@ -348,7 +367,7 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
                 Prime AI Chat with Modular Tools
               </h2>
               <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
-                Tailor action guides by LLM provider, select MCP tools, and add custom instructions
+                Tailor action guides by LLM provider, select or omit MCP servers, and add custom instructions
               </p>
             </div>
           </div>
@@ -634,11 +653,66 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
           </div>
 
           {/* Section 5: External MCP Servers */}
-          {mcpGroups.length > 0 && (
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase' }}>
-                External MCP Servers (Model Context Protocol)
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '8px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>
+                External MCP Servers — Select or Omit ({mcpGroups.length} Active)
               </div>
+              {onOpenMcpModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose()
+                    onOpenMcpModal()
+                  }}
+                  style={{
+                    background: 'rgba(168, 85, 247, 0.14)',
+                    border: '1px solid rgba(168, 85, 247, 0.35)',
+                    color: '#d8b4fe',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                  title="Open MCP Server Manager to search online registries or add new MCP servers"
+                >
+                  <Globe size={12} />
+                  <span>Manage / Find MCP Servers Online...</span>
+                </button>
+              )}
+            </div>
+
+            {mcpGroups.length === 0 ? (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: '8px',
+                  background: 'rgba(168, 85, 247, 0.05)',
+                  border: '1px dashed rgba(168, 85, 247, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '12px',
+                  color: '#94a3b8',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Server size={15} color="#c084fc" />
+                  <span>No connected MCP servers with exposed tools yet. Add or enable servers in the MCP Manager.</span>
+                </div>
+              </div>
+            ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                 {mcpGroups.map((group) => {
                   const isChecked = selectedGroupIds.has(group.id)
@@ -690,8 +764,8 @@ export const PrimeChatModal: React.FC<PrimeChatModalProps> = ({
                   )
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Section 6: Custom User Instructions */}
           <div>

@@ -103,6 +103,36 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
 
+  // Top Application Menu Bar Listeners
+  onOpenMcpModal: (callback: (data?: { initialTab?: 'installed' | 'discover' | 'custom' }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:open-mcp-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-mcp-modal', listener)
+    }
+  },
+  onOpenActionModeModal: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:open-action-mode-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-action-mode-modal', listener)
+    }
+  },
+  onOpenPrimeChatModal: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:open-prime-chat-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-prime-chat-modal', listener)
+    }
+  },
+  onMenuLayoutCommand: (callback: (data: { command: string; pane?: 'book' | 'ai' | 'note'; ratio?: number }) => void) => {
+    const listener = (_: any, data: any) => callback(data)
+    ipcRenderer.on('workbench:menu-layout-command', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:menu-layout-command', listener)
+    }
+  },
+
   // Local File Explorer API
   selectFolder: (defaultPath?: string) =>
     ipcRenderer.invoke('workbench:select-folder', defaultPath),
@@ -317,6 +347,10 @@ contextBridge.exposeInMainWorld('electron', {
   mcpRemoveServer: (serverName: string) => ipcRenderer.invoke('workbench:mcp-remove-server', serverName),
   mcpConfigureServer: (serverName: string, updates: any) =>
     ipcRenderer.invoke('workbench:mcp-configure-server', { serverName, updates }),
+  mcpUpsertServer: (serverName: string, config: any) =>
+    ipcRenderer.invoke('workbench:mcp-upsert-server', { serverName, config }),
+  mcpSearchOnline: (query: string) =>
+    ipcRenderer.invoke('workbench:mcp-search-online', query),
 
   // Error Log Management
   openErrorLog: () => ipcRenderer.invoke('workbench:open-error-log'),

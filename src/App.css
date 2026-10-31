@@ -253,6 +253,92 @@
   font-weight: 500;
 }
 
+/* Header Non-Overlapping Layout & Responsive Breakpoints */
+.app-header {
+  gap: 10px;
+  padding: 0 12px;
+  overflow: hidden;
+}
+
+.header-left {
+  flex: 1 1 auto;
+  min-width: max-content;
+  gap: 8px;
+}
+
+.header-center {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.header-right {
+  flex: 1 0 auto;
+  min-width: max-content;
+  gap: 8px;
+}
+
+.header-controls {
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.logo-badge,
+.status-pill,
+.pane-chip,
+.preset-btn,
+.action-icon-btn,
+.quick-tip {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mcp-header-btn {
+  border-color: rgba(168, 85, 247, 0.4);
+  background-color: rgba(168, 85, 247, 0.14);
+  color: #d8b4fe;
+  font-weight: 600;
+}
+
+.mcp-header-btn:hover {
+  background-color: rgba(168, 85, 247, 0.26);
+  border-color: rgba(168, 85, 247, 0.65);
+  color: #f3e8ff;
+}
+
+@media (max-width: 1220px) {
+  .app-header .quick-tip {
+    display: none;
+  }
+}
+
+@media (max-width: 1040px) {
+  .pane-selector-group .group-label {
+    display: none;
+  }
+  .preset-btn {
+    padding: 4px 6px;
+  }
+  .preset-btn svg {
+    display: none;
+  }
+}
+
+@media (max-width: 880px) {
+  .app-header .status-pill {
+    display: none;
+  }
+  .header-right .action-icon-btn:not(.mcp-header-btn) .btn-label {
+    display: none;
+  }
+}
+
+/* Keep Zoom Out (-) and Zoom In (+) buttons always visible in Bookview & Chatview even in narrow splits */
+@container pane (max-width: 560px) {
+  .zoom-controls {
+    display: flex !important;
+  }
+}
+
 .notification-banner {
   display: flex;
   align-items: center;

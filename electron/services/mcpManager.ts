@@ -20,24 +20,53 @@ function getUserDataPath(): string {
 }
 
 export interface McpServerConfig {
-  command: string
+  displayName?: string
+  command?: string
   args?: string[]
+  url?: string
+  headers?: Record<string, string>
   env?: Record<string, string>
   disabled?: boolean
+  defaultSelected?: boolean
   description?: string
   browser?: string
 }
 
+export interface McpOnlineServerResult {
+  id: string
+  displayName: string
+  description: string
+  transport: 'npx' | 'uvx' | 'remote' | 'custom'
+  command?: string
+  args?: string[]
+  url?: string
+  headers?: Record<string, string>
+  env?: Record<string, string>
+  requiredEnvKeys?: string[]
+  publisher?: string
+  homepage?: string
+  version?: string
+  source?: 'catalog' | 'mcp-registry' | 'npm'
+  defaultSelected?: boolean
+}
+
 export interface McpConfigFile {
   mcpServers: Record<string, McpServerConfig>
+  catalog?: McpOnlineServerResult[]
 }
 
 export interface McpServerInfo {
   name: string
+  displayName?: string
+  description?: string
   command: string
   args: string[]
+  url?: string
+  headers?: Record<string, string>
+  env?: Record<string, string>
   connected: boolean
   disabled?: boolean
+  defaultSelected?: boolean
   browser?: string
   error?: string
   toolCount: number
@@ -87,14 +116,16 @@ export class McpManager {
       if (!fs.existsSync(this.configPath)) {
         const initialConfig: McpConfigFile = {
           mcpServers: {
-            // Example configuration: SQLite server (disabled by default)
             sqlite_example: {
+              displayName: '🗄️ MCP: SQLite Example',
               command: 'uvx',
               args: ['--with', 'mcp<2', 'mcp-server-sqlite', '--db-path', './workspace.db'],
               disabled: true,
+              defaultSelected: false,
               description: 'Example SQLite MCP Server. Set disabled to false to activate.',
             },
           },
+          catalog: [],
         }
         fs.writeFileSync(this.configPath, JSON.stringify(initialConfig, null, 2), 'utf-8')
         console.log(`[MCP] Created initial configuration file at: ${this.configPath}`)
@@ -112,22 +143,59 @@ export class McpManager {
     try {
       if (fs.existsSync(this.configPath)) {
         const raw = fs.readFileSync(this.configPath, 'utf-8')
-        return JSON.parse(raw)
+        const parsed = JSON.parse(raw)
+        return {
+          mcpServers: parsed?.mcpServers || {},
+          catalog: Array.isArray(parsed?.catalog) ? parsed.catalog : [],
+        }
       }
     } catch (err: any) {
       console.error('[MCP] Failed to read config file:', err)
     }
-    return { mcpServers: {} }
+    return { mcpServers: {}, catalog: [] }
   }
 
   public saveConfig(config: McpConfigFile): boolean {
     try {
-      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8')
+      const existing = this.readConfig()
+      const toWrite: McpConfigFile = {
+        mcpServers: config.mcpServers || {},
+        catalog: config.catalog !== undefined ? config.catalog : existing.catalog,
+      }
+      fs.writeFileSync(this.configPath, JSON.stringify(toWrite, null, 2), 'utf-8')
       return true
     } catch (err: any) {
       console.error('[MCP] Failed to save config file:', err)
       return false
     }
+  }
+
+  /**
+   * Resolves effective stdio command and args for either local command or remote HTTP/SSE URL servers.
+   */
+  private resolveCommandAndArgs(serverName: string, cfg: McpServerConfig): { command: string; args: string[] } {
+    const hasExplicitCommand = Boolean(cfg.command && cfg.command.trim())
+    const command = hasExplicitCommand ? cfg.command!.trim() : cfg.url ? 'npx' : ''
+    let args: string[] = []
+
+    if (hasExplicitCommand) {
+      args = [...(cfg.args || [])]
+    } else if (cfg.url && cfg.url.trim()) {
+      args = ['-y', 'mcp-remote', cfg.url.trim(), ...(cfg.args || [])]
+      if (cfg.headers) {
+        for (const [k, v] of Object.entries(cfg.headers)) {
+          if (k.trim() && v.trim()) {
+            args.push('--header', `${k.trim()}: ${v.trim()}`)
+          }
+        }
+      }
+    }
+
+    if (serverName.toLowerCase().includes('playwright') || args.some((a) => a.includes('playwright'))) {
+      args = this.resolvePlaywrightArgs(args, cfg.browser)
+    }
+
+    return { command, args }
   }
 
   /**
@@ -143,15 +211,22 @@ export class McpManager {
       const serverEntries = Object.entries(config.mcpServers || {})
 
       const connectionPromises = serverEntries.map(async ([serverName, serverCfg]) => {
+        const { command, args } = this.resolveCommandAndArgs(serverName, serverCfg)
         if (serverCfg.disabled) {
           console.log(`[MCP] Server "${serverName}" is disabled in config. Skipping.`)
           this.serverStatuses.set(serverName, {
             name: serverName,
-            command: serverCfg.command,
-            args: serverCfg.args || [],
+            displayName: serverCfg.displayName,
+            description: serverCfg.description,
+            command,
+            args,
+            url: serverCfg.url,
+            headers: serverCfg.headers,
+            env: serverCfg.env,
             connected: false,
             disabled: true,
-            browser: serverCfg.browser || this.detectBrowser(serverCfg.args || []),
+            defaultSelected: Boolean(serverCfg.defaultSelected),
+            browser: serverCfg.browser || this.detectBrowser(args),
             error: 'Server is disabled in configuration',
             toolCount: 0,
             tools: [],
@@ -223,7 +298,6 @@ export class McpManager {
         cleanArgs.push('--browser', browserToSet)
       }
     } else {
-      // If neither --browser nor --executable-path is set, DEFAULT TO COMET
       const hasBrowser = cleanArgs.includes('--browser')
       const hasExecutable = cleanArgs.includes('--executable-path')
       if (!hasBrowser && !hasExecutable && cometExists) {
@@ -232,7 +306,6 @@ export class McpManager {
       }
     }
 
-    // Always ensure --isolated is present to prevent user profile locking
     if (!cleanArgs.includes('--isolated')) {
       cleanArgs.push('--isolated')
     }
@@ -263,27 +336,26 @@ export class McpManager {
    * Connects to a single MCP server via Stdio transport and registers its tools into ActionRegistry.
    */
   public async connectServer(serverName: string, cfg: McpServerConfig): Promise<boolean> {
-    // If already connected, disconnect first
     await this.disconnectServer(serverName)
 
-    console.log(`[MCP:${serverName}] Connecting via stdio: ${cfg.command} ${(cfg.args || []).join(' ')}...`)
-
-    let resolvedArgs = [...(cfg.args || [])]
-    if (serverName.toLowerCase().includes('playwright') || resolvedArgs.some((a) => a.includes('playwright'))) {
-      resolvedArgs = this.resolvePlaywrightArgs(resolvedArgs, cfg.browser)
-    }
+    const { command: effectiveCommand, args: resolvedArgs } = this.resolveCommandAndArgs(serverName, cfg)
+    console.log(`[MCP:${serverName}] Connecting via stdio: ${effectiveCommand} ${resolvedArgs.join(' ')}...`)
 
     let transport: StdioClientTransport | null = null
     let client: Client | null = null
 
     try {
+      if (!effectiveCommand) {
+        throw new Error('No command or remote URL configured for this server')
+      }
+
       const mergedEnv: Record<string, string> = {
         ...(process.env as Record<string, string>),
         ...(cfg.env || {}),
       }
 
       transport = new StdioClientTransport({
-        command: cfg.command,
+        command: effectiveCommand,
         args: resolvedArgs,
         env: mergedEnv,
       })
@@ -354,7 +426,6 @@ export class McpManager {
           example,
           execute: async (_ctx: ActionContext, payload: any): Promise<ActionResult> => {
             const rawArgs = payload.parameters || payload.arguments || payload.args || { ...payload }
-            // Clean internal routing fields
             const args = { ...rawArgs }
             delete args.action
             delete args.type
@@ -376,10 +447,16 @@ export class McpManager {
 
       this.serverStatuses.set(serverName, {
         name: serverName,
-        command: cfg.command,
+        displayName: cfg.displayName,
+        description: cfg.description,
+        command: effectiveCommand,
         args: resolvedArgs,
+        url: cfg.url,
+        headers: cfg.headers,
+        env: cfg.env,
         connected: true,
         disabled: false,
+        defaultSelected: Boolean(cfg.defaultSelected),
         browser: cfg.browser || this.detectBrowser(resolvedArgs),
         toolCount: tools.length,
         tools: tools.map((t) => ({
@@ -394,7 +471,6 @@ export class McpManager {
       const errMsg = err?.message || String(err)
       console.warn(`[MCP:${serverName}] Failed to connect:`, errMsg)
 
-      // Clean up transport and client to prevent orphaned child processes
       if (transport) {
         try {
           await transport.close()
@@ -408,10 +484,16 @@ export class McpManager {
 
       this.serverStatuses.set(serverName, {
         name: serverName,
-        command: cfg.command,
+        displayName: cfg.displayName,
+        description: cfg.description,
+        command: effectiveCommand,
         args: resolvedArgs,
+        url: cfg.url,
+        headers: cfg.headers,
+        env: cfg.env,
         connected: false,
         disabled: !!cfg.disabled,
+        defaultSelected: Boolean(cfg.defaultSelected),
         browser: cfg.browser || this.detectBrowser(resolvedArgs),
         error: errMsg,
         toolCount: 0,
@@ -419,6 +501,17 @@ export class McpManager {
       })
       return false
     }
+  }
+
+  /**
+   * Returns a map of serverName -> registeredActionIds for accurate grouping in ActionRegistry.
+   */
+  public getRegisteredActionIdsByServer(): Map<string, string[]> {
+    const map = new Map<string, string[]>()
+    for (const [serverName, conn] of this.connectedServers.entries()) {
+      map.set(serverName, [...conn.registeredActionIds])
+    }
+    return map
   }
 
   /**
@@ -483,7 +576,6 @@ export class McpManager {
       console.error(`[MCP:${serverName}] Execution error in "${toolName}":`, err)
       const errMsg = err?.message || String(err)
 
-      // Self-healing: if the connection closed or child process died, attempt to re-connect once and retry
       if (
         (errMsg.includes('Connection closed') || errMsg.includes('not connected') || errMsg.includes('Client is closed')) &&
         !args.__retried
@@ -544,11 +636,9 @@ export class McpManager {
     const cleanName = serverName.toLowerCase().trim()
     console.log(`[MCP] Removing server "${cleanName}"...`)
 
-    // 1. Disconnect and unregister in-memory tools
     await this.disconnectServer(cleanName)
     this.serverStatuses.delete(cleanName)
 
-    // 2. Remove from config file
     const config = this.readConfig()
     if (config.mcpServers && config.mcpServers[cleanName]) {
       delete config.mcpServers[cleanName]
@@ -559,7 +649,81 @@ export class McpManager {
   }
 
   /**
-   * Configures an existing MCP server (e.g. toggle disabled, update args, or env vars).
+   * Adds a new MCP server or updates an existing one in workbench-mcp.json and connects it live.
+   */
+  public async upsertServer(
+    serverName: string,
+    serverCfg: McpServerConfig
+  ): Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo }> {
+    const cleanName = serverName.toLowerCase().trim().replace(/\s+/g, '-')
+    if (!cleanName) {
+      return { success: false, error: 'Server name cannot be empty.' }
+    }
+
+    const config = this.readConfig()
+    if (!config.mcpServers) config.mcpServers = {}
+
+    const existingCfg = config.mcpServers[cleanName] || {}
+    const mergedCfg: McpServerConfig = {
+      ...existingCfg,
+      ...serverCfg,
+      displayName: serverCfg.displayName !== undefined ? serverCfg.displayName : existingCfg.displayName,
+      description: serverCfg.description !== undefined ? serverCfg.description : existingCfg.description,
+      defaultSelected:
+        serverCfg.defaultSelected !== undefined ? Boolean(serverCfg.defaultSelected) : Boolean(existingCfg.defaultSelected),
+      disabled: serverCfg.disabled !== undefined ? Boolean(serverCfg.disabled) : false,
+    }
+
+    // If URL is specified without an explicit non-npx command, ensure mcp-remote args are synchronized
+    if (mergedCfg.url && mergedCfg.url.trim()) {
+      const cleanUrl = mergedCfg.url.trim()
+      if (!mergedCfg.command || mergedCfg.command === 'npx') {
+        mergedCfg.command = 'npx'
+        const baseArgs = ['-y', 'mcp-remote', cleanUrl]
+        if (mergedCfg.headers) {
+          for (const [k, v] of Object.entries(mergedCfg.headers)) {
+            if (k.trim() && v.trim()) {
+              baseArgs.push('--header', `${k.trim()}: ${v.trim()}`)
+            }
+          }
+        }
+        mergedCfg.args = baseArgs
+      }
+    }
+
+    config.mcpServers[cleanName] = mergedCfg
+    this.saveConfig(config)
+
+    if (mergedCfg.disabled) {
+      await this.disconnectServer(cleanName)
+      const { command, args } = this.resolveCommandAndArgs(cleanName, mergedCfg)
+      this.serverStatuses.set(cleanName, {
+        name: cleanName,
+        displayName: mergedCfg.displayName,
+        description: mergedCfg.description,
+        command,
+        args,
+        url: mergedCfg.url,
+        headers: mergedCfg.headers,
+        env: mergedCfg.env,
+        connected: false,
+        disabled: true,
+        defaultSelected: Boolean(mergedCfg.defaultSelected),
+        browser: mergedCfg.browser || this.detectBrowser(args),
+        error: 'Server is disabled in configuration',
+        toolCount: 0,
+        tools: [],
+      })
+      return { success: true, serverInfo: this.serverStatuses.get(cleanName) }
+    }
+
+    const connected = await this.connectServer(cleanName, mergedCfg)
+    const info = this.serverStatuses.get(cleanName)
+    return { success: connected, error: info?.error, serverInfo: info }
+  }
+
+  /**
+   * Configures an existing MCP server (e.g. toggle disabled, defaultSelected, update args, or env vars).
    */
   public async configureServer(
     serverName: string,
@@ -572,10 +736,19 @@ export class McpManager {
     }
 
     const existingCfg = config.mcpServers[cleanName]
+    const onlyMetadataChanged =
+      updates.disabled === undefined &&
+      updates.command === undefined &&
+      updates.args === undefined &&
+      updates.url === undefined &&
+      updates.headers === undefined &&
+      updates.env === undefined &&
+      updates.browser === undefined
+
     const mergedCfg: McpServerConfig = {
       ...existingCfg,
       ...updates,
-      env: updates.env !== undefined ? { ...existingCfg.env, ...updates.env } : existingCfg.env,
+      env: updates.env !== undefined ? updates.env : existingCfg.env,
     }
 
     if (updates.browser && (cleanName.includes('playwright') || (mergedCfg.args || []).some((a) => a.includes('playwright')))) {
@@ -586,26 +759,205 @@ export class McpManager {
     config.mcpServers[cleanName] = mergedCfg
     this.saveConfig(config)
 
+    // Fast path: if only displayName, description, or defaultSelected was toggled, don't restart the child process
+    if (onlyMetadataChanged) {
+      const currentStatus = this.serverStatuses.get(cleanName)
+      if (currentStatus) {
+        currentStatus.displayName = mergedCfg.displayName
+        currentStatus.description = mergedCfg.description
+        currentStatus.defaultSelected = Boolean(mergedCfg.defaultSelected)
+        return { success: true, serverInfo: currentStatus }
+      }
+    }
+
     if (mergedCfg.disabled) {
       await this.disconnectServer(cleanName)
+      const { command, args } = this.resolveCommandAndArgs(cleanName, mergedCfg)
       this.serverStatuses.set(cleanName, {
         name: cleanName,
-        command: mergedCfg.command,
-        args: mergedCfg.args || [],
+        displayName: mergedCfg.displayName,
+        description: mergedCfg.description,
+        command,
+        args,
+        url: mergedCfg.url,
+        headers: mergedCfg.headers,
+        env: mergedCfg.env,
         connected: false,
         disabled: true,
-        browser: mergedCfg.browser || this.detectBrowser(mergedCfg.args || []),
+        defaultSelected: Boolean(mergedCfg.defaultSelected),
+        browser: mergedCfg.browser || this.detectBrowser(args),
         error: 'Server is disabled in configuration',
         toolCount: 0,
         tools: [],
       })
       return { success: true, serverInfo: this.serverStatuses.get(cleanName) }
     } else {
-      // Reconnect live
       const connected = await this.connectServer(cleanName, mergedCfg)
       const info = this.serverStatuses.get(cleanName)
       return { success: connected, error: info?.error, serverInfo: info }
     }
+  }
+
+  /**
+   * Searches online MCP registries (Official MCP Registry + NPM Registry + local JSON catalog).
+   */
+  public async searchOnlineServers(rawQuery: string = ''): Promise<McpOnlineServerResult[]> {
+    const query = rawQuery.trim().toLowerCase()
+    const config = this.readConfig()
+    const results: McpOnlineServerResult[] = []
+    const seenIds = new Set<string>()
+
+    // 1. Include matching items from the modular JSON catalog in workbench-mcp.json
+    const catalog = config.catalog || []
+    for (const item of catalog) {
+      const hay = `${item.id} ${item.displayName} ${item.description} ${item.publisher || ''}`.toLowerCase()
+      if (!query || hay.includes(query)) {
+        seenIds.add(item.id.toLowerCase())
+        results.push({ ...item, source: 'catalog' })
+      }
+    }
+
+    // If query is empty, return the JSON catalog immediately
+    if (!query) {
+      return results
+    }
+
+    // 2. Query Official Model Context Protocol Registry + NPM Registry in parallel with a 6s timeout
+    const fetchWithTimeout = async (url: string, timeoutMs = 6000): Promise<any> => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json', 'User-Agent': 'Workbench-Desktop/1.0' },
+        })
+        if (!res.ok) return null
+        return await res.json()
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
+    const mcpRegistryUrl = `https://registry.modelcontextprotocol.io/v0.1/servers?search=${encodeURIComponent(query)}&limit=25`
+    const npmSearchUrl = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent('mcp server ' + query)}&size=20`
+
+    const [mcpRegData, npmData] = await Promise.all([
+      fetchWithTimeout(mcpRegistryUrl),
+      fetchWithTimeout(npmSearchUrl),
+    ])
+
+    // Parse Official MCP Registry results
+    if (mcpRegData && Array.isArray(mcpRegData.servers)) {
+      for (const entry of mcpRegData.servers) {
+        const srv = entry?.server || entry
+        if (!srv || !srv.name) continue
+
+        const rawName: string = srv.name
+        const shortId = (rawName.split('/').pop() || rawName)
+          .toLowerCase()
+          .replace(/^mcp-server-/, '')
+          .replace(/^server-/, '')
+          .replace(/[^a-z0-9-_]/g, '-')
+
+        if (seenIds.has(shortId)) continue
+
+        const description = srv.description || `MCP server ${rawName}`
+        const homepage = srv.repository?.url || srv.websiteUrl || ''
+        const publisher = rawName.includes('/') ? rawName.split('/')[0] : 'MCP Registry'
+
+        // Check packages (npm / pypi) or remotes (streamable-http / sse)
+        const pkg = Array.isArray(srv.packages) ? srv.packages[0] : null
+        const remote = Array.isArray(srv.remotes) ? srv.remotes[0] : null
+
+        if (pkg && pkg.identifier) {
+          const regType = (pkg.registryType || pkg.registry_name || 'npm').toLowerCase()
+          const isPypi = regType === 'pypi'
+          const envVars: string[] = []
+          const envMap: Record<string, string> = {}
+          if (Array.isArray(pkg.environmentVariables)) {
+            for (const ev of pkg.environmentVariables) {
+              if (ev?.name) {
+                envVars.push(ev.name)
+                envMap[ev.name] = ev.default || `YOUR_${ev.name}`
+              }
+            }
+          }
+
+          seenIds.add(shortId)
+          results.push({
+            id: shortId,
+            displayName: `🔌 MCP: ${srv.title || shortId}`,
+            description,
+            transport: isPypi ? 'uvx' : 'npx',
+            command: isPypi ? 'uvx' : 'npx',
+            args: isPypi ? [pkg.identifier] : ['-y', pkg.identifier],
+            env: envVars.length > 0 ? envMap : undefined,
+            requiredEnvKeys: envVars.length > 0 ? envVars : undefined,
+            publisher,
+            homepage,
+            version: srv.version,
+            source: 'mcp-registry',
+            defaultSelected: false,
+          })
+        } else if (remote && remote.url) {
+          seenIds.add(shortId)
+          results.push({
+            id: shortId,
+            displayName: `🌐 MCP: ${srv.title || shortId}`,
+            description,
+            transport: 'remote',
+            url: remote.url,
+            command: 'npx',
+            args: ['-y', 'mcp-remote', remote.url],
+            publisher,
+            homepage,
+            version: srv.version,
+            source: 'mcp-registry',
+            defaultSelected: false,
+          })
+        }
+      }
+    }
+
+    // Parse NPM Registry results
+    if (npmData && Array.isArray(npmData.objects)) {
+      for (const obj of npmData.objects) {
+        const pkg = obj?.package
+        if (!pkg || !pkg.name) continue
+        const pkgName: string = pkg.name
+        const lowerPkg = pkgName.toLowerCase()
+
+        // Filter to packages that look like MCP servers
+        if (!lowerPkg.includes('mcp')) continue
+
+        const shortId = (pkgName.split('/').pop() || pkgName)
+          .toLowerCase()
+          .replace(/^mcp-server-/, '')
+          .replace(/^server-/, '')
+          .replace(/[^a-z0-9-_]/g, '-')
+
+        if (seenIds.has(shortId)) continue
+        seenIds.add(shortId)
+
+        results.push({
+          id: shortId,
+          displayName: `📦 MCP: ${shortId}`,
+          description: pkg.description || `NPM MCP server package (${pkgName})`,
+          transport: 'npx',
+          command: 'npx',
+          args: ['-y', pkgName],
+          publisher: pkg.publisher?.username || pkg.author?.name || 'npm',
+          homepage: pkg.links?.repository || pkg.links?.homepage || pkg.links?.npm || '',
+          version: pkg.version,
+          source: 'npm',
+          defaultSelected: false,
+        })
+      }
+    }
+
+    return results
   }
 
   /**
@@ -626,7 +978,44 @@ export class McpManager {
    * Returns current status of all servers.
    */
   public getStatus(): McpServerInfo[] {
-    return Array.from(this.serverStatuses.values())
+    const config = this.readConfig()
+    const statuses: McpServerInfo[] = []
+
+    for (const [serverName, cfg] of Object.entries(config.mcpServers || {})) {
+      const existing = this.serverStatuses.get(serverName)
+      if (existing) {
+        statuses.push({
+          ...existing,
+          displayName: cfg.displayName || existing.displayName,
+          description: cfg.description || existing.description,
+          defaultSelected: Boolean(cfg.defaultSelected),
+          url: cfg.url || existing.url,
+          headers: cfg.headers || existing.headers,
+          env: cfg.env || existing.env,
+        })
+      } else {
+        const { command, args } = this.resolveCommandAndArgs(serverName, cfg)
+        statuses.push({
+          name: serverName,
+          displayName: cfg.displayName,
+          description: cfg.description,
+          command,
+          args,
+          url: cfg.url,
+          headers: cfg.headers,
+          env: cfg.env,
+          connected: false,
+          disabled: Boolean(cfg.disabled),
+          defaultSelected: Boolean(cfg.defaultSelected),
+          browser: cfg.browser || this.detectBrowser(args),
+          error: cfg.disabled ? 'Server is disabled in configuration' : 'Not connected',
+          toolCount: 0,
+          tools: [],
+        })
+      }
+    }
+
+    return statuses
   }
 
   /**

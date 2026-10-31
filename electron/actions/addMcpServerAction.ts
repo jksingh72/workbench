@@ -11,12 +11,17 @@ export const addMcpServerAction: ActionDefinition = {
     name: {
       type: 'string',
       required: true,
-      description: 'Unique name/identifier for the MCP server (e.g. "playwright", "sqlite", "weather", "github")',
+      description: 'Unique name/identifier for the MCP server (e.g. "playwright", "sqlite", "oreilly", "github")',
     },
     command: {
       type: 'string',
-      required: true,
-      description: 'Executable command to spawn the server (e.g. "npx", "uvx", "node", "python")',
+      required: false,
+      description: 'Executable command to spawn the server (e.g. "npx", "uvx", "node", "python"). Optional if "url" is provided.',
+    },
+    url: {
+      type: 'string',
+      required: false,
+      description: 'Remote HTTP/SSE MCP server URL (e.g. "https://api.oreilly.com/api/search/v1/mcp"). Automatically bridged via mcp-remote if command is omitted.',
     },
     args: {
       type: 'array',
@@ -28,10 +33,20 @@ export const addMcpServerAction: ActionDefinition = {
       required: false,
       description: 'Optional environment variables or API keys for the server (e.g. { "API_KEY": "..." })',
     },
+    displayName: {
+      type: 'string',
+      required: false,
+      description: 'Friendly display name shown in UI and Prime Chat modal (e.g. "📚 MCP: O\'Reilly Books")',
+    },
     description: {
       type: 'string',
       required: false,
       description: 'Brief description of what this MCP server provides',
+    },
+    defaultSelected: {
+      type: 'boolean',
+      required: false,
+      description: 'Whether this MCP server should be selected by default when priming AI chats',
     },
   },
   example: {
@@ -46,10 +61,17 @@ export const addMcpServerAction: ActionDefinition = {
   async execute(ctx: ActionContext, payload: any): Promise<ActionResult> {
     const params = payload.params || payload.parameters || payload
     const name = (params.name || '').trim().toLowerCase()
-    const command = (params.command || '').trim()
-    const args = Array.isArray(params.args) ? params.args : []
+    const url = (params.url || '').trim()
+    const command = (params.command || (url ? 'npx' : '')).trim()
+    const args = Array.isArray(params.args)
+      ? params.args
+      : url && !params.command
+      ? ['-y', 'mcp-remote', url]
+      : []
     const env = typeof params.env === 'object' && params.env !== null ? params.env : undefined
+    const displayName = params.displayName ? String(params.displayName).trim() : `🔌 MCP: ${name}`
     const description = params.description || `MCP Server: ${name}`
+    const defaultSelected = Boolean(params.defaultSelected)
 
     if (!name) {
       return {
@@ -60,43 +82,31 @@ export const addMcpServerAction: ActionDefinition = {
       }
     }
 
-    if (!command) {
+    if (!command && !url) {
       return {
         success: false,
         action: 'add_mcp_server',
-        message: 'Missing required parameter "command" for MCP server.',
-        error: 'Missing command',
+        message: 'Missing required parameter "command" or "url" for MCP server.',
+        error: 'Missing command or url',
       }
     }
 
     ctx.notify(`⏳ Connecting MCP server: "${name}"...`)
     const manager = McpManager.getInstance()
 
-    // 1. Update config file persistence (workbench-mcp.json)
-    const currentConfig = manager.readConfig()
-    if (!currentConfig.mcpServers) currentConfig.mcpServers = {}
-    currentConfig.mcpServers[name] = {
+    const res = await manager.upsertServer(name, {
+      displayName,
       command,
       args,
+      url: url || undefined,
       env,
       disabled: false,
-      description,
-    }
-    manager.saveConfig(currentConfig)
-
-    // 2. Connect live in memory without app restart
-    const connected = await manager.connectServer(name, {
-      command,
-      args,
-      env,
-      disabled: false,
+      defaultSelected,
       description,
     })
 
-    if (!connected) {
-      const statuses = manager.getStatus()
-      const serverStatus = statuses.find((s) => s.name === name)
-      const errorDetail = serverStatus?.error || 'Failed to establish stdio connection'
+    if (!res.success) {
+      const errorDetail = res.error || 'Failed to establish stdio connection'
       ctx.notify(`❌ MCP connection failed for "${name}": ${errorDetail}`)
       return {
         success: false,
@@ -106,14 +116,9 @@ export const addMcpServerAction: ActionDefinition = {
       }
     }
 
-    // 3. Retrieve registered tools
-    const statuses = manager.getStatus()
-    const serverInfo = statuses.find((s) => s.name === name)
-    const toolList = serverInfo?.tools || []
-
+    const toolList = res.serverInfo?.tools || []
     ctx.notify(`⚡ Connected MCP: "${name}" (${toolList.length} tools loaded)`)
 
-    // 4. Automatically re-prime the active AI chat so the model immediately knows the new tools!
     try {
       await ActionDispatcher.getInstance().reprimeActiveChat()
     } catch (primeErr) {

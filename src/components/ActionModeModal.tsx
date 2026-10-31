@@ -32,6 +32,7 @@ interface ActionModeModalProps {
   activeDirectory: string
   onNotify: (msg: string) => void
   onOpenPrimeChatModal?: () => void
+  onOpenMcpModal?: () => void
 }
 
 const QUICK_RULES = [
@@ -51,6 +52,7 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
   activeDirectory,
   onNotify,
   onOpenPrimeChatModal,
+  onOpenMcpModal,
 }) => {
   const [instructions, setInstructions] = useState(customInstructions)
   const [fullPrompt, setFullPrompt] = useState<string>('')
@@ -1055,6 +1057,31 @@ export const ActionModeModal: React.FC<ActionModeModalProps> = ({
                   <RefreshCw size={10} className={isReloadingMcp ? 'animate-spin' : ''} />
                   <span>{isReloadingMcp ? 'Reloading...' : 'Reload'}</span>
                 </button>
+                {onOpenMcpModal && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onClose()
+                      onOpenMcpModal()
+                    }}
+                    style={{
+                      background: 'rgba(168, 85, 247, 0.18)',
+                      border: '1px solid rgba(168, 85, 247, 0.45)',
+                      color: '#e9d5ff',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer',
+                    }}
+                    title="Open MCP Server Manager & Online Discovery"
+                  >
+                    <span>🌐 Manage / Discover</span>
+                  </button>
+                )}
                 {showMcpSection ? <ChevronDown size={13} style={{ color: '#94a3b8' }} /> : <ChevronRight size={13} style={{ color: '#94a3b8' }} />}
               </div>
             </div>

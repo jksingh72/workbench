@@ -79,6 +79,12 @@ export interface ElectronAPI {
   onNoteSourceChanged: (callback: (data: { activeSourceId: string; activeSource: NoteSource }) => void) => () => void
   onOpenNoteSourceModal: (callback: () => void) => () => void
 
+  // Top Application Menu Bar Listeners
+  onOpenMcpModal?: (callback: (data?: { tab?: 'installed' | 'discover' | 'custom'; initialTab?: 'installed' | 'discover' | 'custom' }) => void) => () => void
+  onOpenActionModeModal?: (callback: () => void) => () => void
+  onOpenPrimeChatModal?: (callback: () => void) => () => void
+  onMenuLayoutCommand?: (callback: (data: { type?: string; command?: string; pane?: 'book' | 'ai' | 'note'; ratio?: number }) => void) => () => void
+
   // Local File Explorer API
   selectFolder: (defaultPath?: string) => Promise<string | null>
   readDirectory: (dirPath: string) => Promise<{ success: boolean; items?: FileItem[]; currentPath?: string; error?: string }>
@@ -159,23 +165,62 @@ export interface ElectronAPI {
   onNavigateToFolder?: (callback: (data: { target: 'book' | 'note'; path: string }) => void) => () => void
 
   // MCP (Model Context Protocol) APIs
-  mcpGetConfig?: () => Promise<{ path: string; config: { mcpServers: Record<string, any> } }>
+  mcpGetConfig?: () => Promise<{ path: string; config: { mcpServers: Record<string, McpServerConfig>; catalog?: McpOnlineServerResult[] } }>
   mcpSaveConfig?: (config: any) => Promise<{ success: boolean; status: McpServerInfo[] }>
   mcpGetStatus?: () => Promise<McpServerInfo[]>
   mcpReload?: () => Promise<{ success: boolean; status: McpServerInfo[] }>
   mcpOpenConfig?: () => Promise<{ success: boolean; path?: string; error?: string }>
   mcpRemoveServer?: (serverName: string) => Promise<{ success: boolean; status: McpServerInfo[] }>
-  mcpConfigureServer?: (serverName: string, updates: any) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
+  mcpConfigureServer?: (serverName: string, updates: Partial<McpServerConfig>) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
+  mcpUpsertServer?: (serverName: string, config: McpServerConfig) => Promise<{ success: boolean; error?: string; serverInfo?: McpServerInfo; status: McpServerInfo[] }>
+  mcpSearchOnline?: (query: string) => Promise<{ success: boolean; results: McpOnlineServerResult[]; error?: string }>
   openErrorLog?: () => Promise<boolean>
   getLogPath?: () => Promise<string>
 }
 
+export interface McpServerConfig {
+  displayName?: string
+  command?: string
+  args?: string[]
+  url?: string
+  headers?: Record<string, string>
+  env?: Record<string, string>
+  disabled?: boolean
+  defaultSelected?: boolean
+  description?: string
+  browser?: string
+}
+
+export interface McpOnlineServerResult {
+  id: string
+  displayName: string
+  description: string
+  transport: 'npx' | 'uvx' | 'remote' | 'custom'
+  command?: string
+  args?: string[]
+  url?: string
+  headers?: Record<string, string>
+  env?: Record<string, string>
+  requiredEnvKeys?: string[]
+  publisher?: string
+  homepage?: string
+  version?: string
+  source?: 'catalog' | 'mcp-registry' | 'npm'
+  defaultSelected?: boolean
+}
+
 export interface McpServerInfo {
   name: string
+  displayName?: string
+  description?: string
   command: string
   args: string[]
+  url?: string
+  headers?: Record<string, string>
+  env?: Record<string, string>
   connected: boolean
   disabled?: boolean
+  defaultSelected?: boolean
   browser?: string
   error?: string
   toolCount: number
