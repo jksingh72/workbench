@@ -110,6 +110,17 @@
       "disabled": false,
       "defaultSelected": true,
       "description": "Official O'Reilly Search MCP Server: Search O'Reilly books, chapters, and expert technical content."
+    },
+    "excalidraw": {
+      "displayName": "📦 MCP: excalidraw",
+      "description": "Model Context Protocol server for Excalidraw diagrams.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@cmd8/excalidraw-mcp"
+      ],
+      "disabled": false,
+      "defaultSelected": false
     }
   },
   "catalog": [
@@ -120,7 +131,11 @@
       "transport": "remote",
       "url": "https://api.oreilly.com/api/search/v1/mcp",
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://api.oreilly.com/api/search/v1/mcp"],
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.oreilly.com/api/search/v1/mcp"
+      ],
       "publisher": "O'Reilly Media",
       "homepage": "https://www.oreilly.com",
       "defaultSelected": true
@@ -131,7 +146,9 @@
       "description": "Official MCP web fetch server to retrieve and convert web pages into markdown for LLMs.",
       "transport": "uvx",
       "command": "uvx",
-      "args": ["mcp-server-fetch"],
+      "args": [
+        "mcp-server-fetch"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": true
@@ -142,7 +159,10 @@
       "description": "Official Microsoft Playwright MCP server for browser automation, DOM snapshots, and web interaction.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"],
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ],
       "publisher": "Microsoft",
       "homepage": "https://github.com/microsoft/playwright-mcp",
       "defaultSelected": false
@@ -153,7 +173,10 @@
       "description": "Persistent memory system using a local knowledge graph so AI chats remember entities and relationships across sessions.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -164,7 +187,10 @@
       "description": "Dynamic and reflective problem-solving tool through structured sequential thought chains.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -175,7 +201,13 @@
       "description": "Query, inspect schemas, and manage local SQLite database files.",
       "transport": "uvx",
       "command": "uvx",
-      "args": ["--with", "mcp<2", "mcp-server-sqlite", "--db-path", "./workspace.db"],
+      "args": [
+        "--with",
+        "mcp<2",
+        "mcp-server-sqlite",
+        "--db-path",
+        "./workspace.db"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -186,7 +218,11 @@
       "description": "Read-only database inspection and schema querying for PostgreSQL databases.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://localhost/mydb"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -197,11 +233,16 @@
       "description": "Repository management, file operations, issue & PR creation, and code search via GitHub API.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
       },
-      "requiredEnvKeys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+      "requiredEnvKeys": [
+        "GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -212,11 +253,16 @@
       "description": "Web and local search using Brave's Search API.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
       "env": {
         "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
       },
-      "requiredEnvKeys": ["BRAVE_API_KEY"],
+      "requiredEnvKeys": [
+        "BRAVE_API_KEY"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -227,7 +273,9 @@
       "description": "Tools to read, search, diff, commit, and inspect local Git repositories.",
       "transport": "uvx",
       "command": "uvx",
-      "args": ["mcp-server-git"],
+      "args": [
+        "mcp-server-git"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -238,7 +286,9 @@
       "description": "Time and timezone conversion capabilities using IANA timezone names.",
       "transport": "uvx",
       "command": "uvx",
-      "args": ["mcp-server-time"],
+      "args": [
+        "mcp-server-time"
+      ],
       "publisher": "Model Context Protocol",
       "homepage": "https://github.com/modelcontextprotocol/servers",
       "defaultSelected": false
@@ -249,7 +299,10 @@
       "description": "Up-to-date, version-specific official documentation and code examples for thousands of libraries.",
       "transport": "npx",
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
       "publisher": "Upstash",
       "homepage": "https://github.com/upstash/context7",
       "defaultSelected": false

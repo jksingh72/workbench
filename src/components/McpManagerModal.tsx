@@ -29,6 +29,162 @@ export interface McpManagerModalProps {
   onOpenPrimeChatModal?: () => void
 }
 
+const FALLBACK_CATALOG: McpOnlineServerResult[] = [
+  {
+    id: 'oreilly',
+    displayName: "📚 MCP: O'Reilly Books",
+    description: "Official O'Reilly Search MCP Server: Search O'Reilly books, chapters, and expert technical content.",
+    transport: 'remote',
+    url: 'https://api.oreilly.com/api/search/v1/mcp',
+    command: 'npx',
+    args: ['-y', 'mcp-remote', 'https://api.oreilly.com/api/search/v1/mcp'],
+    publisher: "O'Reilly Media",
+    homepage: 'https://www.oreilly.com',
+    source: 'catalog',
+    defaultSelected: true,
+  },
+  {
+    id: 'fetch',
+    displayName: '🌐 MCP: Web Fetch',
+    description: 'Official MCP web fetch server to retrieve and convert web pages into markdown for LLMs.',
+    transport: 'uvx',
+    command: 'uvx',
+    args: ['mcp-server-fetch'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: true,
+  },
+  {
+    id: 'playwright',
+    displayName: '🎭 MCP: Playwright Browser',
+    description: 'Official Microsoft Playwright MCP server for browser automation, DOM snapshots, and web interaction.',
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@playwright/mcp@latest'],
+    publisher: 'Microsoft',
+    homepage: 'https://github.com/microsoft/playwright-mcp',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'memory',
+    displayName: '🧠 MCP: Knowledge Graph Memory',
+    description: 'Persistent memory system using a local knowledge graph so AI chats remember entities and relationships across sessions.',
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-memory'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'sequential-thinking',
+    displayName: '🧩 MCP: Sequential Thinking',
+    description: 'Dynamic and reflective problem-solving tool through structured sequential thought chains.',
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'sqlite',
+    displayName: '🗄️ MCP: SQLite Database',
+    description: 'Query, inspect schemas, and manage local SQLite database files.',
+    transport: 'uvx',
+    command: 'uvx',
+    args: ['--with', 'mcp<2', 'mcp-server-sqlite', '--db-path', './workspace.db'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'postgres',
+    displayName: '🐘 MCP: PostgreSQL Database',
+    description: 'Read-only database inspection and schema querying for PostgreSQL databases.',
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://localhost/mydb'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'github',
+    displayName: '🐙 MCP: GitHub',
+    description: 'Repository management, file operations, issue & PR creation, and code search via GitHub API.',
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-github'],
+    env: {
+      GITHUB_PERSONAL_ACCESS_TOKEN: 'YOUR_GITHUB_TOKEN_HERE',
+    },
+    requiredEnvKeys: ['GITHUB_PERSONAL_ACCESS_TOKEN'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'brave_search',
+    displayName: '🦁 MCP: Brave Web Search',
+    description: "Web and local search using Brave's Search API.",
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-brave-search'],
+    env: {
+      BRAVE_API_KEY: 'YOUR_BRAVE_API_KEY_HERE',
+    },
+    requiredEnvKeys: ['BRAVE_API_KEY'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'git',
+    displayName: '🌿 MCP: Git Repository Tools',
+    description: 'Tools to read, search, diff, commit, and inspect local Git repositories.',
+    transport: 'uvx',
+    command: 'uvx',
+    args: ['mcp-server-git'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'time',
+    displayName: '🕒 MCP: Time & Timezone',
+    description: 'Time and timezone conversion capabilities using IANA timezone names.',
+    transport: 'uvx',
+    command: 'uvx',
+    args: ['mcp-server-time'],
+    publisher: 'Model Context Protocol',
+    homepage: 'https://github.com/modelcontextprotocol/servers',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+  {
+    id: 'context7',
+    displayName: '📖 MCP: Context7 Live Code Docs',
+    description: 'Up-to-date, version-specific official documentation and code examples for thousands of libraries.',
+    transport: 'npx',
+    command: 'npx',
+    args: ['-y', '@upstash/context7-mcp@latest'],
+    publisher: 'Upstash',
+    homepage: 'https://github.com/upstash/context7',
+    source: 'catalog',
+    defaultSelected: false,
+  },
+]
+
 export const McpManagerModal: React.FC<McpManagerModalProps> = ({
   isOpen,
   initialTab = 'installed',
@@ -44,8 +200,9 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
 
   // Online Discovery state
   const [searchQuery, setSearchQuery] = useState<string>('')
-  const [onlineResults, setOnlineResults] = useState<McpOnlineServerResult[]>([])
+  const [onlineResults, setOnlineResults] = useState<McpOnlineServerResult[]>(FALLBACK_CATALOG)
   const [isSearchingOnline, setIsSearchingOnline] = useState<boolean>(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [installingId, setInstallingId] = useState<string | null>(null)
 
   // Add / Edit Form state
@@ -73,6 +230,38 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
     }
   }, [isOpen, initialTab])
 
+  const mergeStatusWithConfig = useCallback(
+    (statusList: McpServerInfo[], mcpServersMap?: Record<string, McpServerConfig>): McpServerInfo[] => {
+      const merged = [...statusList]
+      const seen = new Set(merged.map((s) => s.name.toLowerCase()))
+      if (mcpServersMap && typeof mcpServersMap === 'object') {
+        for (const [name, cfg] of Object.entries(mcpServersMap)) {
+          if (!seen.has(name.toLowerCase())) {
+            merged.push({
+              name,
+              displayName: cfg.displayName || `🔌 MCP: ${name}`,
+              description: cfg.description,
+              command: cfg.command || (cfg.url ? 'npx' : ''),
+              args: cfg.args || (cfg.url ? ['-y', 'mcp-remote', cfg.url] : []),
+              url: cfg.url,
+              headers: cfg.headers,
+              env: cfg.env,
+              disabled: Boolean(cfg.disabled),
+              defaultSelected: Boolean(cfg.defaultSelected),
+              connected: false,
+              toolCount: 0,
+              tools: [],
+              error: 'Click "Reload All" to connect newly added server',
+            })
+            seen.add(name.toLowerCase())
+          }
+        }
+      }
+      return merged
+    },
+    []
+  )
+
   const loadServersAndConfig = useCallback(async () => {
     setIsLoadingStatus(true)
     try {
@@ -80,39 +269,267 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
         window.electron?.mcpGetStatus?.(),
         window.electron?.mcpGetConfig?.(),
       ])
-      if (Array.isArray(statusRes)) {
-        setServers(statusRes)
-      }
       if (cfgRes?.path) {
         setConfigPath(cfgRes.path)
       }
+      const baseStatus = Array.isArray(statusRes) ? statusRes : []
+      const merged = mergeStatusWithConfig(baseStatus, cfgRes?.config?.mcpServers)
+      setServers(merged)
     } catch (err) {
       console.error('Failed to load MCP status:', err)
     } finally {
       setIsLoadingStatus(false)
     }
+  }, [mergeStatusWithConfig])
+
+  // Direct renderer-side search fallback (queries workbench-mcp.json catalog + Official MCP Registry + NPM Registry)
+  const searchOnlineDirect = useCallback(async (query: string): Promise<McpOnlineServerResult[]> => {
+    const q = (query || '').trim().toLowerCase()
+    let catalogItems: McpOnlineServerResult[] = FALLBACK_CATALOG
+
+    try {
+      const cfgRes = await window.electron?.mcpGetConfig?.()
+      if (Array.isArray(cfgRes?.config?.catalog) && cfgRes.config.catalog.length > 0) {
+        catalogItems = cfgRes.config.catalog.map((item) => ({
+          ...item,
+          source: item.source || 'catalog',
+        }))
+      }
+    } catch {
+      // Use FALLBACK_CATALOG
+    }
+
+    if (!q) {
+      return catalogItems
+    }
+
+    // Topic alias expansion for quick-search chips
+    const topicAliases: Record<string, string[]> = {
+      database: ['database', 'sqlite', 'postgres', 'postgresql', 'sql', 'mysql', 'db', 'supabase', 'redis'],
+      browser: ['browser', 'playwright', 'puppeteer', 'fetch', 'web', 'scrape'],
+      docs: ['docs', 'context7', 'oreilly', 'documentation', 'fetch', 'markdown'],
+      oreilly: ['oreilly', "o'reilly", 'books', 'learning'],
+      memory: ['memory', 'knowledge', 'graph', 'thinking'],
+    }
+    const matchTerms = topicAliases[q] || [q]
+
+    const matchedCatalog = catalogItems.filter((item) => {
+      const haystack = `${item.id} ${item.displayName} ${item.description} ${item.publisher || ''}`.toLowerCase()
+      return matchTerms.some((term) => haystack.includes(term))
+    })
+
+    const results: McpOnlineServerResult[] = [...matchedCatalog]
+    const seenIds = new Set<string>(results.map((r) => r.id.toLowerCase()))
+
+    // Query Official Model Context Protocol Registry + NPM Registry in parallel
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6500)
+
+    try {
+      const [registryResp, npmResp] = await Promise.allSettled([
+        fetch(`https://registry.modelcontextprotocol.io/v0.1/servers?search=${encodeURIComponent(q)}&limit=24`, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        }).then((r) => (r.ok ? r.json() : null)),
+        fetch(
+          `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(`mcp server ${q}`)}&size=24`,
+          {
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          }
+        ).then((r) => (r.ok ? r.json() : null)),
+      ])
+
+      // 1. Parse Official MCP Registry results
+      if (registryResp.status === 'fulfilled' && registryResp.value) {
+        const list = Array.isArray(registryResp.value.servers)
+          ? registryResp.value.servers
+          : Array.isArray(registryResp.value)
+          ? registryResp.value
+          : []
+
+        for (const rawEntry of list) {
+          const entry = rawEntry?.server || rawEntry
+          const rawName: string = entry?.name || entry?.id || ''
+          if (!rawName) continue
+
+          const shortId = (rawName.split('/').pop() || rawName)
+            .replace(/^mcp-server-/, '')
+            .replace(/^server-/, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9-_]/g, '-')
+
+          if (!shortId || seenIds.has(shortId)) continue
+
+          const remotes = Array.isArray(entry?.remotes) ? entry.remotes : []
+          const packages = Array.isArray(entry?.packages) ? entry.packages : []
+          const firstRemote = remotes.find((r: any) => r?.url)
+          const npmPkg = packages.find(
+            (p: any) => p?.registryType === 'npm' || p?.registry_name === 'npm' || p?.identifier
+          )
+
+          if (firstRemote?.url) {
+            seenIds.add(shortId)
+            results.push({
+              id: shortId,
+              displayName: `🌐 MCP: ${entry.title || shortId}`,
+              description: entry.description || `Remote MCP server (${rawName})`,
+              transport: 'remote',
+              url: firstRemote.url,
+              command: 'npx',
+              args: ['-y', 'mcp-remote', firstRemote.url],
+              publisher: rawName.split('/')[0] || 'MCP Registry',
+              homepage: entry?.repository?.url || entry?.websiteUrl,
+              source: 'mcp-registry',
+              defaultSelected: false,
+            })
+          } else if (npmPkg?.identifier || npmPkg?.name) {
+            const pkgId = npmPkg.identifier || npmPkg.name
+            seenIds.add(shortId)
+            results.push({
+              id: shortId,
+              displayName: `🔌 MCP: ${entry.title || shortId}`,
+              description: entry.description || `MCP Server (${pkgId})`,
+              transport: 'npx',
+              command: 'npx',
+              args: ['-y', pkgId],
+              publisher: rawName.split('/')[0] || 'MCP Registry',
+              homepage: entry?.repository?.url || entry?.websiteUrl,
+              source: 'mcp-registry',
+              defaultSelected: false,
+            })
+          }
+        }
+      }
+
+      // 2. Parse NPM Registry results
+      if (npmResp.status === 'fulfilled' && Array.isArray(npmResp.value?.objects)) {
+        for (const obj of npmResp.value.objects) {
+          const pkg = obj?.package
+          const pkgName: string = pkg?.name || ''
+          if (!pkgName) continue
+          const lowerPkg = pkgName.toLowerCase()
+          if (!lowerPkg.includes('mcp')) continue
+
+          const shortId = (pkgName.split('/').pop() || pkgName)
+            .replace(/^mcp-server-/, '')
+            .replace(/^server-/, '')
+            .replace(/-mcp-server$/, '')
+            .replace(/-mcp$/, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9-_]/g, '-')
+
+          if (!shortId || seenIds.has(shortId)) continue
+          seenIds.add(shortId)
+
+          results.push({
+            id: shortId,
+            displayName: `📦 MCP: ${shortId}`,
+            description: pkg.description || `NPM MCP server package ${pkgName}`,
+            transport: 'npx',
+            command: 'npx',
+            args: ['-y', pkgName],
+            publisher: pkg?.publisher?.username || 'npm',
+            homepage: pkg?.links?.homepage || pkg?.links?.repository || pkg?.links?.npm,
+            source: 'npm',
+            defaultSelected: false,
+          })
+        }
+      }
+    } catch (err: any) {
+      console.warn('Direct online search warning:', err)
+    } finally {
+      clearTimeout(timeoutId)
+    }
+
+    return results
   }, [])
 
-  const runOnlineSearch = useCallback(async (q: string) => {
-    if (!window.electron?.mcpSearchOnline) return
-    setIsSearchingOnline(true)
-    try {
-      const res = await window.electron.mcpSearchOnline(q)
-      if (res?. results) {
-        setOnlineResults(res.results)
+  const runOnlineSearch = useCallback(
+    async (q: string) => {
+      setIsSearchingOnline(true)
+      setSearchError(null)
+      try {
+        // 1. Try Electron Main IPC handler first if available
+        if (window.electron?.mcpSearchOnline) {
+          try {
+            const ipcRes = await window.electron.mcpSearchOnline(q)
+            if (Array.isArray(ipcRes?.results) && ipcRes.results.length > 0) {
+              setOnlineResults(ipcRes.results)
+              return
+            }
+          } catch {
+            // Fall through to direct search when main process hasn't restarted yet
+          }
+        }
+
+        // 2. Direct fallback search (Catalog + Official MCP Registry + NPM Registry)
+        const directResults = await searchOnlineDirect(q)
+        setOnlineResults(directResults)
+      } catch (err: any) {
+        console.error('Online MCP search error:', err)
+        setSearchError(err?.message || 'Failed to search online registries')
+      } finally {
+        setIsSearchingOnline(false)
       }
-    } catch (err) {
-      console.error('Online MCP search error:', err)
-    } finally {
-      setIsSearchingOnline(false)
-    }
-  }, [])
+    },
+    [searchOnlineDirect]
+  )
+
+  // Upsert helper with automatic fallback to mcpGetConfig + mcpSaveConfig
+  const upsertServerWithFallback = useCallback(
+    async (serverName: string, cfg: McpServerConfig) => {
+      // 1. Try newly added IPC handler if registered in main process
+      if (window.electron?.mcpUpsertServer) {
+        try {
+          const res = await window.electron.mcpUpsertServer(serverName, cfg)
+          if (res && typeof res === 'object') {
+            return res
+          }
+        } catch {
+          // Main process predates workbench:mcp-upsert-server; fall back to mcpSaveConfig
+        }
+      }
+
+      // 2. Fallback: read workbench-mcp.json via mcpGetConfig, insert server, and call mcpSaveConfig
+      const cfgRes = await window.electron?.mcpGetConfig?.()
+      const currentFileConfig = cfgRes?.config || { mcpServers: {} }
+      if (!currentFileConfig.mcpServers || typeof currentFileConfig.mcpServers !== 'object') {
+        currentFileConfig.mcpServers = {}
+      }
+
+      const normalized: McpServerConfig = {
+        ...cfg,
+        command: cfg.command || (cfg.url ? 'npx' : 'npx'),
+        args:
+          Array.isArray(cfg.args) && cfg.args.length > 0
+            ? cfg.args
+            : cfg.url
+            ? ['-y', 'mcp-remote', cfg.url]
+            : [],
+      }
+
+      currentFileConfig.mcpServers[serverName] = normalized
+      const saveRes = await window.electron?.mcpSaveConfig?.(currentFileConfig)
+      const statusList = Array.isArray(saveRes?.status) ? saveRes.status : []
+      const mergedStatus = mergeStatusWithConfig(statusList, currentFileConfig.mcpServers)
+      const serverInfo = mergedStatus.find((s) => s.name === serverName)
+
+      return {
+        success: Boolean(saveRes?.success && (serverInfo?.connected || normalized.disabled)),
+        error: (saveRes as any)?.error || serverInfo?.error,
+        status: mergedStatus,
+        serverInfo,
+      }
+    },
+    [mergeStatusWithConfig]
+  )
 
   useEffect(() => {
     if (!isOpen) return
     loadServersAndConfig()
-    runOnlineSearch('')
-  }, [isOpen, loadServersAndConfig, runOnlineSearch])
+    runOnlineSearch(searchQuery)
+  }, [isOpen, loadServersAndConfig]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close on Escape
   useEffect(() => {
@@ -181,7 +598,10 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
     try {
       const nextDisabled = !srv.disabled
       const res = await window.electron?.mcpConfigureServer?.(srv.name, { disabled: nextDisabled })
-      if (res?.status) setServers(res.status)
+      if (res?.status) {
+        const cfgRes = await window.electron?.mcpGetConfig?.()
+        setServers(mergeStatusWithConfig(res.status, cfgRes?.config?.mcpServers))
+      }
       if (res?.success) {
         onNotify(nextDisabled ? `⏸️ Disabled MCP server "${srv.name}"` : `🟢 Enabled & connected "${srv.name}"!`)
       } else {
@@ -199,7 +619,8 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
     try {
       const res = await window.electron?.mcpConfigureServer?.(srv.name, { defaultSelected: nextDefault })
       if (res?.status) {
-        setServers(res.status)
+        const cfgRes = await window.electron?.mcpGetConfig?.()
+        setServers(mergeStatusWithConfig(res.status, cfgRes?.config?.mcpServers))
       } else {
         setServers((prev) => prev.map((s) => (s.name === srv.name ? { ...s, defaultSelected: nextDefault } : s)))
       }
@@ -218,7 +639,10 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
     setActionLoadingServer(serverName)
     try {
       const res = await window.electron?.mcpRemoveServer?.(serverName)
-      if (res?.status) setServers(res.status)
+      if (res?.status) {
+        const cfgRes = await window.electron?.mcpGetConfig?.()
+        setServers(mergeStatusWithConfig(res.status, cfgRes?.config?.mcpServers))
+      }
       onNotify(`🗑️ Removed MCP server "${serverName}"`)
     } catch (err: any) {
       onNotify(`⚠️ Failed to remove "${serverName}": ${err?.message || ''}`)
@@ -230,11 +654,15 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
   const handleReloadAll = async () => {
     setIsLoadingStatus(true)
     try {
-      const res = await window.electron?.mcpReload?.()
+      const [res, cfgRes] = await Promise.all([
+        window.electron?.mcpReload?.(),
+        window.electron?.mcpGetConfig?.(),
+      ])
       if (res?.status) {
-        setServers(res.status)
-        const activeCount = res.status.filter((s) => s.connected).length
-        const toolCount = res.status.reduce((sum, s) => sum + (s.toolCount || 0), 0)
+        const merged = mergeStatusWithConfig(res.status, cfgRes?.config?.mcpServers)
+        setServers(merged)
+        const activeCount = merged.filter((s) => s.connected).length
+        const toolCount = merged.reduce((sum, s) => sum + (s.toolCount || 0), 0)
         onNotify(`🔄 Reloaded MCP servers: ${activeCount} connected (${toolCount} tools)`)
       }
     } catch (err: any) {
@@ -281,7 +709,7 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
         disabled: false,
         defaultSelected: item.defaultSelected ?? true,
       }
-      const res = await window.electron?.mcpUpsertServer?.(item.id, cfg)
+      const res = await upsertServerWithFallback(item.id, cfg)
       if (res?.status) {
         setServers(res.status)
       }
@@ -452,7 +880,7 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
 
     setIsSavingServer(true)
     try {
-      const res = await window.electron?.mcpUpsertServer?.(cleanKey, cfg)
+      const res = await upsertServerWithFallback(cleanKey, cfg)
       if (res?.status) {
         setServers(res.status)
       }
@@ -1090,146 +1518,216 @@ export const McpManagerModal: React.FC<McpManagerModalProps> = ({
                 ))}
               </div>
 
-              {/* Results Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-                {onlineResults.map((item) => {
-                  const isInstalled = installedIds.has(item.id.toLowerCase())
-                  const isBusy = installingId === item.id
-                  return (
-                    <div
-                      key={`${item.source || 'cat'}-${item.id}`}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.025)',
-                        border: `1px solid ${
-                          isInstalled ? 'rgba(52, 211, 153, 0.3)' : 'rgba(255, 255, 255, 0.08)'
-                        }`,
-                        borderRadius: '9px',
-                        padding: '12px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        gap: '10px',
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
-                            {item.displayName}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '9.5px',
-                              padding: '1px 6px',
-                              borderRadius: '8px',
-                              background:
-                                item.transport === 'remote'
-                                  ? 'rgba(56, 189, 248, 0.15)'
-                                  : item.transport === 'uvx'
-                                  ? 'rgba(245, 158, 11, 0.15)'
-                                  : 'rgba(168, 85, 247, 0.15)',
-                              color:
-                                item.transport === 'remote'
-                                  ? '#38bdf8'
-                                  : item.transport === 'uvx'
-                                  ? '#fbbf24'
-                                  : '#c084fc',
-                              fontWeight: 600,
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {item.transport}
-                          </span>
-                        </div>
+              {/* Search Status & Result Count Banner */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 10px',
+                  borderRadius: '7px',
+                  background: 'rgba(56, 189, 248, 0.06)',
+                  border: '1px solid rgba(56, 189, 248, 0.16)',
+                  fontSize: '11.5px',
+                  color: '#94a3b8',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                  {isSearchingOnline ? (
+                    <>
+                      <RefreshCw size={12} className="animate-spin" color="#38bdf8" />
+                      <span style={{ color: '#7dd3fc' }}>
+                        Searching Official MCP Registry, NPM & Starter Catalog for "{searchQuery || 'featured'}"...
+                      </span>
+                    </>
+                  ) : (
+                    <span>
+                      Showing <strong style={{ color: '#f8fafc' }}>{onlineResults.length}</strong> MCP server(s){' '}
+                      {searchQuery.trim()
+                        ? `matching "${searchQuery.trim()}" across Catalog, Official MCP Registry & NPM`
+                        : 'from Starter Catalog (workbench-mcp.json)'}
+                    </span>
+                  )}
+                </span>
+                {searchError && <span style={{ color: '#f87171', fontSize: '11px' }}>⚠️ {searchError}</span>}
+              </div>
 
-                        <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.35 }}>
-                          {item.description}
-                        </p>
-
-                        {item.requiredEnvKeys && item.requiredEnvKeys.length > 0 && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
-                            <KeyRound size={11} color="#f59e0b" />
-                            <span style={{ fontSize: '10px', color: '#fbbf24' }}>
-                              Requires: {item.requiredEnvKeys.join(', ')}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
+              {/* Results Grid or Empty State */}
+              {onlineResults.length === 0 && !isSearchingOnline ? (
+                <div
+                  style={{
+                    padding: '28px',
+                    textAlign: 'center',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    borderRadius: '9px',
+                    border: '1px dashed rgba(255, 255, 255, 0.12)',
+                    color: '#94a3b8',
+                  }}
+                >
+                  <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#e2e8f0' }}>
+                    No MCP servers found for "{searchQuery}".
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('')
+                      runOnlineSearch('')
+                    }}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      color: '#38bdf8',
+                      padding: '5px 12px',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ⭐ Show Featured Catalog
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                  {onlineResults.map((item) => {
+                    const isInstalled = installedIds.has(item.id.toLowerCase())
+                    const isBusy = installingId === item.id
+                    return (
                       <div
+                        key={`${item.source || 'cat'}-${item.id}`}
                         style={{
+                          background: 'rgba(255, 255, 255, 0.025)',
+                          border: `1px solid ${
+                            isInstalled ? 'rgba(52, 211, 153, 0.3)' : 'rgba(255, 255, 255, 0.08)'
+                          }`,
+                          borderRadius: '9px',
+                          padding: '12px',
                           display: 'flex',
-                          alignItems: 'center',
+                          flexDirection: 'column',
                           justifyContent: 'space-between',
-                          paddingTop: '8px',
-                          borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                          gap: '10px',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10.5px', color: '#64748b' }}>
-                          <span>{item.publisher || item.source || 'MCP'}</span>
-                          {item.homepage && (
-                            <button
-                              type="button"
-                              onClick={() => window.electron?.openExternal?.(item.homepage!)}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
+                              {item.displayName}
+                            </span>
+                            <span
                               style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#38bdf8',
-                                fontSize: '10.5px',
-                                padding: 0,
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
+                                fontSize: '9.5px',
+                                padding: '1px 6px',
+                                borderRadius: '8px',
+                                background:
+                                  item.transport === 'remote'
+                                    ? 'rgba(56, 189, 248, 0.15)'
+                                    : item.transport === 'uvx'
+                                    ? 'rgba(245, 158, 11, 0.15)'
+                                    : 'rgba(168, 85, 247, 0.15)',
+                                color:
+                                  item.transport === 'remote'
+                                    ? '#38bdf8'
+                                    : item.transport === 'uvx'
+                                    ? '#fbbf24'
+                                    : '#c084fc',
+                                fontWeight: 600,
+                                textTransform: 'uppercase',
                               }}
                             >
-                              <ExternalLink size={10} />
-                              <span>Docs</span>
-                            </button>
+                              {item.transport}
+                            </span>
+                          </div>
+
+                          <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.35 }}>
+                            {item.description}
+                          </p>
+
+                          {item.requiredEnvKeys && item.requiredEnvKeys.length > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                              <KeyRound size={11} color="#f59e0b" />
+                              <span style={{ fontSize: '10px', color: '#fbbf24' }}>
+                                Requires: {item.requiredEnvKeys.join(', ')}
+                              </span>
+                            </div>
                           )}
                         </div>
 
-                        {isInstalled ? (
-                          <span
-                            style={{
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              color: '#34d399',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                            }}
-                          >
-                            <CheckCircle2 size={13} />
-                            <span>Installed</span>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleInstallFromOnline(item)}
-                            disabled={isBusy}
-                            style={{
-                              background: 'rgba(56, 189, 248, 0.16)',
-                              border: '1px solid rgba(56, 189, 248, 0.4)',
-                              color: '#38bdf8',
-                              padding: '4px 10px',
-                              borderRadius: '6px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              cursor: isBusy ? 'wait' : 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                            }}
-                          >
-                            {isBusy ? <RefreshCw size={11} className="animate-spin" /> : <Plus size={12} />}
-                            <span>{isBusy ? 'Connecting...' : 'Add to Workbench'}</span>
-                          </button>
-                        )}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingTop: '8px',
+                            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10.5px', color: '#64748b' }}>
+                            <span>{item.publisher || item.source || 'MCP'}</span>
+                            {item.homepage && (
+                              <button
+                                type="button"
+                                onClick={() => window.electron?.openExternal?.(item.homepage!)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: '#38bdf8',
+                                  fontSize: '10.5px',
+                                  padding: 0,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                }}
+                              >
+                                <ExternalLink size={10} />
+                                <span>Docs</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {isInstalled ? (
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                color: '#34d399',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>Installed</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleInstallFromOnline(item)}
+                              disabled={isBusy}
+                              style={{
+                                background: 'rgba(56, 189, 248, 0.16)',
+                                border: '1px solid rgba(56, 189, 248, 0.4)',
+                                color: '#38bdf8',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: isBusy ? 'wait' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              {isBusy ? <RefreshCw size={11} className="animate-spin" /> : <Plus size={12} />}
+                              <span>{isBusy ? 'Connecting...' : 'Add to Workbench'}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
