@@ -142,6 +142,10 @@ Workbench includes a specialized suite of high-reliability document engineering 
 | `run_script` | Safe multi-language script execution engine. Supports Python, Shell, PowerShell, and JavaScript (with full CommonJS `require('fs')` and `require('path')` support). Enforces execution timeouts and returns exit codes. |
 | `read_pages` | Bounded document extraction. Normalizes Windows CRLF and Unix LF newlines, extracts exact page ranges without dumping entire documents, and prevents context exhaustion. |
 | `fetch_official_docs` | Zero-install ecosystem & official documentation intelligence. Directly inspects PyPI metadata to resolve canonical documentation sites (`python.langchain.com`, `docs.pydantic.dev`), automatically maps satellite/core foundation packages (`requires_dist`), derives verified import identifiers, and extracts clean, boilerplate-free Markdown documentation without downloading or installing any packages locally. |
+| `read_book_page` | Extracts visible viewport text, full chapter/document text (including local PDFs via `pdf-parse`), headings, form inputs, and interactive links from the active BookView pane. |
+| `list_book_links` | Indexes clickable links, buttons, and Table of Contents items in BookView and optionally renders visual `#id` overlay badges on the BookView page. |
+| `click_book_link` | Clicks any link, button, or TOC entry inside BookView by `#id` badge or fuzzy text match, waits for navigation/DOM settlement, and returns the updated page title and URL. |
+| `navigate_book` | Scrolls (`scroll-down`, `scroll-up`, `scroll-top`, `scroll-bottom`) or navigates (`next`, `prev`, `back`, `forward`, `reload`, `url`, `show-badges`, `clear-badges`) the active BookView pane. |
 
 ### System Safeguards & Output Caps
 - **Default Action Caps**: `read_file` and tool outputs default to a safe 2,500 lines / 100,000 characters to prevent crashing LLM context windows.
@@ -202,6 +206,25 @@ Workbench provides seamless data flow between all three panes:
 - **Direct File Upload**: Attaches any file from Local Explorer directly into the active AI chat via simulated file drops.
 - **Native OS Drag-and-Drop**: Supports native dragging of files between Workbench and external desktop applications (File Explorer, VS Code, Slack).
 - **Windows Clipboard Bridge (`CF_HDROP`)**: Full support for copying and pasting files using standard Windows clipboard mechanisms.
+
+### 6.5 ChatView ↔ BookView Command Bridge, `@` Macros & Summarization Styles
+See [`docs/CHATVIEW_BOOKVIEW_BRIDGE_GUIDE.md`](file:///d:/Products/Workbench/docs/CHATVIEW_BOOKVIEW_BRIDGE_GUIDE.md) for the complete architecture and command guide.
+- **Instant HUD & Extraction Slash Commands (No Priming Required — supports `/`, `!`, or `wb:` prefix)**:
+  - `/page` (`!page`), `/chapter` (`!chapter`), `/inputs` (`!inputs`): Extracts live BookView viewport text, full chapter/PDF text, or form inputs into an interactive in-chat HUD card with 1-click action buttons.
+  - `/page <question>`, `/chapter <question>`, `/inputs <question>`: Automatically expands live BookView content into the prompt and submits it to the active AI chat.
+  - `/help` (`!help`, `/book help`): Opens the in-chat **Command & Summarization Style Reference Card**.
+- **Configurable Summarization Styles**:
+  - **Inline Shorthand Flags**: `/chapter summarize:brief` (`:tldr`), `/chapter summarize:deep` (`:detailed`), `/chapter summarize:steps` (`:algo`, `:trace`), `/chapter summarize:study` (`:notes`, `:cheatsheet`), `/chapter summarize:eli5` (`:intuition`), `/chapter summarize:table` (`:matrix`), `/chapter summarize:code` (`:impl`), plus optional extra focus text (e.g., `/chapter summarize:steps focus on index pointers`).
+  - **1-Click HUD Style Pills**: Clicking any style pill on the `/page` or `/chapter` HUD card immediately runs that summarization preset.
+  - **Custom User Templates**: Synchronizes with **⚙️ Customize Ask AI Templates** (`AskAITemplateModal`) and `prompts/` files so users can customize bare `/chapter summarize` or trigger custom templates via `/chapter #<template-id>`.
+- **Inline Context `@` Macros**:
+  - Use `@page`, `@chapter`, `@inputs`, `@links`, or `@selection` anywhere inside a sentence (e.g., `Compare @page with @selection` or `summarize:deep @chapter`) to inline live BookView context automatically.
+- **Interactive Link Clicking & Navigation from ChatView**:
+  - `/links [filter]`: Overlays numbered `#1`, `#2`, `#3...` badges on clickable links in BookView and opens an interactive link directory in ChatView.
+  - `/click #3` or `/click Next`: Clicks any link, button, or TOC item inside BookView directly from ChatView.
+  - `/next`, `/prev`, `/scroll-down`, `/scroll-up`, `/book top`, `/book bottom`, `/book back`, `/book forward`, `/book reload`, `/book url <url>`: Navigates BookView without leaving the chat keyboard.
+- **TrustedTypes CSP & Streaming Code-Block Resilience**:
+  - Uses `setSafeInnerHTML()` (`electron/utils/safeDom.ts`) to construct DOM nodes without `.innerHTML`, ensuring full compatibility with Google Gemini's `require-trusted-types-for 'script'` CSP policy as well as Claude, ChatGPT, and Grok.
 
 ---
 

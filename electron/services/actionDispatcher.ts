@@ -35,6 +35,7 @@ export class ActionDispatcher {
   private static instance: ActionDispatcher | null = null
   private mainWindow: BrowserWindow | null = null
   private aiHandler: any = null
+  private bookHandler: any = null
   private registry: ActionRegistry
   private actionModeEnabled: boolean = true
   private autoFeedbackLoopEnabled: boolean = true
@@ -44,6 +45,14 @@ export class ActionDispatcher {
 
   public setAIHandler(handler: any) {
     this.aiHandler = handler
+  }
+
+  public setBookHandler(handler: any) {
+    this.bookHandler = handler
+  }
+
+  public getBookHandler(): any {
+    return this.bookHandler
   }
 
   private activeDirectories: {
@@ -299,6 +308,14 @@ export class ActionDispatcher {
         }
         return { success: false, error: 'AI View handler is not connected' }
       },
+      bookBridge: this.bookHandler
+        ? {
+            extractVisiblePage: (opts) => this.bookHandler.extractVisiblePage(opts),
+            extractAndIndexLinks: (opts) => this.bookHandler.extractAndIndexLinks(opts),
+            clickLinkOrElement: (target) => this.bookHandler.clickLinkOrElement(target),
+            scrollOrNavigate: (params) => this.bookHandler.scrollOrNavigate(params),
+          }
+        : undefined,
     }
   }
 

@@ -1,4 +1,12 @@
 import { webFrame, ipcRenderer } from 'electron'
+import {
+  parseBookChatCommand,
+  ParsedBookChatCommand,
+  SUMMARY_STYLE_PRESETS,
+  EXPLAIN_STYLE_PRESETS,
+  resolveBookInstructionWithPresets,
+} from '../utils/bookCommandParser'
+import { setSafeInnerHTML } from '../utils/safeDom'
 
 /**
  * Isolated View Preload Script
@@ -218,8 +226,16 @@ const injectionCode = `
 })();
 `
 
+// Prevent duplicate initialization if both session.setPreloads and webPreferences.preload load viewPreload.cjs
+const __wbShouldInitPreload = !(window as any).__workbenchViewPreloadInitialized
+if (__wbShouldInitPreload) {
+  ;(window as any).__workbenchViewPreloadInitialized = true
+}
+
 try {
-  webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: injectionCode }])
+  if (__wbShouldInitPreload) {
+    webFrame.executeJavaScriptInIsolatedWorld(0, [{ code: injectionCode }])
+  }
 } catch (err) {
   console.error('[viewPreload] Failed to inject emulation script:', err)
 }
@@ -231,7 +247,8 @@ try {
 // and ensures the file is uploaded to the chatbot.
 // =========================================================================
 try {
-  window.addEventListener('dragover', (e: DragEvent) => {
+  if (__wbShouldInitPreload) {
+    window.addEventListener('dragover', (e: DragEvent) => {
     if (e.dataTransfer) {
       const types = Array.from(e.dataTransfer.types || [])
       if (types.includes('Files') || types.includes('application/x-workbench-file')) {
@@ -289,6 +306,7 @@ try {
       } catch (_) {}
     }
   }, true)
+  }
 } catch (_) {}
 
 // =========================================================================
@@ -298,6 +316,7 @@ try {
 // =========================================================================
 try {
   (function initWorkbenchActionObserver() {
+    if (!__wbShouldInitPreload) return
     if (typeof window === 'undefined' || typeof document === 'undefined') return
 
     let actionModeEnabled = true
@@ -409,6 +428,10 @@ try {
           data.payload?.folderName ||
           data.payload?.filePath ||
           data.payload?.targetDirectory ||
+          data.payload?.text ||
+          data.payload?.command ||
+          data.payload?.scope ||
+          (data.payload?.id !== undefined ? `#${data.payload.id}` : '') ||
           data.result?.createdPath ||
           ''
 
@@ -486,7 +509,9 @@ try {
         // Header
         const header = document.createElement('div')
         header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;'
-        header.innerHTML = `
+        setSafeInnerHTML(
+          header,
+          `
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:13px;">${isSuccess ? '✅' : '❌'}</span>
             <span style="font-weight:600;font-size:12px;color:${isSuccess ? '#34d399' : '#f87171'};">
@@ -498,6 +523,7 @@ try {
             ${isSuccess ? 'Success' : 'Failed'}
           </span>
         `
+        )
         card.appendChild(header)
 
         // Body (scrollable preview)
@@ -528,7 +554,7 @@ try {
         hintText.style.cssText = 'font-size:11px;color:#94a3b8;'
         if (data.canContinue === false) {
           hintText.style.color = '#fbbf24'
-          hintText.innerHTML = `⚠️ ${escapeHtml(data.stagnationReason || 'Action cycle detected. Check before continuing.')}`
+          hintText.textContent = `⚠️ ${data.stagnationReason || 'Action cycle detected. Check before continuing.'}`
         } else {
           hintText.textContent = isSuccess ? 'Output ready. Click to proceed.' : 'Error recorded. Click to submit error to AI.'
         }
@@ -553,7 +579,7 @@ try {
           user-select: none;
           white-space: nowrap;
         `
-        continueBtn.innerHTML = `<span>▶</span><span>Continue to Next Step</span>`
+        setSafeInnerHTML(continueBtn, `<span>▶</span><span>Continue to Next Step</span>`)
 
         continueBtn.addEventListener('mouseenter', () => {
           if (!continueBtn.disabled) {
@@ -573,7 +599,7 @@ try {
           continueBtn.disabled = true
           continueBtn.style.cursor = 'default'
           continueBtn.style.opacity = '0.75'
-          continueBtn.innerHTML = `<span>⏳</span><span>Submitting to AI...</span>`
+          setSafeInnerHTML(continueBtn, `<span>⏳</span><span>Submitting to AI...</span>`)
 
           ipcRenderer.send('workbench:submit-action-feedback', {
             actionId,
@@ -672,7 +698,7 @@ try {
           btn.style.border = '1px solid rgba(16, 185, 129, 0.4)'
           btn.style.boxShadow = 'none'
           btn.style.opacity = '1'
-          btn.innerHTML = `<span>✓</span><span>Next Step Submitted</span>`
+          setSafeInnerHTML(btn, `<span>✓</span><span>Next Step Submitted</span>`)
         }
       } catch (_) {}
     }
@@ -709,24 +735,34 @@ try {
     let lastCancelTimestamp = 0
 
     function getLatestAssistantContainer(): HTMLElement | null {
-      const selectors = [
-        '[data-message-author-role="assistant"]',
-        'div.font-claude-message',
-        '.font-claude-message',
-        '.standard-markdown',
-        'div[class*="font-claude"]',
-        'div[class*="message"][class*="assistant"]',
-        'div[data-is-streaming]',
-        '[data-is-streaming]',
-        'model-response',
-        '.model-response-text',
-        'div[data-testid*="assistant-message"]',
-        'div[data-testid="chat-message-assistant"]',
-        'article[data-testid*="conversation-turn"]:has([data-message-author-role="assistant"])',
-        'div[class*="chat-message"][class*="assistant"]',
-        'div[class*="response-message"]',
-        'div[class*="ChatMessage"][data-role="assistant"]'
-      ]
+      const host = (window.location?.hostname || '').toLowerCase()
+      const selectors = host.includes('gemini')
+        ? [
+            'model-response',
+            '.model-response-text',
+            'message-content',
+            '[data-message-author-role="assistant"]',
+            'div[data-is-streaming]',
+            '[data-is-streaming]',
+          ]
+        : [
+            '[data-message-author-role="assistant"]',
+            'div.font-claude-message',
+            '.font-claude-message',
+            '.standard-markdown',
+            'div[class*="font-claude"]',
+            'div[class*="message"][class*="assistant"]',
+            'div[data-is-streaming]',
+            '[data-is-streaming]',
+            'model-response',
+            '.model-response-text',
+            'div[data-testid*="assistant-message"]',
+            'div[data-testid="chat-message-assistant"]',
+            'article[data-testid*="conversation-turn"]:has([data-message-author-role="assistant"])',
+            'div[class*="chat-message"][class*="assistant"]',
+            'div[class*="response-message"]',
+            'div[class*="ChatMessage"][data-role="assistant"]'
+          ]
       for (const sel of selectors) {
         try {
           const nodes = document.querySelectorAll(sel)
@@ -794,7 +830,7 @@ try {
             inString = false
           }
         } else {
-          if (ch === '"') {
+          if (ch === '"' && depth > 0) {
             inString = true
           } else if (ch === '{') {
             if (depth === 0) startIdx = i
@@ -984,7 +1020,8 @@ try {
         !rawText.includes('workbench:action') &&
         !rawText.includes('create_folder') &&
         !rawText.includes('write_file') &&
-        !rawText.includes('"action"')
+        !rawText.includes('"action"') &&
+        !rawText.includes('"type"')
       ) {
         return
       }
@@ -997,6 +1034,24 @@ try {
         ) {
           extracted = [{ payload: null, raw: rawText, error: 'Malformed action block: invalid JSON syntax or unclosed structure' }]
         } else {
+          return
+        }
+      }
+
+      // If the block is still actively streaming / unclosed and has no complete JSON payload yet,
+      // wait for streaming to finish instead of prematurely marking the element as executed!
+      const validActions = extracted.filter((item) => item.payload && !item.error)
+      const hasIncompleteError = extracted.some((item) => item.error === 'Incomplete or unclosed JSON block')
+      if (validActions.length === 0 && hasIncompleteError) {
+        const nowMs = Date.now()
+        const firstIncompleteStr = containerEl.getAttribute('data-wb-incomplete-since')
+        const firstIncompleteAt = firstIncompleteStr ? parseInt(firstIncompleteStr, 10) : nowMs
+        if (!firstIncompleteStr) {
+          containerEl.setAttribute('data-wb-incomplete-since', String(nowMs))
+        }
+        if (nowMs - firstIncompleteAt < 8000) {
+          if (scanTimeout) clearTimeout(scanTimeout)
+          scanTimeout = setTimeout(scanForActions, 250)
           return
         }
       }
@@ -1038,7 +1093,9 @@ try {
             badge.style.cssText =
               'display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin:6px 0;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f87171;font-weight:500;cursor:pointer;user-select:none;transition:all 0.15s ease;'
             badge.title = 'Click to show / hide raw block'
-            badge.innerHTML = `
+            setSafeInnerHTML(
+              badge,
+              `
               <div style="display:flex;align-items:center;gap:6px;">
                 <span style="font-size:13px;">⚠️</span>
                 <span style="font-weight:600;color:#ef4444;">Workbench Action Error:</span>
@@ -1048,6 +1105,7 @@ try {
                 <span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span>
               </div>
             `
+            )
             const collapseTarget = targetBox || containerEl
             badge.addEventListener('click', () => {
               const isHidden = collapseTarget.style.display === 'none'
@@ -1081,14 +1139,25 @@ try {
         // Inject sleek collapsible tool badge & auto-collapse raw JSON code block
         try {
           const actionType = item.payload.action || item.payload.type || 'action'
-          const actionParam = item.payload.path || item.payload.folderName || item.payload.filePath || item.payload.targetDirectory || '.'
+          const actionParam =
+            item.payload.path ||
+            item.payload.folderName ||
+            item.payload.filePath ||
+            item.payload.targetDirectory ||
+            item.payload.text ||
+            item.payload.command ||
+            item.payload.scope ||
+            (item.payload.id !== undefined ? `#${item.payload.id}` : '') ||
+            '.'
           const badge = document.createElement('div')
           badge.className = 'workbench-action-badge'
           badge.setAttribute('data-action-id', actionId)
           badge.style.cssText =
             'display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin:6px 0;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#60a5fa;font-weight:500;cursor:pointer;user-select:none;transition:all 0.15s ease;'
           badge.title = 'Click to show / hide raw action JSON'
-          badge.innerHTML = `
+          setSafeInnerHTML(
+            badge,
+            `
             <div style="display:flex;align-items:center;gap:6px;">
               <span style="font-size:12px;">⚡</span>
               <span style="font-weight:600;color:#3b82f6;">${escapeHtml(actionType)}</span>
@@ -1099,6 +1168,7 @@ try {
               <span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span>
             </div>
           `
+          )
 
           const collapseTarget = targetBox || containerEl
           collapseTarget.style.display = 'none'
@@ -1117,13 +1187,6 @@ try {
 
     function isStreamingActive(): boolean {
       try {
-        // 1. If Send/Submit button is visible and active, the AI turn has completely finished.
-        const sendSelectors = [
-          'button[aria-label*="Send" i]',
-          'button[data-testid="send-button"]',
-          'button[aria-label*="Submit" i]',
-          'button.send-button'
-        ]
         function isVisibleElement(el: HTMLElement | null): el is HTMLElement {
           if (!el || (el as any).disabled || el.getAttribute('aria-disabled') === 'true' || el.getAttribute('aria-hidden') === 'true') {
             return false
@@ -1134,15 +1197,9 @@ try {
           return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
         }
 
-        for (const sel of sendSelectors) {
-          const btn = document.querySelector(sel) as HTMLElement | null
-          if (isVisibleElement(btn)) {
-            return false
-          }
-        }
-
-        // 2. Check for active Stop buttons inside chat input / control containers
+        // 1. Check for active Stop buttons FIRST (on Gemini, Stop button has class "send-button stop")
         const stopSelectors = [
+          'button.send-button.stop',
           'button[data-testid="stop-button"]',
           'button[aria-label*="Stop generating" i]',
           'button[aria-label*="Stop Response" i]',
@@ -1166,6 +1223,23 @@ try {
               continue
             }
             return true
+          }
+        }
+
+        // 2. If Send/Submit button is visible, active, and NOT in stop mode, the AI turn has finished.
+        const sendSelectors = [
+          'button[aria-label*="Send" i]',
+          'button[data-testid="send-button"]',
+          'button[aria-label*="Submit" i]',
+          'button.send-button:not(.stop)'
+        ]
+        for (const sel of sendSelectors) {
+          const btn = document.querySelector(sel) as HTMLElement | null
+          if (isVisibleElement(btn)) {
+            const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase()
+            if (!ariaLabel.includes('stop') && !btn.classList.contains('stop')) {
+              return false
+            }
           }
         }
 
@@ -1223,7 +1297,10 @@ try {
                     htmlEl.parentNode.insertBefore(streamBadge, htmlEl)
                   }
                 }
-                streamBadge.innerHTML = `<span style="animation:pulse 1s infinite;">⚡</span> Receiving action (${sizeKb} KB)...`
+                if (streamBadge.getAttribute('data-kb') !== sizeKb) {
+                  streamBadge.setAttribute('data-kb', sizeKb)
+                  setSafeInnerHTML(streamBadge, `<span style="animation:pulse 1s infinite;">⚡</span> Receiving action (${sizeKb} KB)...`)
+                }
               }
             })
           } catch (_) {}
@@ -1321,8 +1398,28 @@ try {
       }, 600)
     }
 
+    function isWorkbenchUiMutationNode(node: Node | null): boolean {
+      if (!node || !(node instanceof Element)) return false
+      return Boolean(
+        node.closest(
+          '#wb-chat-status-card, .wb-streaming-badge, .workbench-action-badge, .workbench-action-result-card, #workbench-selection-bubble-host, #wb-chat-cmd-styles'
+        )
+      )
+    }
+
     // Set up MutationObserver on document
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((mutations) => {
+      if (
+        mutations.length > 0 &&
+        mutations.every(
+          (m) =>
+            isWorkbenchUiMutationNode(m.target) ||
+            (m.addedNodes.length > 0 &&
+              Array.from(m.addedNodes).every((n) => isWorkbenchUiMutationNode(n)))
+        )
+      ) {
+        return
+      }
       scanForActions()
       checkPrimedStatus()
       hideFeedbackBubbles()
@@ -1365,18 +1462,20 @@ try {
       } catch (_) {}
     }
 
-    if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: true })
+    const attachObserver = () => {
+      const rootNode = document.documentElement || document.body
+      if (rootNode) {
+        observer.observe(rootNode, { childList: true, subtree: true })
+      }
       checkPrimedStatus()
       hideFeedbackBubbles()
       setTimeout(markHistoricalActions, 400)
+    }
+
+    if (document.body || document.documentElement) {
+      attachObserver()
     } else {
-      document.addEventListener('DOMContentLoaded', () => {
-        observer.observe(document.body, { childList: true, subtree: true })
-        checkPrimedStatus()
-        hideFeedbackBubbles()
-        setTimeout(markHistoricalActions, 400)
-      })
+      document.addEventListener('DOMContentLoaded', attachObserver)
     }
 
     window.addEventListener('popstate', checkPrimedStatus)
@@ -1457,10 +1556,11 @@ try {
       true
     )
 
-    // Capture Escape key to abort in-flight actions, and Enter to detect new human prompt
+    // Capture genuine hardware Escape key to abort in-flight actions, and Enter to detect new human prompt
     window.addEventListener(
       'keydown',
       (e: KeyboardEvent) => {
+        if (!e.isTrusted) return
         if (e.key === 'Escape') {
           handleUserCancel('Escape key')
         } else if (e.key === 'Enter' && !e.shiftKey) {
@@ -1493,6 +1593,7 @@ try {
 // =========================================================================
 try {
   (function initInChatCommands() {
+    if (!__wbShouldInitPreload) return
     if (typeof window === 'undefined' || typeof document === 'undefined') return
 
     function isChatSite(): boolean {
@@ -1538,16 +1639,50 @@ try {
       })
     } catch (_) {}
 
+    function isElementVisible(el: HTMLElement | null): el is HTMLElement {
+      if (!el || (el as any).disabled || el.getAttribute('aria-disabled') === 'true' || el.getAttribute('aria-hidden') === 'true') {
+        return false
+      }
+      const rect = el.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return false
+      const style = window.getComputedStyle(el)
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+    }
+
     function getInputField(): HTMLElement | null {
-      return (
-        document.querySelector('#prompt-textarea') ||
-        document.querySelector('div[contenteditable="true"].ProseMirror') ||
-        document.querySelector('rich-textarea div[contenteditable="true"]') ||
-        document.querySelector('.ql-editor') ||
-        document.querySelector('#chat-input') ||
-        document.querySelector('div[contenteditable="true"]') ||
-        document.querySelector('textarea')
-      ) as HTMLElement | null
+      // 1. Prefer the currently focused element if it is a valid chat editor
+      const activeEl = document.activeElement as HTMLElement | null
+      if (
+        activeEl &&
+        isElementVisible(activeEl) &&
+        (activeEl.tagName === 'TEXTAREA' ||
+          activeEl.isContentEditable ||
+          activeEl.getAttribute('contenteditable') === 'true' ||
+          activeEl.getAttribute('role') === 'textbox')
+      ) {
+        return activeEl
+      }
+
+      // 2. Otherwise search known chat composer selectors and return the visible composer
+      const selectors = [
+        '#prompt-textarea',
+        'div[contenteditable="true"].ProseMirror',
+        'rich-textarea div[contenteditable="true"]',
+        'div.ql-editor[contenteditable="true"]',
+        '.ql-editor',
+        '#chat-input',
+        'div[contenteditable="true"][role="textbox"]',
+        'div[contenteditable="true"]',
+        'textarea',
+      ]
+      for (const sel of selectors) {
+        const matches = Array.from(document.querySelectorAll(sel)) as HTMLElement[]
+        const visibleMatches = matches.filter(isElementVisible)
+        if (visibleMatches.length > 0) {
+          return visibleMatches[visibleMatches.length - 1]
+        }
+      }
+      return null
     }
 
     function getInputValue(el: HTMLElement): string {
@@ -1557,34 +1692,20 @@ try {
       return el.innerText || el.textContent || ''
     }
 
-    function sanitizeCommandText(raw: string): string {
-      return (raw || '')
-        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
-        .trim()
-        .toLowerCase()
-    }
-
-    function isStatusCmd(val: string): boolean {
-      return val === '/status' || val === '!status' || val === 'wb:status'
-    }
-
-    function isConnectCmd(val: string): boolean {
-      return (
-        val === '/connect' ||
-        val === '!connect' ||
-        val === 'wb:connect' ||
-        val === '/prime' ||
-        val === '!prime' ||
-        val === 'wb:prime'
-      )
+    function escapeHtml(text: string): string {
+      return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
     }
 
     function clearInputField(el: HTMLElement) {
       try {
-        // Send Escape to close any slash command or mention autocomplete popup in Claude/ProseMirror
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
-        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
+        // Send Escape on the input element to dismiss any slash-command popup in Claude/ProseMirror
         el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
+        el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }))
       } catch (_) {}
 
       if (el.tagName === 'TEXTAREA') {
@@ -1592,24 +1713,32 @@ try {
         if (nativeSetter) {
           nativeSetter.call(el, '')
         } else {
-          (el as HTMLTextAreaElement).value = ''
+          ;(el as HTMLTextAreaElement).value = ''
         }
         el.dispatchEvent(new Event('input', { bubbles: true }))
         el.dispatchEvent(new Event('change', { bubbles: true }))
       } else {
         try {
           el.focus()
-          const sel = window.getSelection()
-          if (sel) {
-            const range = document.createRange()
-            range.selectNodeContents(el)
-            sel.removeAllRanges()
-            sel.addRange(range)
-          }
+          document.execCommand('selectAll', false)
           document.execCommand('delete', false)
         } catch (_) {}
-        el.textContent = ''
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }))
+        if ((el.innerText || el.textContent || '').trim().length > 0) {
+          try {
+            const sel = window.getSelection()
+            if (sel) {
+              const range = document.createRange()
+              range.selectNodeContents(el)
+              sel.removeAllRanges()
+              sel.addRange(range)
+            }
+            document.execCommand('delete', false)
+          } catch (_) {}
+          if ((el.innerText || el.textContent || '').trim().length > 0) {
+            el.textContent = ''
+          }
+        }
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }))
         el.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
         el.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
       }
@@ -1748,7 +1877,9 @@ try {
       }
 
       if (isPriming) {
-        card.innerHTML = `
+        setSafeInnerHTML(
+          card,
+          `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
             <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#fbbf24;">
               <span>⚡</span> <span>Workbench</span>
@@ -1757,8 +1888,8 @@ try {
             <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:4px;">
-            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#fde68a;">${targetLabel}: ${folderName}</code>
-            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${currentActiveDir || 'No path'})</span>
+            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#fde68a;">${escapeHtml(targetLabel)}: ${escapeHtml(folderName)}</code>
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${escapeHtml(currentActiveDir || 'No path')})</span>
           </div>
           <div style="font-size:11.5px; color:#94a3b8; margin-bottom:8px;">
             Connecting chat to Workbench and injecting action system...
@@ -1767,8 +1898,11 @@ try {
             <button class="wb-cmd-btn-prime" disabled style="opacity:0.7;">⚡ Priming Chat...</button>
           </div>
         `
+        )
       } else if (isPrimed) {
-        card.innerHTML = `
+        setSafeInnerHTML(
+          card,
+          `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
             <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399;">
               <span>⚡</span> <span>Workbench</span>
@@ -1777,18 +1911,22 @@ try {
             <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:4px;">
-            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#a7f3d0;">${targetLabel}: ${folderName}</code>
-            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${currentActiveDir || 'No path'})</span>
+            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#a7f3d0;">${escapeHtml(targetLabel)}: ${escapeHtml(folderName)}</code>
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${escapeHtml(currentActiveDir || 'No path')})</span>
           </div>
           <div style="font-size:11.5px; color:#94a3b8; margin-bottom:8px;">
             This chat is primed and connected to local files.
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <button class="wb-cmd-btn-disable" id="wb-cmd-trigger-disable-btn">Disable</button>
+            <button class="wb-cmd-btn-disable" id="wb-cmd-trigger-help-btn">❓ Commands & Help</button>
           </div>
         `
+        )
       } else {
-        card.innerHTML = `
+        setSafeInnerHTML(
+          card,
+          `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
             <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#f59e0b;">
               <span>⚡</span> <span>Workbench</span>
@@ -1797,17 +1935,19 @@ try {
             <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">
-            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#fde68a;">${targetLabel}: ${folderName}</code>
-            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${currentActiveDir || 'No path'})</span>
+            <strong>Target:</strong> <code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:3px; color:#fde68a;">${escapeHtml(targetLabel)}: ${escapeHtml(folderName)}</code>
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${escapeHtml(currentActiveDir || 'No path')})</span>
           </div>
           <div style="font-size:11.5px; color:#94a3b8; margin-bottom:8px;">
             This chat is not connected to local files yet.
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <button class="wb-cmd-btn-prime" id="wb-cmd-trigger-prime-btn">⚡ Prime Chat</button>
-            <span style="font-size:11px; color:#64748b;">or type <code style="color:#cbd5e1;">!connect</code> / <code style="color:#cbd5e1;">!status</code></span>
+            <button class="wb-cmd-btn-disable" id="wb-cmd-trigger-help-btn">❓ Commands & Help</button>
+            <span style="font-size:11px; color:#64748b;">or type <code style="color:#cbd5e1;">/help</code> / <code style="color:#cbd5e1;">!status</code></span>
           </div>
         `
+        )
       }
 
       // Always append directly to body with high z-index overlay so it is never clipped or unmounted by chat frameworks
@@ -1816,6 +1956,11 @@ try {
       const closeBtn = card.querySelector('#wb-card-close-btn')
       if (closeBtn) {
         closeBtn.addEventListener('click', () => card.remove())
+      }
+
+      const helpBtn = card.querySelector('#wb-cmd-trigger-help-btn')
+      if (helpBtn) {
+        helpBtn.addEventListener('click', () => renderBookHelpCard())
       }
 
       const primeBtn = card.querySelector('#wb-cmd-trigger-prime-btn')
@@ -1842,28 +1987,750 @@ try {
       }
     }
 
-    function handleCommand(cmd: string) {
-      if (isStatusCmd(cmd)) {
-        renderStatusCard('status')
-      } else if (isConnectCmd(cmd)) {
-        isActionModeGloballyEnabled = true
-        renderStatusCard('priming')
-        ipcRenderer.send('workbench:prime-active-chat', {})
+    function ensureCmdStyles() {
+      if (!document.getElementById('wb-chat-cmd-styles')) {
+        const style = document.createElement('style')
+        style.id = 'wb-chat-cmd-styles'
+        style.textContent = `
+          @keyframes wbFadeIn {
+            from { opacity: 0; transform: translate(-50%, 8px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+          }
+          @keyframes wbPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+          }
+          .wb-cmd-btn-prime {
+            background: rgba(245, 158, 11, 0.22);
+            border: 1px solid rgba(245, 158, 11, 0.5);
+            color: #fbbf24;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .wb-cmd-btn-prime:hover {
+            background: rgba(245, 158, 11, 0.38);
+            color: #fef08a;
+          }
+          .wb-cmd-btn-prime:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+          }
+          .wb-cmd-btn-emerald {
+            background: rgba(16, 185, 129, 0.22);
+            border: 1px solid rgba(16, 185, 129, 0.5);
+            color: #34d399;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .wb-cmd-btn-emerald:hover {
+            background: rgba(16, 185, 129, 0.38);
+            color: #a7f3d0;
+          }
+          .wb-cmd-btn-disable {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #94a3b8;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .wb-cmd-btn-disable:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #f1f5f9;
+          }
+          .wb-cmd-close-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px 6px;
+            line-height: 1;
+            border-radius: 3px;
+          }
+          .wb-cmd-close-btn:hover {
+            color: #f1f5f9;
+            background: rgba(255, 255, 255, 0.1);
+          }
+          .wb-book-link-pill {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 5px 9px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-size: 11.5px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.12s ease;
+          }
+          .wb-book-link-pill:hover {
+            background: rgba(16, 185, 129, 0.16);
+            border-color: rgba(16, 185, 129, 0.45);
+            color: #ffffff;
+          }
+        `
+        document.head.appendChild(style)
       }
     }
 
+    function createHudCardContainer(borderColor: string = 'rgba(52, 211, 153, 0.5)'): HTMLDivElement {
+      ensureCmdStyles()
+      const existing = document.getElementById('wb-chat-status-card')
+      if (existing) existing.remove()
+
+      const card = document.createElement('div')
+      card.id = 'wb-chat-status-card'
+      card.style.cssText = `
+        position: fixed;
+        bottom: 95px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 720px;
+        width: calc(100% - 32px);
+        background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));
+        border: 1px solid ${borderColor};
+        border-radius: 10px;
+        padding: 14px 18px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #f1f5f9;
+        font-size: 13px;
+        line-height: 1.5;
+        z-index: 999999;
+        backdrop-filter: blur(12px);
+        animation: wbFadeIn 0.2s ease-out;
+      `
+      return card
+    }
+
+    async function invokeWithTimeout<T = any>(channel: string, payload?: any, timeoutMs: number = 6000): Promise<T> {
+      return await Promise.race([
+        ipcRenderer.invoke(channel, payload) as Promise<T>,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`IPC "${channel}" timed out after ${timeoutMs}ms`)), timeoutMs)
+        ),
+      ])
+    }
+
+    async function renderBookExtractCard(scope: 'viewport' | 'full' | 'inputs' = 'viewport') {
+      const loadingCard = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+      setSafeInnerHTML(
+        loadingCard,
+        `
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:8px;color:#34d399;font-weight:600;">
+            <span>📖</span><span>Reading BookView (${escapeHtml(scope)})...</span>
+          </div>
+          <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+        </div>
+      `
+      )
+      document.body.appendChild(loadingCard)
+      loadingCard.querySelector('#wb-card-close-btn')?.addEventListener('click', () => loadingCard.remove())
+
+      try {
+        const res = await invokeWithTimeout('workbench:book-extract-page', {
+          scope,
+          includeLinks: true,
+          includeInputs: true,
+        }, 6500)
+        if (!res || !res.success) {
+          setSafeInnerHTML(
+            loadingCard,
+            `
+            <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+              <span>⚠️ ${escapeHtml(res?.error || 'Failed to read BookView page')}</span>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+            </div>
+          `
+          )
+          loadingCard.querySelector('#wb-card-close-btn')?.addEventListener('click', () => loadingCard.remove())
+          return
+        }
+
+        const presetData = await invokeWithTimeout('workbench:get-book-prompt-presets', {}, 2500).catch(() => null)
+        const rawSummaryPresets: any[] =
+          Array.isArray(presetData?.summaryPresets) && presetData.summaryPresets.length > 0
+            ? presetData.summaryPresets
+            : Array.isArray(presetData?.presets) && presetData.presets.length > 0
+              ? presetData.presets
+              : SUMMARY_STYLE_PRESETS
+        const summaryPresets = rawSummaryPresets.filter((p: any) => !['eli5', 'code'].includes(String(p.id)))
+        const explainPresets: any[] =
+          Array.isArray(presetData?.explainPresets) && presetData.explainPresets.length > 0
+            ? presetData.explainPresets
+            : EXPLAIN_STYLE_PRESETS
+        const allUserTemplates: any[] = Array.isArray(presetData?.userTemplates) ? presetData.userTemplates : []
+        const customUserTemplates: any[] = allUserTemplates.filter(
+          (t: any) => !['explain', 'summarize', 'code', 'quiz', 'raw'].includes(String(t.id).toLowerCase())
+        )
+        const baseCmd = scope === 'full' ? '/chapter' : scope === 'inputs' ? '/inputs' : '/page'
+
+        const summaryPillsHtml =
+          `<button class="wb-cmd-btn-emerald" data-raw-cmd="${escapeHtml(`${baseCmd} summarize`)}" title="4-Part Structured Technical Summary" style="padding:3px 9px;font-size:11px;">📝 Default</button>` +
+          summaryPresets
+            .map(
+              (p: any) =>
+                `<button class="wb-cmd-btn-disable" data-raw-cmd="${escapeHtml(`${baseCmd} summarize:${p.id}`)}" title="${escapeHtml(p.description || '')}" style="padding:3px 8px;font-size:11px;border-color:rgba(16,185,129,0.35);color:#a7f3d0;">${escapeHtml(p.icon || '📝')} ${escapeHtml(p.label)}</button>`
+            )
+            .join('')
+
+        const explainPillsHtml =
+          `<button class="wb-cmd-btn-prime" data-raw-cmd="${escapeHtml(`${baseCmd} explain`)}" title="4-Part Tutor Explanation (Intuition, How & Why, Walkthrough, Gotchas)" style="padding:3px 9px;font-size:11px;">💡 Default</button>` +
+          explainPresets
+            .map(
+              (p: any) =>
+                `<button class="wb-cmd-btn-disable" data-raw-cmd="${escapeHtml(`${baseCmd} explain:${p.id}`)}" title="${escapeHtml(p.description || '')}" style="padding:3px 8px;font-size:11px;border-color:rgba(245,158,11,0.38);color:#fde68a;">${escapeHtml(p.icon || '💡')} ${escapeHtml(p.label)}</button>`
+            )
+            .join('')
+
+        const customPillsHtml = customUserTemplates
+          .slice(0, 6)
+          .map(
+            (t: any) =>
+              `<button class="wb-cmd-btn-disable" data-raw-cmd="${escapeHtml(`${baseCmd} #${t.id}`)}" title="${escapeHtml(t.description || t.prompt || '')}" style="padding:3px 8px;font-size:11px;border-color:rgba(168,85,247,0.4);color:#d8b4fe;">✨ ${escapeHtml(t.name)}</button>`
+          )
+          .join('')
+
+        const card = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+        let rawBodyPreview = (scope === 'full' ? res.fullText : res.visibleText) || '(No visible text found)'
+        if (scope === 'full' && res.chapter && rawBodyPreview) {
+          const chTitle = String(res.chapter).trim()
+          const firstIdx = rawBodyPreview.indexOf(chTitle)
+          const secondIdx = firstIdx >= 0 ? rawBodyPreview.indexOf(chTitle, firstIdx + chTitle.length) : -1
+          if (secondIdx > 0 && secondIdx < 4500) {
+            rawBodyPreview = rawBodyPreview.slice(secondIdx).trim()
+          }
+        }
+        const previewText =
+          scope === 'inputs'
+            ? (res.inputs || [])
+                .map((i: any) => `[Input #${i.id}] ${i.label || i.placeholder || i.name || i.tag} (${i.type}) = "${i.value}"`)
+                .join('\n') || '(No form inputs detected on visible BookView page)'
+            : rawBodyPreview
+
+        setSafeInnerHTML(
+          card,
+          `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399;">
+              <span>📖</span> <span>BookView ${scope === 'full' ? 'Chapter' : scope === 'inputs' ? 'Inputs' : 'Page'} Extracted</span>
+              <span style="font-size:11px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); padding:1px 6px; border-radius:4px;">~${res.scrollPercent || 0}%</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button class="wb-cmd-btn-disable" id="wb-book-customize-templates-btn" style="padding:2px 8px;font-size:10.5px;" title="Customize summary & Ask AI templates">⚙️ Customize</button>
+              <button class="wb-cmd-btn-disable" id="wb-book-help-btn" style="padding:2px 8px;font-size:10.5px;" title="Show ChatView ↔ BookView command reference">❓ Help</button>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
+            </div>
+          </div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            <strong>${escapeHtml(res.title || 'BookView')}</strong>
+            ${res.chapter && res.chapter !== res.title ? `<span style="color:#94a3b8;"> · ${escapeHtml(res.chapter)}</span>` : ''}
+            <span style="color:#64748b; font-size:11px; margin-left:6px;">(${(res.links || []).length} links, ${(res.inputs || []).length} inputs)</span>
+          </div>
+          <div style="background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; max-height:105px; overflow-y:auto; font-family:monospace; font-size:11px; color:#e2e8f0; white-space:pre-wrap; margin-bottom:8px;">${escapeHtml(previewText.slice(0, 1500))}${previewText.length > 1500 ? '\n... [truncated preview]' : ''}</div>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); border-radius:7px; padding:7px 9px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:5px;">
+              <span style="font-size:11px; color:#34d399; font-weight:700; min-width:86px;">📝 Summarize:</span>
+              ${summaryPillsHtml}
+            </div>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:5px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
+              <span style="font-size:11px; color:#fbbf24; font-weight:700; min-width:86px;">💡 Explain:</span>
+              ${explainPillsHtml}
+            </div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px;">
+            ${customPillsHtml}
+            <button class="wb-cmd-btn-emerald" data-raw-cmd="${escapeHtml(`${baseCmd} quiz`)}">❓ Quiz Me</button>
+            <button class="wb-cmd-btn-emerald" data-prompt="Extract all parameters, inputs, and actionable steps from this page:">🎛️ Extract Inputs</button>
+            <button class="wb-cmd-btn-disable" id="wb-book-insert-raw-btn">📋 Insert in Prompt</button>
+            <button class="wb-cmd-btn-disable" id="wb-book-show-links-btn">🔗 Links (${(res.links || []).length})</button>
+          </div>
+          <div style="font-size:10.5px; color:#64748b; margin-top:6px;">
+            Tip: Type <code style="color:#94a3b8;">${escapeHtml(baseCmd)} summarize:deep</code>, <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:why</code>, <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:trace</code>, or <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:compare</code>!
+          </div>
+        `
+        )
+        document.body.appendChild(card)
+        card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+
+        card.querySelector('#wb-book-customize-templates-btn')?.addEventListener('click', () => {
+          ipcRenderer.send('workbench:open-ask-ai-templates-from-chat')
+        })
+
+        card.querySelector('#wb-book-help-btn')?.addEventListener('click', () => {
+          renderBookHelpCard()
+        })
+
+        card.querySelectorAll('button[data-raw-cmd]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const rawCmd = btn.getAttribute('data-raw-cmd') || `${baseCmd} summarize`
+            const subParsed = parseBookChatCommand(rawCmd)
+            let promptToSend = rawCmd
+            if (subParsed && subParsed.kind === 'book-prompt-expansion' && !subParsed.hasInlineMacros) {
+              const resolvedInstr = resolveBookInstructionWithPresets(subParsed.instruction, allUserTemplates)
+              promptToSend = `${baseCmd} ${resolvedInstr}`
+            }
+            card.remove()
+            await invokeWithTimeout('workbench:book-expand-and-submit', {
+              rawPrompt: promptToSend,
+              autoSubmit: true,
+            }, 8000).catch(() => {})
+          })
+        })
+
+        card.querySelectorAll('button[data-prompt]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const instr = btn.getAttribute('data-prompt') || 'Analyze this page:'
+            card.remove()
+            await invokeWithTimeout('workbench:book-expand-and-submit', {
+              rawPrompt: `${baseCmd} ${instr}`,
+              autoSubmit: true,
+            }, 8000).catch(() => {})
+          })
+        })
+
+        card.querySelector('#wb-book-insert-raw-btn')?.addEventListener('click', async () => {
+          card.remove()
+          await invokeWithTimeout('workbench:book-expand-and-submit', {
+            rawPrompt: `${baseCmd} `,
+            autoSubmit: false,
+          }, 8000).catch(() => {})
+        })
+
+        card.querySelector('#wb-book-show-links-btn')?.addEventListener('click', () => {
+          renderBookLinksCard()
+        })
+      } catch (err: any) {
+        const msg = err?.message || String(err || 'Failed to read BookView')
+        const needsRestartHint = msg.includes('No handler registered')
+          ? ' (Please restart Workbench so new IPC handlers are active)'
+          : ''
+        setSafeInnerHTML(
+          loadingCard,
+          `
+          <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+            <span>⚠️ ${escapeHtml(msg + needsRestartHint)}</span>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+          </div>
+        `
+        )
+        loadingCard.querySelector('#wb-card-close-btn')?.addEventListener('click', () => loadingCard.remove())
+      }
+    }
+
+    async function renderBookLinksCard(filter?: string) {
+      const loadingCard = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+      setSafeInnerHTML(
+        loadingCard,
+        `
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:8px;color:#34d399;font-weight:600;">
+            <span>🔗</span><span>Indexing links in BookView...</span>
+          </div>
+          <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+        </div>
+      `
+      )
+      document.body.appendChild(loadingCard)
+      loadingCard.querySelector('#wb-card-close-btn')?.addEventListener('click', () => loadingCard.remove())
+
+      try {
+        const res = await invokeWithTimeout('workbench:book-get-links', {
+          viewportOnly: false,
+          showBadges: true,
+          filter,
+        }, 6500)
+        const links = res?.links || []
+        const card = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+
+        const linksHtml =
+          links.length > 0
+            ? links
+                .slice(0, 40)
+                .map(
+                  (l: any) => `
+              <button class="wb-book-link-pill" data-link-id="${l.id}" title="${escapeHtml(l.href || l.text)}">
+                <span style="display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                  <span style="background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.4);padding:0 5px;border-radius:4px;font-family:monospace;font-size:10.5px;font-weight:700;">#${l.id}</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(l.text)}</span>
+                </span>
+                <span style="font-size:10px;color:#64748b;flex-shrink:0;">${l.inViewport ? '👁️' : ''} ${escapeHtml(l.type.toUpperCase())}</span>
+              </button>
+            `
+                )
+                .join('')
+            : `<div style="color:#94a3b8;font-size:12px;padding:8px;">No matching links found on the current BookView page.</div>`
+
+        setSafeInnerHTML(
+          card,
+          `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399;">
+              <span>🔗</span> <span>BookView Links (${links.length})</span>
+              ${filter ? `<span style="font-size:11px;color:#94a3b8;">filter: "${escapeHtml(filter)}"</span>` : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button class="wb-cmd-btn-disable" id="wb-book-clear-badges-btn" style="padding:2px 8px;font-size:10.5px;">Hide Badges</button>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:5px; max-height:190px; overflow-y:auto; margin-bottom:10px; padding-right:2px;">
+            ${linksHtml}
+          </div>
+          <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px;">
+            <div style="display:flex; align-items:center; gap:5px;">
+              <button class="wb-cmd-btn-disable" data-nav="back">◀ Back</button>
+              <button class="wb-cmd-btn-disable" data-nav="forward">Forward ▶</button>
+              <button class="wb-cmd-btn-disable" data-nav="scroll-up">⬆ Up</button>
+              <button class="wb-cmd-btn-disable" data-nav="scroll-down">⬇ Down</button>
+              <button class="wb-cmd-btn-emerald" data-nav="prev">⏮ Prev</button>
+              <button class="wb-cmd-btn-emerald" data-nav="next">Next ⏭</button>
+            </div>
+            <button class="wb-cmd-btn-emerald" id="wb-book-read-page-btn">📖 Read Page</button>
+          </div>
+          <div style="font-size:10.5px; color:#64748b; margin-top:6px;">
+            Click any link above or type <code style="color:#94a3b8;">/click #id</code> or <code style="color:#94a3b8;">/click &lt;text&gt;</code> in chat.
+          </div>
+        `
+        )
+        document.body.appendChild(card)
+
+        card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => {
+          ipcRenderer.invoke('workbench:book-navigate', { command: 'clear-badges' }).catch(() => {})
+          card.remove()
+        })
+
+        card.querySelector('#wb-book-clear-badges-btn')?.addEventListener('click', () => {
+          ipcRenderer.invoke('workbench:book-navigate', { command: 'clear-badges' }).catch(() => {})
+        })
+
+        card.querySelector('#wb-book-read-page-btn')?.addEventListener('click', () => {
+          renderBookExtractCard('viewport')
+        })
+
+        card.querySelectorAll('.wb-book-link-pill').forEach((pill) => {
+          pill.addEventListener('click', async () => {
+            const idAttr = pill.getAttribute('data-link-id')
+            if (!idAttr) return
+            const id = parseInt(idAttr, 10)
+            ;(pill as HTMLButtonElement).style.opacity = '0.6'
+            const clickRes = await invokeWithTimeout('workbench:book-click-link', { id }, 6000).catch(() => null)
+            if (clickRes?.success) {
+              setTimeout(() => renderBookLinksCard(), 350)
+            }
+          })
+        })
+
+        card.querySelectorAll('button[data-nav]').forEach((navBtn) => {
+          navBtn.addEventListener('click', async () => {
+            const cmd = navBtn.getAttribute('data-nav')
+            if (!cmd) return
+            await invokeWithTimeout('workbench:book-navigate', { command: cmd }, 6000).catch(() => {})
+            setTimeout(() => renderBookLinksCard(filter), 350)
+          })
+        })
+      } catch (err: any) {
+        const msg = err?.message || String(err || 'Failed to index BookView links')
+        setSafeInnerHTML(
+          loadingCard,
+          `
+          <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+            <span>⚠️ ${escapeHtml(msg)}</span>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+          </div>
+        `
+        )
+        loadingCard.querySelector('#wb-card-close-btn')?.addEventListener('click', () => loadingCard.remove())
+      }
+    }
+
+    function renderBookHelpCard() {
+      const card = createHudCardContainer('rgba(56, 189, 248, 0.55)')
+      setSafeInnerHTML(
+        card,
+        `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#38bdf8;">
+            <span>📘</span> <span>Workbench ChatView ↔ BookView Command & Style Reference</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="wb-cmd-btn-disable" id="wb-help-customize-btn" style="padding:2px 8px;font-size:10.5px;">⚙️ Customize Templates</button>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
+          </div>
+        </div>
+        <div style="max-height:260px; overflow-y:auto; padding-right:4px; font-size:11.5px; color:#cbd5e1; display:flex; flex-direction:column; gap:8px;">
+          <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px;">
+            <div style="font-weight:600; color:#34d399; margin-bottom:4px;">📖 Reading & Extraction (No Priming Required — supports / or ! prefix)</div>
+            <div><code style="color:#fde68a;">/page</code> or <code style="color:#fde68a;">/chapter</code> — Open interactive BookView HUD card with 1-click style pills</div>
+            <div><code style="color:#fde68a;">/page &lt;question&gt;</code> or <code style="color:#fde68a;">/chapter &lt;question&gt;</code> — Extract visible viewport or full chapter/PDF &amp; ask AI</div>
+            <div><code style="color:#fde68a;">/inputs [question]</code> — Extract form inputs/configs from BookView</div>
+            <div><code style="color:#fde68a;">@page</code>, <code style="color:#fde68a;">@chapter</code>, <code style="color:#fde68a;">@inputs</code>, <code style="color:#fde68a;">@links</code>, <code style="color:#fde68a;">@selection</code> — Inline context macros in any sentence</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px;">
+            <div style="font-weight:600; color:#34d399; margin-bottom:4px;">📝 Summarization Styles (Condense &amp; Organize — /chapter summarize:&lt;style&gt;)</div>
+            <div><code style="color:#a7f3d0;">/chapter summarize</code> — 4-part structured digest (or your custom <em>Summarize</em> template)</div>
+            <div><code style="color:#a7f3d0;">/chapter summarize:brief</code> — ⚡ 1-sentence thesis + 3–5 concise bullets (<code style="color:#94a3b8;">:tldr</code>, <code style="color:#94a3b8;">:short</code>)</div>
+            <div><code style="color:#a7f3d0;">/chapter summarize:deep</code> — 🔬 Section-by-section technical digest (<code style="color:#94a3b8;">:detailed</code>, <code style="color:#94a3b8;">:technical</code>)</div>
+            <div><code style="color:#a7f3d0;">/chapter summarize:steps</code> — 🔢 Sequential algorithm &amp; variable summary (<code style="color:#94a3b8;">:algo</code>)</div>
+            <div><code style="color:#a7f3d0;">/chapter summarize:study</code> — 🎓 Study guide, rules, pitfalls &amp; 3 quiz Q&amp;As (<code style="color:#94a3b8;">:notes</code>, <code style="color:#94a3b8;">:cheatsheet</code>)</div>
+            <div><code style="color:#a7f3d0;">/chapter summarize:table</code> — 📊 Markdown reference/comparison matrix (<code style="color:#94a3b8;">:matrix</code>)</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px;">
+            <div style="font-weight:600; color:#fbbf24; margin-bottom:4px;">💡 Explanation Styles (Teach &amp; Clarify — /chapter explain:&lt;style&gt;)</div>
+            <div><code style="color:#fde68a;">/chapter explain</code> — 4-part tutor explanation (Intuition, How &amp; Why, Walkthrough, Gotchas)</div>
+            <div><code style="color:#fde68a;">/chapter explain:eli5</code> — 🧠 Everyday analogy mapped 1-to-1 to formal terms (<code style="color:#94a3b8;">:intuition</code>, <code style="color:#94a3b8;">:simple</code>)</div>
+            <div><code style="color:#fde68a;">/chapter explain:why</code> — 🧱 First-principles design rationale &amp; invariants (<code style="color:#94a3b8;">:first-principles</code>, <code style="color:#94a3b8;">:design</code>)</div>
+            <div><code style="color:#fde68a;">/chapter explain:trace</code> — 🔍 Step-by-step ASCII visual state trace (<code style="color:#94a3b8;">:visual</code>, <code style="color:#94a3b8;">:walkthrough</code>)</div>
+            <div><code style="color:#fde68a;">/chapter explain:code</code> — 💻 Annotated runnable code tutorial &amp; output (<code style="color:#94a3b8;">:demo</code>, <code style="color:#94a3b8;">:example</code>)</div>
+            <div><code style="color:#fde68a;">/chapter explain:compare</code> — ⚖️ Compare &amp; contrast against alternatives (<code style="color:#94a3b8;">:vs</code>, <code style="color:#94a3b8;">:tradeoffs</code>)</div>
+            <div><code style="color:#fde68a;">/chapter explain:pitfalls</code> — 🧑‍🏫 Top misconceptions, boundary traps &amp; Q&amp;A (<code style="color:#94a3b8;">:socratic</code>, <code style="color:#94a3b8;">:bugs</code>)</div>
+            <div><code style="color:#e9d5ff;">/chapter #&lt;template-id&gt;</code> — Run any custom template from ⚙️ Customize or <code style="color:#94a3b8;">prompts/</code></div>
+          </div>
+          <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px;">
+            <div style="font-weight:600; color:#38bdf8; margin-bottom:4px;">🔗 Link Clicking, Navigation &amp; Status</div>
+            <div><code style="color:#bae6fd;">/links [filter]</code> — Show numbered <code style="color:#34d399;">#id</code> badges on BookView links &amp; open clickable list</div>
+            <div><code style="color:#bae6fd;">/click #3</code> or <code style="color:#bae6fd;">/click Next</code> — Click a link/button inside BookView by badge #id or text</div>
+            <div><code style="color:#bae6fd;">/next</code>, <code style="color:#bae6fd;">/prev</code>, <code style="color:#bae6fd;">/scroll-down</code>, <code style="color:#bae6fd;">/scroll-up</code>, <code style="color:#bae6fd;">/book back</code> — Navigate BookView</div>
+            <div><code style="color:#bae6fd;">/status</code> (<code style="color:#94a3b8;">!status</code>) · <code style="color:#bae6fd;">/connect</code> (<code style="color:#94a3b8;">!connect</code>) · <code style="color:#bae6fd;">/help</code> (<code style="color:#94a3b8;">!help</code>)</div>
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; margin-top:8px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:5px;">
+            <button class="wb-cmd-btn-emerald" id="wb-help-open-page">📖 /page</button>
+            <button class="wb-cmd-btn-emerald" id="wb-help-open-chapter">📚 /chapter</button>
+            <button class="wb-cmd-btn-emerald" id="wb-help-open-links">🔗 /links</button>
+            <button class="wb-cmd-btn-disable" id="wb-help-open-status">⚡ /status</button>
+          </div>
+          <span style="font-size:10.5px; color:#64748b;">Full guide: <code style="color:#94a3b8;">docs/CHATVIEW_BOOKVIEW_BRIDGE_GUIDE.md</code></span>
+        </div>
+      `
+      )
+      document.body.appendChild(card)
+      card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+      card.querySelector('#wb-help-customize-btn')?.addEventListener('click', () => {
+        ipcRenderer.send('workbench:open-ask-ai-templates-from-chat')
+      })
+      card.querySelector('#wb-help-open-page')?.addEventListener('click', () => renderBookExtractCard('viewport'))
+      card.querySelector('#wb-help-open-chapter')?.addEventListener('click', () => renderBookExtractCard('full'))
+      card.querySelector('#wb-help-open-links')?.addEventListener('click', () => renderBookLinksCard())
+      card.querySelector('#wb-help-open-status')?.addEventListener('click', () => renderStatusCard('status'))
+    }
+
+    async function executeBookChatCommand(parsed: ParsedBookChatCommand) {
+      if (parsed.kind === 'help') {
+        renderBookHelpCard()
+        return
+      }
+      if (parsed.kind === 'status') {
+        renderStatusCard('status')
+        return
+      }
+      if (parsed.kind === 'connect') {
+        isActionModeGloballyEnabled = true
+        renderStatusCard('priming')
+        ipcRenderer.send('workbench:prime-active-chat', {})
+        return
+      }
+      if (parsed.kind === 'book-extract-card') {
+        await renderBookExtractCard(parsed.scope)
+        return
+      }
+      if (parsed.kind === 'book-links') {
+        await renderBookLinksCard(parsed.filter)
+        return
+      }
+      if (parsed.kind === 'book-badges') {
+        await ipcRenderer.invoke('workbench:book-navigate', {
+          command: parsed.show ? 'show-badges' : 'clear-badges',
+        })
+        if (parsed.show) {
+          await renderBookLinksCard()
+        }
+        return
+      }
+      if (parsed.kind === 'book-click') {
+        const card = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+        setSafeInnerHTML(
+          card,
+          `
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="color:#34d399;font-weight:600;">🖱️ Clicking "${escapeHtml(parsed.text || '#' + parsed.id)}" in BookView...</span>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+          </div>
+        `
+        )
+        document.body.appendChild(card)
+        card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+
+        try {
+          const res = await invokeWithTimeout('workbench:book-click-link', {
+            id: parsed.id,
+            text: parsed.text,
+          }, 6500)
+          setSafeInnerHTML(
+            card,
+            `
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <span style="color:${res?.success ? '#34d399' : '#f87171'};font-weight:600;">
+                ${res?.success ? '✅ ' + escapeHtml(res.message) : '⚠️ ' + escapeHtml(res?.message || res?.error || 'Click failed')}
+              </span>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button class="wb-cmd-btn-emerald" id="wb-after-click-read">📖 Read Visible Page</button>
+              <button class="wb-cmd-btn-disable" id="wb-after-click-links">🔗 Show Links</button>
+            </div>
+          `
+          )
+          card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+          card.querySelector('#wb-after-click-read')?.addEventListener('click', () => renderBookExtractCard('viewport'))
+          card.querySelector('#wb-after-click-links')?.addEventListener('click', () => renderBookLinksCard())
+        } catch (err: any) {
+          setSafeInnerHTML(
+            card,
+            `
+            <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+              <span>⚠️ ${escapeHtml(err?.message || 'Click command failed')}</span>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+            </div>
+          `
+          )
+          card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+        }
+        setTimeout(() => {
+          if (document.body.contains(card)) card.remove()
+        }, 6500)
+        return
+      }
+      if (parsed.kind === 'book-nav') {
+        const card = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+        try {
+          const res = await invokeWithTimeout('workbench:book-navigate', {
+            command: parsed.command,
+            url: parsed.url,
+          }, 6500)
+          setSafeInnerHTML(
+            card,
+            `
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="color:${res?.success ? '#34d399' : '#f87171'};font-weight:600;">
+                ${res?.success ? '🧭 ' + escapeHtml(res.message) : '⚠️ ' + escapeHtml(res?.message || res?.error || 'Navigation failed')}
+              </span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <button class="wb-cmd-btn-emerald" id="wb-after-nav-read" style="padding:2px 8px;font-size:11px;">📖 Read Page</button>
+                <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+              </div>
+            </div>
+          `
+          )
+          document.body.appendChild(card)
+          card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+          card.querySelector('#wb-after-nav-read')?.addEventListener('click', () => renderBookExtractCard('viewport'))
+        } catch (err: any) {
+          setSafeInnerHTML(
+            card,
+            `
+            <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+              <span>⚠️ ${escapeHtml(err?.message || 'Navigation command failed')}</span>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+            </div>
+          `
+          )
+          document.body.appendChild(card)
+          card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+        }
+        setTimeout(() => {
+          if (document.body.contains(card)) card.remove()
+        }, 4500)
+        return
+      }
+      if (parsed.kind === 'book-prompt-expansion') {
+        const card = createHudCardContainer('rgba(16, 185, 129, 0.55)')
+        setSafeInnerHTML(
+          card,
+          `
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="color:#34d399;font-weight:600;animation:wbPulse 1.2s infinite ease-in-out;">
+              📖 Extracting BookView ${escapeHtml(parsed.scope)} into prompt...
+            </span>
+            <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+          </div>
+        `
+        )
+        document.body.appendChild(card)
+        card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+
+        try {
+          const res = await invokeWithTimeout('workbench:book-expand-and-submit', {
+            rawPrompt: parsed.rawPrompt,
+            autoSubmit: true,
+          }, 8000)
+          if (!res?.success) {
+            setSafeInnerHTML(
+              card,
+              `
+              <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+                <span>⚠️ ${escapeHtml(res?.error || 'Failed to expand BookView prompt')}</span>
+                <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+              </div>
+            `
+            )
+            card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+            return
+          }
+        } catch (err: any) {
+          setSafeInnerHTML(
+            card,
+            `
+            <div style="display:flex;align-items:center;justify-content:space-between;color:#f87171;">
+              <span>⚠️ ${escapeHtml(err?.message || 'Failed to expand BookView prompt')}</span>
+              <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
+            </div>
+          `
+          )
+          card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+          return
+        }
+        setTimeout(() => {
+          if (document.body.contains(card)) card.remove()
+        }, 1800)
+      }
+    }
+
+    let lastInterceptTimestamp = 0
+
     function checkAndInterceptCommand(e: Event) {
+      if (!e.isTrusted) return
       if (!isChatSite()) return
+      const now = Date.now()
+      if (now - lastInterceptTimestamp < 300) return
       const inputEl = getInputField()
       if (!inputEl) return
       const raw = getInputValue(inputEl)
-      const val = sanitizeCommandText(raw)
-      if (isStatusCmd(val) || isConnectCmd(val)) {
+      const parsed = parseBookChatCommand(raw)
+      if (parsed) {
+        lastInterceptTimestamp = now
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
         clearInputField(inputEl)
-        handleCommand(val)
+        executeBookChatCommand(parsed)
       }
     }
 
@@ -1877,16 +2744,45 @@ try {
       true
     )
 
+    function isSendButtonTarget(e: Event): boolean {
+      try {
+        const selector =
+          'button[data-testid*="send"], button[aria-label*="Send" i], button[aria-label*="Submit" i], button.send-button, .send-button-container button, button[type="submit"]'
+        const path = typeof (e as any).composedPath === 'function' ? ((e as any).composedPath() as EventTarget[]) : [e.target]
+        for (const node of path) {
+          if (node && node instanceof Element) {
+            const btn = (node.matches(selector) ? node : node.closest(selector)) as HTMLElement | null
+            if (btn) {
+              const aria = (btn.getAttribute('aria-label') || '').toLowerCase()
+              if (aria.includes('stop') || btn.classList.contains('stop')) return false
+              return true
+            }
+          }
+        }
+      } catch (_) {}
+      return false
+    }
+
+    window.addEventListener(
+      'pointerdown',
+      (e: PointerEvent) => {
+        try {
+          if (isSendButtonTarget(e)) {
+            checkAndInterceptCommand(e)
+          }
+        } catch (_) {}
+      },
+      true
+    )
+
     window.addEventListener(
       'click',
       (e: MouseEvent) => {
-        const target = e.target as HTMLElement | null
-        const sendBtn = target?.closest(
-          'button[data-testid*="send"], button[aria-label*="Send"], button[aria-label*="send"], button[type="submit"], button:has(svg)'
-        )
-        if (sendBtn) {
-          checkAndInterceptCommand(e)
-        }
+        try {
+          if (isSendButtonTarget(e)) {
+            checkAndInterceptCommand(e)
+          }
+        } catch (_) {}
       },
       true
     )
@@ -1898,6 +2794,7 @@ try {
 // =========================================================================
 try {
   (function initSelectionBubble() {
+    if (!__wbShouldInitPreload) return
     if (typeof window === 'undefined' || typeof document === 'undefined') return
 
     let bubbleHost: HTMLDivElement | null = null
@@ -2028,7 +2925,9 @@ try {
 
       bubbleEl = document.createElement('div')
       bubbleEl.className = 'wb-bubble'
-      bubbleEl.innerHTML = `
+      setSafeInnerHTML(
+        bubbleEl,
+        `
         <button class="wb-btn wb-btn-primary" data-action="explain" title="Ask AI to explain this excerpt">
           <svg class="wb-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
           <span>Explain</span>
@@ -2048,6 +2947,7 @@ try {
           <span>Quiz</span>
         </button>
       `
+      )
 
       bubbleEl.addEventListener('mouseenter', () => { isMouseInsideBubble = true })
       bubbleEl.addEventListener('mouseleave', () => { isMouseInsideBubble = false })

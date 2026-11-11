@@ -23,6 +23,41 @@ export interface ActionContext {
   }
   setActiveTarget(target: 'book' | 'note' | 'custom', customPath?: string): void
   attachToChat?(filePath: string, customInstruction?: string): Promise<{ success: boolean; uploaded?: boolean; error?: string }>
+  bookBridge?: {
+    extractVisiblePage(options?: {
+      scope?: 'viewport' | 'full' | 'both'
+      includeLinks?: boolean
+      includeInputs?: boolean
+      showBadges?: boolean
+    }): Promise<any>
+    extractAndIndexLinks(options?: {
+      viewportOnly?: boolean
+      showBadges?: boolean
+      filter?: string
+    }): Promise<any>
+    clickLinkOrElement(target: {
+      id?: number
+      text?: string
+      selector?: string
+    }): Promise<any>
+    scrollOrNavigate(params: {
+      command:
+        | 'scroll-down'
+        | 'scroll-up'
+        | 'scroll-top'
+        | 'scroll-bottom'
+        | 'next'
+        | 'prev'
+        | 'back'
+        | 'forward'
+        | 'reload'
+        | 'home'
+        | 'url'
+        | 'clear-badges'
+        | 'show-badges'
+      url?: string
+    }): Promise<any>
+  }
 }
 
 export interface ActionParameter {

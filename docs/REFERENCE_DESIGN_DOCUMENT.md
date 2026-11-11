@@ -124,6 +124,13 @@ Managing native `WebContentsView` surfaces alongside web modals and splitters re
 - **Local File Upload Injection**: `aiHandler.sendFileToAI()` reads local files into a binary buffer, converts to `Blob` / `File`, and programmatically populates the AI web client's `input[type="file"]` via synthetic `DataTransfer` events.
 - **Drag-and-Drop Bridge**: Injected drop interceptors in `viewPreload.ts` trap OS and cross-pane file drop events, preventing Chromium from inserting literal file paths into textareas and ensuring authentic file attachment.
 
+### 4. Chatview ↔ Bookview Command Bridge & Summarization Presets
+- **Slash / `!` Commands & `@` Macros**: `viewPreload.ts` intercepts `/page`, `/chapter`, `/inputs`, `/links`, `/click`, `/next`, `/prev`, `/status`, `/connect`, `/help` (and inline `@page`, `@chapter`, `@inputs`, `@links`, `@selection` macros) via `bookCommandParser.ts`.
+- **Configurable Summarization Styles**: Supports inline style flags (`summarize:brief`, `:deep`, `:steps`, `:study`, `:eli5`, `:table`, `:code`), custom `#<template-id>` triggers, and 1-click style pills on the `/page` and `/chapter` HUD cards, synchronized with `AskAITemplateModal.tsx` and `prompts/`.
+- **Autonomous Bookview Actions**: `bookBridgeActions.ts` exposes `read_book_page`, `list_book_links`, `click_book_link`, and `navigate_book` to primed AI models.
+- **TrustedTypes CSP Safety**: All injected HUD cards and badges use `setSafeInnerHTML()` (`electron/utils/safeDom.ts`) to satisfy strict CSP policies on `gemini.google.com`.
+- See [`docs/CHATVIEW_BOOKVIEW_BRIDGE_GUIDE.md`](file:///d:/Products/Workbench/docs/CHATVIEW_BOOKVIEW_BRIDGE_GUIDE.md) for the complete specification.
+
 ---
 
 ## 5. IPC Interface Contract & Protocol
@@ -152,6 +159,13 @@ Managing native `WebContentsView` surfaces alongside web modals and splitters re
 | `workbench:set-action-mode` | Renderer → Main | `invoke` | `{ enabled, customInstructions?, primeAI? }` | Toggles action mode and triggers AI priming. |
 | `workbench:scan-ai-actions` | Renderer → Main | `invoke` | `void` | Scans active AI conversation for executable action blocks. |
 | `workbench:mcp-get-config` / `reload` | Renderer → Main | `invoke` | `void \| config` | Manages Model Context Protocol (MCP) server status. |
+| `workbench:book-extract-page` | Chat Preload → Main | `invoke` | `{ scope, includeLinks?, includeInputs? }` | Extracts visible viewport, full chapter/PDF text, inputs, and links from BookView. |
+| `workbench:book-get-links` | Chat Preload → Main | `invoke` | `{ viewportOnly?, showBadges?, filter? }` | Indexes clickable links in BookView and renders `#id` badges. |
+| `workbench:book-click-link` | Chat Preload → Main | `invoke` | `{ id?, text?, selector? }` | Clicks a link or button inside BookView by `#id` or fuzzy text match. |
+| `workbench:book-navigate` | Chat Preload → Main | `invoke` | `{ command, url? }` | Scrolls or navigates BookView (`next`, `prev`, `scroll-down`, `back`, etc.). |
+| `workbench:book-expand-and-submit` | Chat Preload → Main | `invoke` | `{ rawPrompt, autoSubmit? }` | Expands `/page`, `/chapter`, `@page` macros and summarization styles, then submits to AI. |
+| `workbench:get-book-prompt-presets` | Chat Preload → Main | `invoke` | `void` | Returns built-in summary style presets and synced custom user templates. |
+| `workbench:sync-ask-ai-templates` | Renderer → Main | `send` | `{ templates, defaultTemplateId }` | Synchronizes `AskAITemplateModal` templates with the main process prompt resolver. |
 
 ---
 

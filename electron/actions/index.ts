@@ -29,6 +29,12 @@ import { searchTextAction } from './searchTextAction'
 import { readPagesAction } from './readPagesAction'
 import { fetchOfficialDocsAction } from './fetchOfficialDocsAction'
 import { loadPromptAction } from './loadPromptAction'
+import {
+  readBookPageAction,
+  listBookLinksAction,
+  clickBookLinkAction,
+  navigateBookAction,
+} from './bookBridgeActions'
 
 export * from './types'
 export * from './registry'
@@ -62,6 +68,7 @@ export * from './searchTextAction'
 export * from './readPagesAction'
 export * from './fetchOfficialDocsAction'
 export * from './loadPromptAction'
+export * from './bookBridgeActions'
 
 /**
  * Initializes and registers all built-in modular actions.
@@ -102,6 +109,10 @@ export function registerBuiltinActions(): ActionRegistry {
   registry.register(readPagesAction)
   registry.register(fetchOfficialDocsAction)
   registry.register(loadPromptAction)
+  registry.register(readBookPageAction)
+  registry.register(listBookLinksAction)
+  registry.register(clickBookLinkAction)
+  registry.register(navigateBookAction)
 
   return registry
 }

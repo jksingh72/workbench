@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electron', {
   updateBounds: (bounds: any) => ipcRenderer.send('workbench:update-bounds', bounds),
   setSplit: (params: { ratio: number; isSwapped: boolean; activePanes?: { book: boolean; ai: boolean; note: boolean } }) => ipcRenderer.send('workbench:set-split', params),
   showAskAIMenu: (params?: any) => ipcRenderer.send('workbench:show-ask-ai-menu', params),
+  syncAskAITemplates: (params: { templates: any[]; defaultTemplateId?: string }) =>
+    ipcRenderer.send('workbench:sync-ask-ai-templates', params),
   navAction: (action: any) => ipcRenderer.send('workbench:nav-action', action),
   askAI: (options: any) => ipcRenderer.invoke('workbench:ask-ai', options),
   onOpenAskAITemplateModal: (callback: (data?: { mode?: 'custom' | 'manage'; initialText?: string }) => void) => {
@@ -355,4 +357,23 @@ contextBridge.exposeInMainWorld('electron', {
   // Error Log Management
   openErrorLog: () => ipcRenderer.invoke('workbench:open-error-log'),
   getLogPath: () => ipcRenderer.invoke('workbench:get-log-path'),
+
+  // BookView Live Bridge APIs
+  bookExtractPage: (options?: {
+    scope?: 'viewport' | 'full' | 'inputs' | 'links' | 'both'
+    includeLinks?: boolean
+    includeInputs?: boolean
+    showBadges?: boolean
+  }) => ipcRenderer.invoke('workbench:book-extract-page', options),
+  bookGetLinks: (options?: {
+    viewportOnly?: boolean
+    showBadges?: boolean
+    filter?: string
+  }) => ipcRenderer.invoke('workbench:book-get-links', options),
+  bookClickLink: (target: { id?: number; text?: string; selector?: string }) =>
+    ipcRenderer.invoke('workbench:book-click-link', target),
+  bookNavigate: (params: { command: string; url?: string }) =>
+    ipcRenderer.invoke('workbench:book-navigate', params),
+  bookExpandAndSubmit: (params: { rawPrompt: string; autoSubmit?: boolean }) =>
+    ipcRenderer.invoke('workbench:book-expand-and-submit', params),
 })

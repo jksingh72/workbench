@@ -138,8 +138,21 @@ export const App: React.FC = () => {
     try {
       localStorage.setItem(ASK_AI_TEMPLATES_KEY, JSON.stringify(templates))
       localStorage.setItem(ASK_AI_DEFAULT_ID_KEY, defaultId)
+      ;(window.electron as any)?.syncAskAITemplates?.({
+        templates,
+        defaultTemplateId: defaultId,
+      })
     } catch (_) {}
   }, [])
+
+  useEffect(() => {
+    try {
+      ;(window.electron as any)?.syncAskAITemplates?.({
+        templates: askAITemplates,
+        defaultTemplateId: defaultAskAITemplateId,
+      })
+    } catch (_) {}
+  }, [askAITemplates, defaultAskAITemplateId])
   const [actionMode, setActionMode] = useState<boolean>(() => {
     try {
       return localStorage.getItem('workbench:action-mode') === 'true'

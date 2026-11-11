@@ -654,6 +654,42 @@ export const AskAITemplateModal: React.FC<AskAITemplateModalProps> = ({
               )}
             </form>
           </div>
+
+          {/* 5. ChatView Slash Commands & Summarization Styles Quick Reference */}
+          <div
+            style={{
+              padding: '10px 12px',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.28)',
+              borderRadius: '8px',
+              fontSize: '11.5px',
+              color: '#cbd5e1',
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ fontWeight: 600, color: '#34d399', marginBottom: '4px' }}>
+              💡 Use Templates &amp; Summarization Styles Directly in ChatView:
+            </div>
+            <div>
+              • <strong>Built-in Summary Styles:</strong> Type{' '}
+              <code style={{ color: '#fde68a' }}>/chapter summarize:brief</code>,{' '}
+              <code style={{ color: '#fde68a' }}>:deep</code>,{' '}
+              <code style={{ color: '#fde68a' }}>:steps</code>,{' '}
+              <code style={{ color: '#fde68a' }}>:study</code>,{' '}
+              <code style={{ color: '#fde68a' }}>:eli5</code>,{' '}
+              <code style={{ color: '#fde68a' }}>:table</code>, or{' '}
+              <code style={{ color: '#fde68a' }}>:code</code> (also works with{' '}
+              <code style={{ color: '#fde68a' }}>/page</code> or{' '}
+              <code style={{ color: '#fde68a' }}>@chapter</code>).
+            </div>
+            <div>
+              • <strong>Custom Templates:</strong> Editing <em>Summarize</em> above customizes bare{' '}
+              <code style={{ color: '#fde68a' }}>/chapter summarize</code>. Any custom template added here appears as a 1-click pill on the{' '}
+              <code style={{ color: '#fde68a' }}>/page</code> &amp; <code style={{ color: '#fde68a' }}>/chapter</code> HUD card and can be triggered via{' '}
+              <code style={{ color: '#fde68a' }}>/chapter #&lt;template-id&gt;</code>. Type{' '}
+              <code style={{ color: '#fde68a' }}>/help</code> in ChatView for the full command list.
+            </div>
+          </div>
         </div>
 
         {/* Modal Footer */}

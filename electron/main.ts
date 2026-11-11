@@ -14,7 +14,15 @@ import { AISourceManager, AISource } from './services/aiSourceManager'
 import { NoteSourceManager, NoteSource } from './services/noteSourceManager'
 import { ActionDispatcher } from './services/actionDispatcher'
 import { McpManager } from './services/mcpManager'
-import { PrimingOptions } from './actions'
+import { PrimingOptions, formatBookPageMarkdown } from './actions'
+import {
+  parseBookChatCommand,
+  buildExpandedBookPrompt,
+  SUMMARY_STYLE_PRESETS,
+  EXPLAIN_STYLE_PRESETS,
+  CustomUserPromptTemplate,
+} from './utils/bookCommandParser'
+import { PromptRegistryService } from './services/promptRegistryService'
 import { Logger } from './services/logger'
 
 process.on('uncaughtException', (err) => {
@@ -218,6 +226,7 @@ function createWindow() {
   layoutManager = new LayoutManager(mainWindow, bookHandler, aiHandler, noteHandler)
   ActionDispatcher.getInstance().setMainWindow(mainWindow)
   ActionDispatcher.getInstance().setAIHandler(aiHandler)
+  ActionDispatcher.getInstance().setBookHandler(bookHandler)
 
   // Defer heavy MCP background processes until the UI has fully mounted & painted
   setTimeout(() => {
@@ -465,7 +474,67 @@ function registerIpcHandlers() {
     })
   })
 
+  let syncedAskAITemplates: CustomUserPromptTemplate[] = []
+  let syncedDefaultAskAITemplateId: string = 'explain'
+
+  function getMergedUserTemplates(): CustomUserPromptTemplate[] {
+    const merged: CustomUserPromptTemplate[] = [...syncedAskAITemplates]
+    try {
+      const wf = ActionDispatcher.getInstance().getWorkspaceFolders()
+      const filePrompts = PromptRegistryService.getInstance().listPrompts(wf?.activeDirectory)
+      for (const fp of filePrompts) {
+        if (!merged.some((t) => t.id.toLowerCase() === fp.id.toLowerCase())) {
+          const loaded = PromptRegistryService.getInstance().getPrompt(fp.id, wf?.activeDirectory)
+          if (loaded && loaded.content) {
+            merged.push({
+              id: loaded.id,
+              name: loaded.name,
+              description: loaded.description || loaded.whenToUse,
+              prompt: loaded.content,
+              isPreset: false,
+            })
+          }
+        }
+      }
+    } catch (_) {}
+    return merged
+  }
+
+  ipcMain.on('workbench:sync-ask-ai-templates', (_, params?: { templates?: CustomUserPromptTemplate[]; defaultTemplateId?: string }) => {
+    if (Array.isArray(params?.templates)) {
+      syncedAskAITemplates = params!.templates
+    }
+    if (params?.defaultTemplateId) {
+      syncedDefaultAskAITemplateId = params.defaultTemplateId
+    }
+  })
+
+  ipcMain.handle('workbench:get-book-prompt-presets', () => {
+    return {
+      presets: SUMMARY_STYLE_PRESETS,
+      summaryPresets: SUMMARY_STYLE_PRESETS,
+      explainPresets: EXPLAIN_STYLE_PRESETS,
+      userTemplates: getMergedUserTemplates(),
+      defaultTemplateId: syncedDefaultAskAITemplateId,
+    }
+  })
+
+  ipcMain.on('workbench:open-ask-ai-templates-from-chat', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const initialText = bookHandler ? await bookHandler.extractSelection().catch(() => '') : ''
+    mainWindow.webContents.send('workbench:open-ask-ai-template-modal', {
+      mode: 'manage',
+      initialText,
+    })
+  })
+
   ipcMain.on('workbench:show-ask-ai-menu', (_, params?: { templates?: any[]; defaultTemplateId?: string; rendererSelection?: string }) => {
+    if (Array.isArray(params?.templates)) {
+      syncedAskAITemplates = params!.templates
+    }
+    if (params?.defaultTemplateId) {
+      syncedDefaultAskAITemplateId = params.defaultTemplateId
+    }
     if (!aiHandler || !bookHandler) return
     aiHandler.showAskAIMenu(
       async () => {
@@ -535,6 +604,140 @@ function registerIpcHandlers() {
       return { success: true, text }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to extract selection' }
+    }
+  })
+
+  // =========================================================================
+  // ChatView <-> BookView Live Bridge (Extraction, Link Indexing, Clicking & Navigation)
+  // =========================================================================
+  ipcMain.handle('workbench:book-extract-page', async (_, options?: {
+    scope?: 'viewport' | 'full' | 'inputs' | 'links' | 'both'
+    includeLinks?: boolean
+    includeInputs?: boolean
+    showBadges?: boolean
+  }) => {
+    if (!bookHandler) return { success: false, error: 'BookView handler not ready' }
+    try {
+      const page = await bookHandler.extractVisiblePage({
+        scope: options?.scope === 'full' ? 'full' : 'both',
+        includeLinks: options?.includeLinks ?? true,
+        includeInputs: options?.includeInputs ?? true,
+        showBadges: options?.showBadges ?? false,
+      })
+      const formattedMarkdown = page.success
+        ? formatBookPageMarkdown(page, {
+            scope:
+              options?.scope === 'full' || options?.scope === 'inputs' || options?.scope === 'links'
+                ? options.scope
+                : 'viewport',
+          })
+        : ''
+      return { ...page, formattedMarkdown }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to extract BookView page' }
+    }
+  })
+
+  ipcMain.handle('workbench:book-get-links', async (_, options?: {
+    viewportOnly?: boolean
+    showBadges?: boolean
+    filter?: string
+  }) => {
+    if (!bookHandler) return { success: false, error: 'BookView handler not ready', links: [] }
+    return await bookHandler.extractAndIndexLinks(options)
+  })
+
+  ipcMain.handle('workbench:book-click-link', async (_, target: {
+    id?: number
+    text?: string
+    selector?: string
+  }) => {
+    if (!bookHandler) return { success: false, error: 'BookView handler not ready' }
+    const res = await bookHandler.clickLinkOrElement(target)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(
+        'workbench:notify',
+        res.success ? `🖱️ ${res.message}` : `⚠️ ${res.message || res.error}`
+      )
+    }
+    return res
+  })
+
+  ipcMain.handle('workbench:book-navigate', async (_, params: {
+    command:
+      | 'scroll-down'
+      | 'scroll-up'
+      | 'scroll-top'
+      | 'scroll-bottom'
+      | 'next'
+      | 'prev'
+      | 'back'
+      | 'forward'
+      | 'reload'
+      | 'home'
+      | 'url'
+      | 'clear-badges'
+      | 'show-badges'
+    url?: string
+  }) => {
+    if (!bookHandler) return { success: false, error: 'BookView handler not ready' }
+    const res = await bookHandler.scrollOrNavigate(params)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(
+        'workbench:notify',
+        res.success ? `🧭 ${res.message}` : `⚠️ ${res.message || res.error}`
+      )
+    }
+    return res
+  })
+
+  ipcMain.handle('workbench:book-expand-and-submit', async (_, { rawPrompt, autoSubmit = true }: { rawPrompt: string; autoSubmit?: boolean }) => {
+    if (!bookHandler || !aiHandler) {
+      return { success: false, error: 'Handlers not ready' }
+    }
+    try {
+      const parsed = parseBookChatCommand(rawPrompt)
+      const page = await bookHandler.extractVisiblePage({
+        scope: 'both',
+        includeLinks: true,
+        includeInputs: true,
+        showBadges: false,
+      })
+
+      if (!page.success) {
+        return { success: false, error: page.error || 'Failed to read BookView page' }
+      }
+
+      let finalPrompt = rawPrompt
+      if (parsed && parsed.kind === 'book-prompt-expansion') {
+        finalPrompt = buildExpandedBookPrompt(parsed, page, {
+          userTemplates: getMergedUserTemplates(),
+        })
+      } else {
+        finalPrompt = `${rawPrompt}\n\n---\n${formatBookPageMarkdown(page, { scope: 'viewport' })}`
+      }
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+          'workbench:notify',
+          `📖 Extracted "${page.title || 'BookView Page'}" into chat prompt!`
+        )
+      }
+
+      aiHandler.resetAutonomousSession()
+      const submitRes = await aiHandler.injectAndSubmitChatText(finalPrompt, {
+        autoSubmit,
+        waitForStreaming: false,
+      })
+      return {
+        success: submitRes.success,
+        submitted: submitRes.submitted,
+        title: page.title,
+        expandedPrompt: finalPrompt,
+        error: submitRes.error,
+      }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to expand BookView prompt' }
     }
   })
 

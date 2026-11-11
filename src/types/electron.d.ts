@@ -176,6 +176,20 @@ export interface ElectronAPI {
   mcpSearchOnline?: (query: string) => Promise<{ success: boolean; results: McpOnlineServerResult[]; error?: string }>
   openErrorLog?: () => Promise<boolean>
   getLogPath?: () => Promise<string>
+  bookExtractPage?: (options?: {
+    scope?: 'viewport' | 'full' | 'inputs' | 'links' | 'both'
+    includeLinks?: boolean
+    includeInputs?: boolean
+    showBadges?: boolean
+  }) => Promise<any>
+  bookGetLinks?: (options?: {
+    viewportOnly?: boolean
+    showBadges?: boolean
+    filter?: string
+  }) => Promise<any>
+  bookClickLink?: (target: { id?: number; text?: string; selector?: string }) => Promise<any>
+  bookNavigate?: (params: { command: string; url?: string }) => Promise<any>
+  bookExpandAndSubmit?: (params: { rawPrompt: string; autoSubmit?: boolean }) => Promise<any>
 }
 
 export interface McpServerConfig {

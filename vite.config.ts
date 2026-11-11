@@ -31,7 +31,13 @@ function buildPreloadsPlugin() {
       rebuild()
     },
     handleHotUpdate({ file }) {
-      if (file.includes('preload') || file.includes('viewPreload')) {
+      if (
+        file.includes('preload') ||
+        file.includes('viewPreload') ||
+        file.includes('safeDom') ||
+        file.includes('bookCommandParser') ||
+        file.includes('bookBridgeActions')
+      ) {
         rebuild()
       }
     },

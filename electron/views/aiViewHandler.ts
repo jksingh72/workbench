@@ -331,7 +331,7 @@ export class AIViewHandler {
       if (!this.isVisible || bounds.width <= 0 || bounds.height <= 0) {
         try {
           this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-        } catch (_) {}
+        } catch (_) { }
         this.detachView(this.view)
       } else {
         this.attachView(this.view)
@@ -348,7 +348,7 @@ export class AIViewHandler {
           v.setVisible(false)
           try {
             v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-          } catch (_) {}
+          } catch (_) { }
           this.detachView(v)
         } else {
           this.attachView(v)
@@ -418,7 +418,7 @@ export class AIViewHandler {
     if (this.currentSourceId === source.id && this.view) {
       if (this.currentUrl !== source.url) {
         this.currentUrl = source.url
-        this.view.webContents.loadURL(source.url).catch(() => {})
+        this.view.webContents.loadURL(source.url).catch(() => { })
       }
       return
     }
@@ -428,7 +428,7 @@ export class AIViewHandler {
       this.view.setVisible(false)
       try {
         this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-      } catch (_) {}
+      } catch (_) { }
       this.detachView(this.view)
     }
 
@@ -446,7 +446,7 @@ export class AIViewHandler {
 
     const prevBaseUrl = this.sourceBaseUrls.get(source.id)
     if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {
-      this.view.webContents.loadURL(source.url).catch(() => {})
+      this.view.webContents.loadURL(source.url).catch(() => { })
     }
     this.sourceBaseUrls.set(source.id, source.url)
     this.currentUrl = source.url
@@ -551,12 +551,12 @@ export class AIViewHandler {
       options?.templates && options.templates.length > 0
         ? options.templates
         : [
-            { id: 'explain', name: 'Explain Concept', prompt: 'Please explain the following concept clearly in simple terms with practical examples:', isPreset: true },
-            { id: 'summarize', name: 'Summarize Key Takeaways', prompt: 'Please summarize the key takeaways of the following excerpt:', isPreset: true },
-            { id: 'code', name: 'Provide Code Example', prompt: 'Please provide a clean, practical code example demonstrating the following concept:', isPreset: true },
-            { id: 'quiz', name: 'Quiz Me (3 Questions)', prompt: 'Based on the following text, create 3 review questions with detailed answers to test my understanding:', isPreset: true },
-            { id: 'raw', name: 'Paste Raw Selection', prompt: '{text}', isPreset: true },
-          ]
+          { id: 'explain', name: 'Explain Concept', prompt: 'Please explain the following concept clearly in simple terms with practical examples:', isPreset: true },
+          { id: 'summarize', name: 'Summarize Key Takeaways', prompt: 'Please summarize the key takeaways of the following excerpt:', isPreset: true },
+          { id: 'code', name: 'Provide Code Example', prompt: 'Please provide a clean, practical code example demonstrating the following concept:', isPreset: true },
+          { id: 'quiz', name: 'Quiz Me (3 Questions)', prompt: 'Based on the following text, create 3 review questions with detailed answers to test my understanding:', isPreset: true },
+          { id: 'raw', name: 'Paste Raw Selection', prompt: '{text}', isPreset: true },
+        ]
 
     const presetItems = activeTemplates.filter((t) => t.id !== 'raw')
     const rawItem = activeTemplates.find((t) => t.id === 'raw')
@@ -698,7 +698,7 @@ export class AIViewHandler {
               } catch (_) {}
             `
               )
-              .catch(() => {})
+              .catch(() => { })
           })
         }
       }
@@ -1325,7 +1325,7 @@ export class AIViewHandler {
                     inString = false;
                   }
                 } else {
-                  if (ch === '"') {
+                  if (ch === '"' && depth > 0) {
                     inString = true;
                   } else if (ch === '{') {
                     if (depth === 0) startIdx = i;
@@ -1526,7 +1526,7 @@ export class AIViewHandler {
                   el.setAttribute('data-workbench-executed', 'true');
                   el.setAttribute('data-wb-executed', 'true');
 
-                  var targetBox = el.closest('pre') || el.closest('[class*="code-block"]') || (el.closest('div.rounded-md') && el.closest('div.rounded-md').querySelector('code') ? el.closest('div.rounded-md') : null) || el;
+                  var targetBox = el.closest('code-block') || el.closest('pre') || el.closest('[class*="code-block"]') || (el.closest('div.rounded-md') && el.closest('div.rounded-md').querySelector('code') ? el.closest('div.rounded-md') : null) || el;
                   if (targetBox) {
                     targetBox.setAttribute('data-workbench-executed', 'true');
                     targetBox.setAttribute('data-wb-executed', 'true');
@@ -1549,7 +1549,31 @@ export class AIViewHandler {
                         badge.className = 'workbench-action-badge';
                         badge.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin:6px 0;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:6px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#34d399;font-weight:500;cursor:pointer;user-select:none;';
                         badge.title = 'Click to show / hide raw action JSON';
-                        badge.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span>⚡</span><span style="font-weight:600;color:#10b981;">' + actionType + '</span><span style="color:#94a3b8;font-size:11px;font-family:monospace;">(' + actionParam + ')</span></div><div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;"><span>Executed</span><span class="wb-badge-arrow" style="font-size:9px;opacity:0.7;">▼</span></div>';
+                        var leftDiv = document.createElement('div');
+                        leftDiv.style.cssText = 'display:flex;align-items:center;gap:6px;';
+                        var iconSpan = document.createElement('span');
+                        iconSpan.textContent = '⚡';
+                        var typeSpan = document.createElement('span');
+                        typeSpan.style.cssText = 'font-weight:600;color:#10b981;';
+                        typeSpan.textContent = String(actionType);
+                        var paramSpan = document.createElement('span');
+                        paramSpan.style.cssText = 'color:#94a3b8;font-size:11px;font-family:monospace;';
+                        paramSpan.textContent = '(' + String(actionParam) + ')';
+                        leftDiv.appendChild(iconSpan);
+                        leftDiv.appendChild(typeSpan);
+                        leftDiv.appendChild(paramSpan);
+                        var rightDiv = document.createElement('div');
+                        rightDiv.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;';
+                        var execSpan = document.createElement('span');
+                        execSpan.textContent = 'Executed';
+                        var arrowSpan = document.createElement('span');
+                        arrowSpan.className = 'wb-badge-arrow';
+                        arrowSpan.style.cssText = 'font-size:9px;opacity:0.7;';
+                        arrowSpan.textContent = '▼';
+                        rightDiv.appendChild(execSpan);
+                        rightDiv.appendChild(arrowSpan);
+                        badge.appendChild(leftDiv);
+                        badge.appendChild(rightDiv);
 
                         (function(box, b) {
                           b.addEventListener('click', function() {
@@ -1961,6 +1985,7 @@ export class AIViewHandler {
 
       // Step 2: Locate and focus the chat input in DOM across Claude, ChatGPT, Gemini, etc.
       console.log(`[AIView:Inject:STEP 2] Locating & focusing chat input in DOM...`)
+      this.view.webContents.focus()
       const focusResult: { success: boolean; error?: string; isContentEditable?: boolean; tagName?: string } =
         await this.view.webContents.executeJavaScript(`
         (function() {
@@ -1973,9 +1998,9 @@ export class AIViewHandler {
           }
 
           const inputSelectors = [
-            '#prompt-textarea',
             'div.ProseMirror[contenteditable="true"]',
             'div[contenteditable="true"].ProseMirror',
+            '#prompt-textarea',
             'div[contenteditable="true"][role="textbox"]',
             'rich-textarea div[contenteditable="true"]',
             'div.ql-editor[contenteditable="true"]',
@@ -1987,13 +2012,20 @@ export class AIViewHandler {
             'textarea'
           ];
 
+          document.querySelectorAll('[data-wb-inject-target]').forEach(function(n) {
+            n.removeAttribute('data-wb-inject-target');
+          });
+
           let input = null;
           for (const sel of inputSelectors) {
-            const el = document.querySelector(sel);
-            if (isVisible(el)) {
-              input = el;
-              break;
+            const nodes = document.querySelectorAll(sel);
+            for (let i = nodes.length - 1; i >= 0; i--) {
+              if (isVisible(nodes[i])) {
+                input = nodes[i];
+                break;
+              }
             }
+            if (input) break;
           }
 
           if (!input) {
@@ -2011,10 +2043,15 @@ export class AIViewHandler {
             return { success: false, error: 'Chat input field not found. Please ensure the chat interface is open.' };
           }
 
+          input.setAttribute('data-wb-inject-target', 'true');
           input.focus();
 
-          // Select all existing content so native insertText cleanly replaces any draft
+          // Clear and select all existing content so native paste/insertText cleanly replaces any draft once
           if (input.isContentEditable) {
+            try {
+              document.execCommand('selectAll', false);
+              document.execCommand('delete', false);
+            } catch (_) {}
             const range = document.createRange();
             range.selectNodeContents(input);
             const sel = window.getSelection();
@@ -2023,6 +2060,7 @@ export class AIViewHandler {
               sel.addRange(range);
             }
           } else if (input.tagName && input.tagName.toLowerCase() === 'textarea') {
+            input.value = '';
             input.select();
           }
 
@@ -2048,6 +2086,7 @@ export class AIViewHandler {
       console.log(`[AIView:Inject:STEP 3] Inserting text (${textToInsert.length} chars) via Chromium WebContents...`)
       this.view.webContents.focus()
 
+      let pastedViaNativeClipboard = false
       // For prompts > 300 characters, native clipboard paste executes in <5ms,
       // completely eliminating Chromium IPC buffer saturation, GPU proxy crashes, and ProseMirror freeze.
       if (textToInsert.length > 300) {
@@ -2055,17 +2094,18 @@ export class AIViewHandler {
         try {
           clipboard.writeText(textToInsert)
           this.view.webContents.paste()
-          // Allow 400ms for web page editor to process paste event, then restore user's previous clipboard
+          pastedViaNativeClipboard = true
+          // Allow 500ms for web page editor to process paste event, then restore user's previous clipboard
           setTimeout(() => {
             try {
               if (prevClipboard) clipboard.writeText(prevClipboard)
-            } catch (_) {}
-          }, 400)
+            } catch (_) { }
+          }, 500)
         } catch (pasteErr) {
           console.warn('[AIView:Inject:STEP 3] webContents.paste failed, using insertText fallback:', pasteErr)
           try {
             await this.view.webContents.insertText(textToInsert)
-          } catch (_) {}
+          } catch (_) { }
         }
       } else {
         try {
@@ -2074,29 +2114,100 @@ export class AIViewHandler {
           console.warn('[AIView:Inject:STEP 3] webContents.insertText failed, using paste fallback:', insertErr)
           clipboard.writeText(textToInsert)
           this.view.webContents.paste()
+          pastedViaNativeClipboard = true
         }
       }
 
-      // Step 3.5: Dispatch input and change events on activeElement so React (ChatGPT) and Angular (Gemini) enable their Send buttons
-      console.log(`[AIView:Inject:STEP 4] Dispatching input events & waiting for DOM reconciliation...`)
-      await this.view.webContents.executeJavaScript(`
-        (function() {
-          const el = document.activeElement || document.querySelector('#prompt-textarea') || document.querySelector('rich-textarea div[contenteditable="true"]') || document.querySelector('div[contenteditable="true"]');
-          if (el) {
-            try {
-              el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste' }));
-            } catch (_) {}
-            try {
-              el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText' }));
-            } catch (_) {}
-            el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      // Step 3.5: Allow 120ms for Chromium paste IPC to land, verify text in the exact visible target editor, and dispatch lightweight input events
+      await new Promise((r) => setTimeout(r, 120))
+      console.log(`[AIView:Inject:STEP 4] Verifying text in editor, dispatching input events & waiting for DOM reconciliation...`)
+      const smallFallback = textToInsert.length <= 1200 ? textToInsert : ''
+      const verifyRes: { hadText?: boolean; hasAttachment?: boolean } | null = await this.view.webContents.executeJavaScript(`
+        (function(fallbackText) {
+          function isVisible(el) {
+            if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+            const rect = el.getBoundingClientRect();
+            return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
           }
-        })()
-      `).catch(() => {})
 
-      // Step 4: Allow 200ms for React/ProseMirror DOM reconciliation & send button enabling
-      await new Promise((r) => setTimeout(r, 200))
+          let el = document.querySelector('[data-wb-inject-target="true"]');
+          if (!el || !isVisible(el)) {
+            const selectors = [
+              'div.ProseMirror[contenteditable="true"]',
+              '#prompt-textarea',
+              'rich-textarea div.ql-editor[contenteditable="true"]',
+              'rich-textarea div[contenteditable="true"]',
+              'div.ql-editor[contenteditable="true"]',
+              'div[contenteditable="true"][role="textbox"]',
+              'div[contenteditable="true"]',
+              'textarea'
+            ];
+            for (const sel of selectors) {
+              const nodes = document.querySelectorAll(sel);
+              for (let i = nodes.length - 1; i >= 0; i--) {
+                if (isVisible(nodes[i])) {
+                  el = nodes[i];
+                  break;
+                }
+              }
+              if (el) break;
+            }
+          }
+          if (!el) el = document.activeElement;
+
+          // Check whether the chat converted large pasted text into an attachment capsule/pill (e.g. ChatGPT "Pasted text")
+          const hasAttachment = Boolean(
+            document.querySelector(
+              '[data-testid*="attachment"], [class*="attachment"], [class*="capsule"], [aria-label*="Remove" i], [aria-label*="Delete" i], button:has(svg)[aria-label*="Remove" i]'
+            ) ||
+            document.querySelector('[data-testid="composer-speech-button"]')?.parentElement?.querySelector('button, [class*="pill"]') ||
+            (document.body && (document.body.innerText.includes('Pasted text') || document.body.innerText.includes('pasted_text')))
+          );
+
+          if (!el) return { hadText: false, hasAttachment: hasAttachment };
+          el.focus();
+          let currentVal = (el.value !== undefined ? el.value : (el.innerText || el.textContent || '')).trim();
+          if (!currentVal && !hasAttachment && fallbackText) {
+            try {
+              if (el.tagName && el.tagName.toLowerCase() === 'textarea') {
+                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                if (nativeSetter) {
+                  nativeSetter.call(el, fallbackText);
+                } else {
+                  el.value = fallbackText;
+                }
+              } else {
+                document.execCommand('selectAll', false);
+                document.execCommand('insertText', false, fallbackText);
+                if (!(el.innerText || el.textContent || '').trim()) {
+                  el.textContent = fallbackText;
+                }
+              }
+              currentVal = (el.value !== undefined ? el.value : (el.innerText || el.textContent || '')).trim();
+            } catch (_) {}
+          }
+          try {
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertFromPaste' }));
+          } catch (_) {}
+          el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          return { hadText: currentVal.length > 0, hasAttachment: hasAttachment };
+        })(${JSON.stringify(smallFallback)})
+      `).catch(() => null)
+
+      // NEVER call paste() a second time if native clipboard paste already fired.
+      // In ChatGPT, large pastes are converted into an attachment capsule ("Pasted text"), leaving el.innerText empty.
+      // Repeating paste() produces duplicate capsules in ChatGPT.
+      if (!pastedViaNativeClipboard && verifyRes && !verifyRes.hadText && !verifyRes.hasAttachment && textToInsert.length > 1200) {
+        try {
+          this.view.webContents.focus()
+          clipboard.writeText(textToInsert)
+          this.view.webContents.paste()
+          await new Promise((r) => setTimeout(r, 120))
+        } catch (_) {}
+      }
 
       if (!autoSubmit) {
         console.log(`[AIView:Inject:STEP 5] autoSubmit is false. Leaving text ready in input.`)
@@ -2109,50 +2220,79 @@ export class AIViewHandler {
       }
 
       // Step 5: Multi-layered Submission
-      // Layer A: Attempt DOM click on the now-enabled Send button
-      console.log(`[AIView:Inject:STEP 5] Submitting prompt: attempting Send button click...`)
-      const clickResult: { clicked: boolean; sendBtnFound: boolean } =
-        await this.view.webContents.executeJavaScript(`
-        (function() {
-          function isVisible(el) {
-            if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-            const rect = el.getBoundingClientRect();
-            return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
-          }
+      // Poll up to 1400ms for React/ProseMirror/ChatGPT attachment processing to settle and Send button to become enabled
+      console.log(`[AIView:Inject:STEP 5] Submitting prompt: waiting for Send button to become enabled...`)
+      let sendBtnClicked = false
+      const sendWaitStart = Date.now()
 
-          const sendSelectors = [
-            'button[data-testid="send-button"]',
-            'button[data-testid="fruitjuice-send-button"]',
-            'button[aria-label*="Send message" i]',
-            'button[aria-label*="Send prompt" i]',
-            'button[aria-label="Send" i]',
-            'button[aria-label*="Send" i]',
-            'button[aria-label*="Submit query" i]',
-            'button[aria-label*="Submit" i]',
-            'button[type="submit"]',
-            'button.send-button',
-            '.send-button-container button',
-            'div[role="button"][aria-label*="Send" i]',
-            'div[role="button"][aria-label*="Submit" i]'
-          ];
-
-          for (const sel of sendSelectors) {
-            const btn = document.querySelector(sel);
-            if (isVisible(btn)) {
-              btn.click();
-              return { clicked: true, sendBtnFound: true };
+      while (Date.now() - sendWaitStart < 1400) {
+        const clickResult: { clicked: boolean; sendBtnFound: boolean } =
+          await this.view.webContents.executeJavaScript(`
+          (function() {
+            function isVisibleAndEnabled(el) {
+              if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+              if (el.classList && el.classList.contains('stop')) return false;
+              const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+              if (aria.includes('stop')) return false;
+              const style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+              const rect = el.getBoundingClientRect();
+              return (rect.width > 0 && rect.height > 0) || el.getClientRects().length > 0;
             }
-          }
-          return { clicked: false, sendBtnFound: false };
-        })()
-      `).catch(() => ({ clicked: false, sendBtnFound: false }))
 
-      // Layer B: Hardware-level Enter key via Electron sendInputEvent if button wasn't clicked
-      if (!clickResult.clicked) {
-        console.log(`[AIView:Inject:STEP 5] Send button click not triggered (found: ${clickResult.sendBtnFound}). Falling back to Enter key...`)
+            const sendSelectors = [
+              'button[data-testid="send-button"]',
+              'button[data-testid="fruitjuice-send-button"]',
+              'button[aria-label*="Send message" i]',
+              'button[aria-label*="Send prompt" i]',
+              'button[aria-label="Send" i]',
+              'button[aria-label*="Send" i]',
+              'button[aria-label*="Submit query" i]',
+              'button[aria-label*="Submit" i]',
+              'button[type="submit"]',
+              'button.send-button:not(.stop)',
+              '.send-button-container button:not(.stop)',
+              'div[role="button"][aria-label*="Send" i]',
+              'div[role="button"][aria-label*="Submit" i]'
+            ];
+
+            for (const sel of sendSelectors) {
+              const btn = document.querySelector(sel);
+              if (isVisibleAndEnabled(btn)) {
+                btn.click();
+                return { clicked: true, sendBtnFound: true };
+              }
+            }
+            return { clicked: false, sendBtnFound: Boolean(document.querySelector(sendSelectors.join(','))) };
+          })()
+        `).catch(() => ({ clicked: false, sendBtnFound: false }))
+
+        if (clickResult.clicked) {
+          sendBtnClicked = true
+          console.log(`[AIView:Inject:STEP 5] Successfully clicked Send button`)
+          break
+        }
+        await new Promise((r) => setTimeout(r, 120))
+      }
+
+      // Layer B: DOM Enter key on active editor + Hardware-level Enter key via Electron sendInputEvent if button wasn't clicked
+      if (!sendBtnClicked) {
+        console.log(`[AIView:Inject:STEP 5] Send button click not triggered. Falling back to Enter key...`)
+        await this.view.webContents.executeJavaScript(`
+          (function() {
+            const el = document.querySelector('rich-textarea div[contenteditable="true"]') ||
+                       document.querySelector('div.ql-editor[contenteditable="true"]') ||
+                       document.querySelector('#prompt-textarea') ||
+                       document.activeElement;
+            if (el) {
+              el.focus();
+              el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+            }
+          })()
+        `).catch(() => { })
         this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+        this.view.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
         this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
       } else {
         console.log(`[AIView:Inject:STEP 5] Successfully clicked Send button`)
@@ -2197,11 +2337,11 @@ export class AIViewHandler {
 
           return { submitted: false };
         })()
-      `).catch(() => ({ submitted: clickResult.clicked }))
+      `).catch(() => ({ submitted: sendBtnClicked }))
       console.log(`[AIView:Inject:STEP 6] Post-submission verification: submitted = ${verification.submitted}`)
 
       // If still not submitted, try one more hardware Enter fallback
-      if (!verification.submitted && !clickResult.clicked) {
+      if (!verification.submitted && !sendBtnClicked) {
         this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
         this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
         await new Promise((r) => setTimeout(r, 300))
@@ -2236,12 +2376,12 @@ export class AIViewHandler {
             setTimeout(hidePromptElement, 500);
             setTimeout(hidePromptElement, 1200);
           })()
-        `).catch(() => {})
+        `).catch(() => { })
       }
 
       return {
         success: true,
-        submitted: verification.submitted || clickResult.clicked,
+        submitted: verification.submitted || sendBtnClicked,
       }
     } catch (err: any) {
       console.warn('[AIView] injectAndSubmitChatText error:', err)
@@ -2339,7 +2479,7 @@ export class AIViewHandler {
             window.__wb_hide_observer.observe(document.body, { childList: true, subtree: true });
           }
         })()
-      `).catch(() => {})
+      `).catch(() => { })
 
       // 2. Check if current conversation is already primed (skip if already primed unless forced)
       if (!force) {
@@ -2416,13 +2556,13 @@ export class AIViewHandler {
     if (this.view && !this.view.webContents.isDestroyed()) {
       try {
         this.view.webContents.send(channel, ...args)
-      } catch (_) {}
+      } catch (_) { }
     }
     for (const v of this.views.values()) {
       if (v.webContents && !v.webContents.isDestroyed() && v.webContents !== this.view?.webContents) {
         try {
           v.webContents.send(channel, ...args)
-        } catch (_) {}
+        } catch (_) { }
       }
     }
   }
