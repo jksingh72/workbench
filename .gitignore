@@ -9,7 +9,6 @@ Releases/
 out/
 
 # Ignored configs & guides
-.github/
 CLAUDE.md
 
 # Environment & credentials
