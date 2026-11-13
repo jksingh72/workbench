@@ -13,6 +13,9 @@ import {
 import {
   parseBookChatCommand,
   buildExpandedBookPrompt,
+  getDefaultBookCommandCatalog,
+  getEffectiveExplainPresets,
+  getEffectiveSummaryPresets,
 } from '../electron/utils/bookCommandParser.ts'
 import { setSafeInnerHTML } from '../electron/utils/safeDom.ts'
 import type {
@@ -437,6 +440,169 @@ describe('ChatView <-> BookView Bridge Test Suite', () => {
         })
         assert.ok(expandedCustom.includes('Extract 5 systems design interview questions and trade-offs from:'))
         assert.ok(!expandedCustom.includes('{text}'))
+      }
+    })
+
+    test('applies configured command overrides and custom commands from BookCommandConfigModal', () => {
+      const catalog = getDefaultBookCommandCatalog()
+      assert.ok(catalog.length >= 15, 'Catalog should expose all built-in Summarize, Explain, and Utility commands')
+      assert.ok(catalog.some((i) => i.key === 'summarize:deep'))
+      assert.ok(catalog.some((i) => i.key === 'explain:why'))
+      assert.ok(catalog.some((i) => i.key === 'quiz'))
+
+      const commandOverrides = {
+        overrides: {
+          'summarize:deep': {
+            label: 'Ultra Deep',
+            promptDirective: 'CUSTOM_DEEP_DIRECTIVE: Analyze memory layout and invariants carefully.',
+          },
+          'explain:why': {
+            promptDirective: 'CUSTOM_WHY_DIRECTIVE: Focus strictly on amortized bounds.',
+          },
+        },
+        customCommands: [
+          {
+            key: 'flashcards',
+            category: 'explain' as const,
+            label: 'Anki Cards',
+            icon: '🃏',
+            description: 'Generate Anki front/back flashcards',
+            promptDirective: 'CUSTOM_FLASHCARD_DIRECTIVE: Produce 5 Anki cards.',
+          },
+        ],
+      }
+
+      const cmdDeep = parseBookChatCommand('/chapter summarize:deep focus on pointers')
+      assert.ok(cmdDeep && cmdDeep.kind === 'book-prompt-expansion')
+      if (cmdDeep && cmdDeep.kind === 'book-prompt-expansion') {
+        const expanded = buildExpandedBookPrompt(cmdDeep, samplePageData, { commandOverrides })
+        assert.ok(expanded.includes('CUSTOM_DEEP_DIRECTIVE: Analyze memory layout and invariants carefully.'))
+        assert.ok(expanded.includes('Additional Focus / Instruction:** focus on pointers'))
+      }
+
+      const cmdFlash = parseBookChatCommand('/chapter explain:flashcards')
+      assert.ok(cmdFlash && cmdFlash.kind === 'book-prompt-expansion')
+      if (cmdFlash && cmdFlash.kind === 'book-prompt-expansion') {
+        const expanded = buildExpandedBookPrompt(cmdFlash, samplePageData, { commandOverrides })
+        assert.ok(expanded.includes('CUSTOM_FLASHCARD_DIRECTIVE: Produce 5 Anki cards.'))
+      }
+
+      const effSummary = getEffectiveSummaryPresets(commandOverrides)
+      assert.strictEqual(effSummary.find((p) => p.id === 'deep')?.label, 'Ultra Deep')
+      const effExplain = getEffectiveExplainPresets(commandOverrides)
+      assert.ok(effExplain.some((p) => p.id === 'flashcards' && p.label === 'Anki Cards'))
+    })
+
+    test('parses PDF page hints, renders material-aware design/video snapshots, and applies pageDesign toggles', () => {
+      // 1. Optional PDF page hints (/page p14 explain:why and /chapter p10-15)
+      const pdfPageCmd = parseBookChatCommand('/page p14 explain:why')
+      assert.ok(pdfPageCmd && pdfPageCmd.kind === 'book-prompt-expansion')
+      if (pdfPageCmd && pdfPageCmd.kind === 'book-prompt-expansion') {
+        assert.deepStrictEqual(pdfPageCmd.pageRangeHint, { startPage: 14, endPage: 14 })
+        assert.strictEqual(pdfPageCmd.instruction, 'explain:why')
+      }
+
+      const pdfRangeCardCmd = parseBookChatCommand('/chapter p10-15')
+      assert.ok(pdfRangeCardCmd && pdfRangeCardCmd.kind === 'book-extract-card')
+      if (pdfRangeCardCmd && pdfRangeCardCmd.kind === 'book-extract-card') {
+        assert.deepStrictEqual(pdfRangeCardCmd.pageRangeHint, { startPage: 10, endPage: 15 })
+      }
+
+      // 2. Course Docs page with PageDesign structure (outline, callouts, chart figures)
+      const coursePage = {
+        ...samplePageData,
+        title: '5. Analyzing Complexity | CS 2110',
+        pageDesign: {
+          materialType: 'course-docs' as const,
+          platformHint: 'course-docs',
+          containerSelector: '.bd-article-container',
+          breadcrumbs: ['CS 2110', '5. Analyzing Complexity'],
+          inPageOutline: ['Measuring Runtime', 'Asymptotic Notation'],
+          hasSidebarToc: true,
+          headingOutline: [{ level: 1, text: '5. Analyzing Complexity', inViewport: true }],
+          figures: [{ caption: 'Runtime on paritySplit()', alt: 'Linear runtime plot', kind: 'chart' as const, inViewport: true }],
+          callouts: [{ kind: 'NOTE', text: 'Loop invariant must hold at entry and exit.', inViewport: true }],
+          tableCount: 1,
+          interactiveWidgets: [],
+        },
+      }
+
+      const designCmd = parseBookChatCommand('/chapter design')
+      assert.ok(designCmd && designCmd.kind === 'book-prompt-expansion')
+      if (designCmd && designCmd.kind === 'book-prompt-expansion') {
+        const expandedWithDesign = buildExpandedBookPrompt(designCmd, coursePage)
+        assert.ok(expandedWithDesign.includes('Material Format**: 📘 Course Notes & Documentation'))
+        assert.ok(expandedWithDesign.includes('#### 🏗️ Source Material & Page Structure:'))
+        assert.ok(expandedWithDesign.includes('Runtime on paritySplit()'))
+        assert.ok(expandedWithDesign.includes('Note on Source Material & Page Design:'))
+
+        const expandedMinimal = buildExpandedBookPrompt(designCmd, coursePage, {
+          commandOverrides: {
+            overrides: {},
+            pageDesign: {
+              includeDesignSummary: false,
+              preserveMarkdownStructure: true,
+              includeFigureCaptions: false,
+              includeVideoTranscript: false,
+              designGuidancePrompt: 'CUSTOM_DISABLED',
+            },
+          },
+        })
+        assert.ok(!expandedMinimal.includes('#### 🏗️ Source Material & Page Structure:'))
+        assert.ok(!expandedMinimal.includes('CUSTOM_DISABLED'))
+      }
+
+      // 3. Video Course snapshot renders playback timestamp & active transcript context
+      const videoPage = {
+        success: true,
+        mode: 'web' as const,
+        title: 'Distributed Consensus Video Lecture',
+        chapter: 'Distributed Consensus [04:32 / 18:15]',
+        url: 'https://learning.oreilly.com/videos/ddia-video/1234',
+        scrollPercent: 25,
+        selectedText: '',
+        visibleText: '▶ [04:32] Leader sends AppendEntries RPC to followers.',
+        fullText: '[00:10] Introduction\n[04:32] Leader sends AppendEntries RPC to followers.',
+        headings: ['1. Intro', '2. Leader Election'],
+        codeBlocks: [],
+        inputs: [],
+        links: [],
+        pageDesign: {
+          materialType: 'video-course' as const,
+          platformHint: 'oreilly-video',
+          containerSelector: 'video-player',
+          breadcrumbs: [],
+          inPageOutline: ['1. Intro', '2. Leader Election'],
+          hasSidebarToc: true,
+          paginationLabel: 'Playback 04:32 / 18:15',
+          headingOutline: [],
+          figures: [],
+          callouts: [],
+          tableCount: 0,
+          interactiveWidgets: [{ kind: 'video' as const, label: 'oreilly-video (04:32 / 18:15)' }],
+          video: {
+            hasVideo: true,
+            platform: 'oreilly-video' as const,
+            videoTitle: 'Distributed Consensus Video Lecture',
+            currentTimeSec: 272,
+            durationSec: 1095,
+            currentTimestampFormatted: '04:32 / 18:15',
+            paused: false,
+            transcriptSource: 'dom-transcript' as const,
+            nearbyCues: [{ time: '04:32', text: 'Leader sends AppendEntries RPC to followers.', isCurrent: true }],
+            fullTranscript: '[00:10] Introduction\n[04:32] Leader sends AppendEntries RPC to followers.',
+            chapters: [{ title: '1. Intro' }, { title: '2. Leader Election' }],
+          },
+        },
+      }
+
+      const videoCmd = parseBookChatCommand('/page video')
+      assert.ok(videoCmd && videoCmd.kind === 'book-prompt-expansion')
+      if (videoCmd && videoCmd.kind === 'book-prompt-expansion') {
+        const expandedVideo = buildExpandedBookPrompt(videoCmd, videoPage)
+        assert.ok(expandedVideo.includes('#### 🎬 Video Playback & Course Context:'))
+        assert.ok(expandedVideo.includes('Playing at `04:32 / 18:15`'))
+        assert.ok(expandedVideo.includes('Active Video Segment Around Current Playback Time'))
       }
     })
 

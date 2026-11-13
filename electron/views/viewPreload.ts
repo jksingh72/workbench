@@ -2127,14 +2127,17 @@ try {
       ])
     }
 
-    async function renderBookExtractCard(scope: 'viewport' | 'full' | 'inputs' = 'viewport') {
+    async function renderBookExtractCard(
+      scope: 'viewport' | 'full' | 'inputs' = 'viewport',
+      pageRangeHint?: { startPage: number; endPage: number }
+    ) {
       const loadingCard = createHudCardContainer('rgba(16, 185, 129, 0.55)')
       setSafeInnerHTML(
         loadingCard,
         `
         <div style="display:flex;align-items:center;justify-content:space-between;">
           <div style="display:flex;align-items:center;gap:8px;color:#34d399;font-weight:600;">
-            <span>📖</span><span>Reading BookView (${escapeHtml(scope)})...</span>
+            <span>📖</span><span>Classifying & Reading BookView (${escapeHtml(scope)})...</span>
           </div>
           <button class="wb-cmd-close-btn" id="wb-card-close-btn">✕</button>
         </div>
@@ -2148,6 +2151,7 @@ try {
           scope,
           includeLinks: true,
           includeInputs: true,
+          pageRangeHint,
         }, 6500)
         if (!res || !res.success) {
           setSafeInnerHTML(
@@ -2199,6 +2203,16 @@ try {
             )
             .join('')
 
+        const customGeneralCommands: any[] = (presetData?.commandConfig?.customCommands || []).filter(
+          (c: any) => c.category === 'general'
+        )
+        const customCmdPillsHtml = customGeneralCommands
+          .map(
+            (c: any) =>
+              `<button class="wb-cmd-btn-disable" data-raw-cmd="${escapeHtml(`${baseCmd} ${c.key}`)}" title="${escapeHtml(c.description || '')}" style="padding:3px 8px;font-size:11px;border-color:rgba(168,85,247,0.45);color:#e9d5ff;">${escapeHtml(c.icon || '✨')} ${escapeHtml(c.label)}</button>`
+          )
+          .join('')
+
         const customPillsHtml = customUserTemplates
           .slice(0, 6)
           .map(
@@ -2224,16 +2238,35 @@ try {
                 .join('\n') || '(No form inputs detected on visible BookView page)'
             : rawBodyPreview
 
+        const materialBadgeMap: Record<string, { label: string; color: string; bg: string; border: string }> = {
+          'video-course': { label: '🎬 Video Course', color: '#f472b6', bg: 'rgba(244,114,182,0.14)', border: 'rgba(244,114,182,0.4)' },
+          'ereader-spa': { label: '📕 Kindle Reader', color: '#fbbf24', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.4)' },
+          'ebook-web': { label: '📙 O’Reilly Book', color: '#fb923c', bg: 'rgba(251,146,60,0.14)', border: 'rgba(251,146,60,0.4)' },
+          'course-docs': { label: '📘 Course Docs', color: '#38bdf8', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.4)' },
+          'local-pdf': { label: '📄 Local PDF', color: '#f87171', bg: 'rgba(248,113,113,0.14)', border: 'rgba(248,113,113,0.4)' },
+          'local-ebook': { label: '📗 Local E-Book', color: '#34d399', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.4)' },
+          'local-doc': { label: '📝 Local Doc', color: '#cbd5e1', bg: 'rgba(148,163,184,0.14)', border: 'rgba(148,163,184,0.4)' },
+          'generic-article': { label: '🌐 Web Page', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.35)' },
+        }
+        const mType = res.pageDesign?.materialType || 'generic-article'
+        const mInfo = materialBadgeMap[mType] || materialBadgeMap['generic-article']
+        const locationLabel = res.pageDesign?.paginationLabel || `~${res.scrollPercent || 0}%`
+        const pageSuffix = pageRangeHint
+          ? ` p${pageRangeHint.startPage}${pageRangeHint.endPage > pageRangeHint.startPage ? '-' + pageRangeHint.endPage : ''}`
+          : ''
+
         setSafeInnerHTML(
           card,
           `
           <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:600; color:#34d399; flex-wrap:wrap;">
               <span>📖</span> <span>BookView ${scope === 'full' ? 'Chapter' : scope === 'inputs' ? 'Inputs' : 'Page'} Extracted</span>
-              <span style="font-size:11px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); padding:1px 6px; border-radius:4px;">~${res.scrollPercent || 0}%</span>
+              <span style="font-size:10.5px; color:${mInfo.color}; background:${mInfo.bg}; border:1px solid ${mInfo.border}; padding:1px 7px; border-radius:4px;">${escapeHtml(mInfo.label)}</span>
+              <span style="font-size:11px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); padding:1px 6px; border-radius:4px;">${escapeHtml(locationLabel)}</span>
             </div>
             <div style="display:flex; align-items:center; gap:6px;">
-              <button class="wb-cmd-btn-disable" id="wb-book-customize-templates-btn" style="padding:2px 8px;font-size:10.5px;" title="Customize summary & Ask AI templates">⚙️ Customize</button>
+              <button class="wb-cmd-btn-disable" id="wb-book-configure-commands-btn" style="padding:2px 8px;font-size:10.5px;border-color:rgba(16,185,129,0.4);color:#34d399;" title="Configure prompts for every /chapter & /page command">⚙️ Commands</button>
+              <button class="wb-cmd-btn-disable" id="wb-book-customize-templates-btn" style="padding:2px 8px;font-size:10.5px;" title="Customize Ask AI highlight templates">✨ Templates</button>
               <button class="wb-cmd-btn-disable" id="wb-book-help-btn" style="padding:2px 8px;font-size:10.5px;" title="Show ChatView ↔ BookView command reference">❓ Help</button>
               <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
             </div>
@@ -2255,19 +2288,26 @@ try {
             </div>
           </div>
           <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px;">
+            ${customCmdPillsHtml}
             ${customPillsHtml}
-            <button class="wb-cmd-btn-emerald" data-raw-cmd="${escapeHtml(`${baseCmd} quiz`)}">❓ Quiz Me</button>
-            <button class="wb-cmd-btn-emerald" data-prompt="Extract all parameters, inputs, and actionable steps from this page:">🎛️ Extract Inputs</button>
+            ${mType === 'video-course' ? `<button class="wb-cmd-btn-prime" data-raw-cmd="${escapeHtml(`${baseCmd} video`)}">🎬 Video Breakdown</button>` : ''}
+            <button class="wb-cmd-btn-disable" data-raw-cmd="${escapeHtml(`${baseCmd} design${pageSuffix}`)}" style="border-color:rgba(56,189,248,0.4);color:#7dd3fc;">🏗️ Analyze Design</button>
+            <button class="wb-cmd-btn-emerald" data-raw-cmd="${escapeHtml(`${baseCmd} quiz${pageSuffix}`)}">❓ Quiz Me</button>
+            <button class="wb-cmd-btn-emerald" data-raw-cmd="${escapeHtml(`${baseCmd} extract-inputs${pageSuffix}`)}">🎛️ Extract Inputs</button>
             <button class="wb-cmd-btn-disable" id="wb-book-insert-raw-btn">📋 Insert in Prompt</button>
             <button class="wb-cmd-btn-disable" id="wb-book-show-links-btn">🔗 Links (${(res.links || []).length})</button>
           </div>
           <div style="font-size:10.5px; color:#64748b; margin-top:6px;">
-            Tip: Type <code style="color:#94a3b8;">${escapeHtml(baseCmd)} summarize:deep</code>, <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:why</code>, <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:trace</code>, or <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:compare</code>!
+            Tip: Type <code style="color:#94a3b8;">${escapeHtml(baseCmd)} summarize:deep</code>, <code style="color:#94a3b8;">${escapeHtml(baseCmd)} explain:why</code>, <code style="color:#94a3b8;">${escapeHtml(baseCmd)} design</code>${mType === 'local-pdf' ? ', or <code style="color:#94a3b8;">/page p14</code>' : ''}!
           </div>
         `
         )
         document.body.appendChild(card)
         card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+
+        card.querySelector('#wb-book-configure-commands-btn')?.addEventListener('click', () => {
+          ipcRenderer.send('workbench:open-book-commands-modal')
+        })
 
         card.querySelector('#wb-book-customize-templates-btn')?.addEventListener('click', () => {
           ipcRenderer.send('workbench:open-ask-ai-templates-from-chat')
@@ -2283,8 +2323,13 @@ try {
             const subParsed = parseBookChatCommand(rawCmd)
             let promptToSend = rawCmd
             if (subParsed && subParsed.kind === 'book-prompt-expansion' && !subParsed.hasInlineMacros) {
-              const resolvedInstr = resolveBookInstructionWithPresets(subParsed.instruction, allUserTemplates)
-              promptToSend = `${baseCmd} ${resolvedInstr}`
+              const resolvedInstr = resolveBookInstructionWithPresets(
+                subParsed.instruction,
+                allUserTemplates,
+                presetData?.commandConfig
+              )
+              const suffix = pageSuffix && !rawCmd.includes(pageSuffix.trim()) ? pageSuffix : (subParsed.pageRangeHint ? ` p${subParsed.pageRangeHint.startPage}-${subParsed.pageRangeHint.endPage}` : '')
+              promptToSend = `${baseCmd} ${resolvedInstr}${suffix}`
             }
             card.remove()
             await invokeWithTimeout('workbench:book-expand-and-submit', {
@@ -2470,7 +2515,8 @@ try {
             <span>📘</span> <span>Workbench ChatView ↔ BookView Command & Style Reference</span>
           </div>
           <div style="display:flex; align-items:center; gap:6px;">
-            <button class="wb-cmd-btn-disable" id="wb-help-customize-btn" style="padding:2px 8px;font-size:10.5px;">⚙️ Customize Templates</button>
+            <button class="wb-cmd-btn-disable" id="wb-help-commands-config-btn" style="padding:2px 8px;font-size:10.5px;border-color:rgba(16,185,129,0.4);color:#34d399;">⚙️ Configure Commands</button>
+            <button class="wb-cmd-btn-disable" id="wb-help-customize-btn" style="padding:2px 8px;font-size:10.5px;">✨ Templates</button>
             <button class="wb-cmd-close-btn" id="wb-card-close-btn" title="Close">✕</button>
           </div>
         </div>
@@ -2523,6 +2569,9 @@ try {
       )
       document.body.appendChild(card)
       card.querySelector('#wb-card-close-btn')?.addEventListener('click', () => card.remove())
+      card.querySelector('#wb-help-commands-config-btn')?.addEventListener('click', () => {
+        ipcRenderer.send('workbench:open-book-commands-modal')
+      })
       card.querySelector('#wb-help-customize-btn')?.addEventListener('click', () => {
         ipcRenderer.send('workbench:open-ask-ai-templates-from-chat')
       })
@@ -2548,7 +2597,7 @@ try {
         return
       }
       if (parsed.kind === 'book-extract-card') {
-        await renderBookExtractCard(parsed.scope)
+        await renderBookExtractCard(parsed.scope, parsed.pageRangeHint)
         return
       }
       if (parsed.kind === 'book-links') {

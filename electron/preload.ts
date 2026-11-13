@@ -376,4 +376,14 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('workbench:book-navigate', params),
   bookExpandAndSubmit: (params: { rawPrompt: string; autoSubmit?: boolean }) =>
     ipcRenderer.invoke('workbench:book-expand-and-submit', params),
+  getBookCommandConfig: () => ipcRenderer.invoke('workbench:get-book-command-config'),
+  saveBookCommandConfig: (config: any) => ipcRenderer.invoke('workbench:save-book-command-config', config),
+  resetBookCommandConfig: () => ipcRenderer.invoke('workbench:reset-book-command-config'),
+  onOpenBookCommandsModal: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('workbench:open-book-commands-modal', listener)
+    return () => {
+      ipcRenderer.removeListener('workbench:open-book-commands-modal', listener)
+    }
+  },
 })

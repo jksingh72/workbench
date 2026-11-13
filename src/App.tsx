@@ -15,6 +15,7 @@ import { ActionModeModal } from './components/ActionModeModal'
 import { PrimeChatModal } from './components/PrimeChatModal'
 import { McpManagerModal } from './components/McpManagerModal'
 import { AskAITemplateModal, DEFAULT_ASK_AI_TEMPLATES } from './components/AskAITemplateModal'
+import { BookCommandConfigModal } from './components/BookCommandConfigModal'
 import { NavState, BookSource, AISource, NoteSource, AskAITemplate } from './types/electron'
 import './App.css'
 
@@ -103,6 +104,7 @@ export const App: React.FC = () => {
   const [isMcpModalOpen, setIsMcpModalOpen] = useState<boolean>(false)
   const [mcpModalInitialTab, setMcpModalInitialTab] = useState<'installed' | 'discover' | 'custom'>('installed')
   const [isAskAITemplateModalOpen, setIsAskAITemplateModalOpen] = useState<boolean>(false)
+  const [isBookCommandConfigModalOpen, setIsBookCommandConfigModalOpen] = useState<boolean>(false)
   const [askAIModalMode, setAskAIModalMode] = useState<'custom' | 'manage'>('manage')
   const [askAIInitialSelection, setAskAIInitialSelection] = useState<string>('')
   const [askAITemplates, setAskAITemplates] = useState<AskAITemplate[]>(() => {
@@ -300,6 +302,7 @@ export const App: React.FC = () => {
     isActionModeModalOpen ||
     isPrimeChatModalOpen ||
     isAskAITemplateModalOpen ||
+    isBookCommandConfigModalOpen ||
     isMcpModalOpen
 
   const isAnyModalOpenRef = useRef(isAnyModalOpen)
@@ -1324,6 +1327,11 @@ export const App: React.FC = () => {
       window.electron?.setViewsVisible(false)
     })
 
+    const unsubOpenBookCommandsModal = window.electron?.onOpenBookCommandsModal?.(() => {
+      setIsBookCommandConfigModalOpen(true)
+      window.electron?.setViewsVisible(false)
+    })
+
     const unsubNotify = window.electron?.onNotification?.((msg) => {
       showNotification(msg)
     })
@@ -1342,6 +1350,7 @@ export const App: React.FC = () => {
       unsubTranscript?.()
       unsubAskAIWithText?.()
       unsubOpenAskAIModal?.()
+      unsubOpenBookCommandsModal?.()
       unsubNotify?.()
       window.removeEventListener('keydown', handleGlobalShortcuts)
     }
@@ -1357,6 +1366,17 @@ export const App: React.FC = () => {
 
   const handleCloseAskAITemplateModal = () => {
     setIsAskAITemplateModalOpen(false)
+    window.electron?.setViewsVisible(true)
+    setTimeout(syncBounds, 50)
+  }
+
+  const handleOpenBookCommandsModal = () => {
+    setIsBookCommandConfigModalOpen(true)
+    window.electron?.setViewsVisible(false)
+  }
+
+  const handleCloseBookCommandsModal = () => {
+    setIsBookCommandConfigModalOpen(false)
     window.electron?.setViewsVisible(true)
     setTimeout(syncBounds, 50)
   }
@@ -1518,6 +1538,7 @@ export const App: React.FC = () => {
       customInstructions={customInstructions}
       onOpenActionModeModal={handleOpenActionModeModal}
       onOpenPrimeChatModal={handleOpenPrimeChatModal}
+      onOpenBookCommandsModal={handleOpenBookCommandsModal}
     />
   )
 
@@ -1822,6 +1843,22 @@ export const App: React.FC = () => {
           handleAskAI(templateKey, customPromptText, textToUse)
         }}
         onNotify={showNotification}
+      />
+
+      <BookCommandConfigModal
+        isOpen={isBookCommandConfigModalOpen}
+        onClose={handleCloseBookCommandsModal}
+        onNotify={showNotification}
+        onRunCommand={async (cmdStr) => {
+          if (!activePanes.ai) {
+            showNotification('🤖 Chatview is currently disabled. Enable Chatview to run commands.')
+            return
+          }
+          await window.electron?.bookExpandAndSubmit?.({
+            rawPrompt: cmdStr,
+            autoSubmit: true,
+          })
+        }}
       />
 
       <McpManagerModal

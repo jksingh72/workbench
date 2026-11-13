@@ -17,6 +17,91 @@ export interface CustomUserPromptTemplate {
   isPreset?: boolean
 }
 
+export type BookCommandCategory = 'summarize' | 'explain' | 'general'
+
+export interface BookCommandPromptConfigItem {
+  key: string
+  command: string
+  category: BookCommandCategory
+  label: string
+  icon: string
+  aliases: string[]
+  description: string
+  promptDirective: string
+  isBuiltIn: boolean
+}
+
+export type BookMaterialType =
+  | 'video-course'
+  | 'ereader-spa'
+  | 'ebook-web'
+  | 'course-docs'
+  | 'local-pdf'
+  | 'local-ebook'
+  | 'local-doc'
+  | 'generic-article'
+
+export interface PageDesignPromptSettings {
+  includeDesignSummary: boolean
+  preserveMarkdownStructure: boolean
+  includeFigureCaptions: boolean
+  includeVideoTranscript: boolean
+  designGuidancePrompt: string
+}
+
+export const DEFAULT_PAGE_DESIGN_GUIDANCE =
+  'Note on Source Material & Page Design: This extraction is tailored to the detected material layout (section hierarchy, callout boxes, code blocks, tables, figure/diagram descriptions, or video transcript timestamps). Use these structural cues—and reference code blocks, diagrams, tables, or timestamps directly—to produce an accurate, well-organized response.'
+
+export const DEFAULT_PAGE_DESIGN_SETTINGS: PageDesignPromptSettings = {
+  includeDesignSummary: true,
+  preserveMarkdownStructure: true,
+  includeFigureCaptions: true,
+  includeVideoTranscript: true,
+  designGuidancePrompt: DEFAULT_PAGE_DESIGN_GUIDANCE,
+}
+
+export interface BookCommandPromptOverrides {
+  overrides: Record<
+    string,
+    {
+      label?: string
+      icon?: string
+      description?: string
+      promptDirective?: string
+      aliases?: string[]
+    }
+  >
+  customCommands?: Array<{
+    key: string
+    label: string
+    icon: string
+    description: string
+    promptDirective: string
+    category: BookCommandCategory
+  }>
+  pageDesign?: PageDesignPromptSettings
+}
+
+export const DEFAULT_DESIGN_COMMAND_DIRECTIVE =
+  'Analyze both the content and the structural/pedagogical design of this BookView page:\n' +
+  '1. **Material Format & Layout Strategy**: Identify how the page organizes concepts (e.g., heading outline, progressive examples, code listings, charts, or callouts).\n' +
+  '2. **Core Concepts & Relationships**: Summarize what each major section, table, diagram/figure, or code block teaches.\n' +
+  '3. **Key Visual & Structural Cues**: Highlight any crucial warnings, edge cases, complexity plots, or cross-references emphasized by the author.\n' +
+  '4. **Synthesis**: Provide a clean study takeaway tying the text and visual elements together.'
+
+export const DEFAULT_VIDEO_COMMAND_DIRECTIVE =
+  'Analyze this BookView video lecture using its playback timestamp, transcript cues, and module outline:\n' +
+  '1. **Current Focus / Timestamped Context**: Identify what the instructor is explaining right around the active timestamp (or across the full lecture).\n' +
+  '2. **Key Technical Points & Examples**: Summarize core explanations, definitions, and code/workflow demonstrations mentioned in the transcript.\n' +
+  '3. **Timestamped Topic Breakdown**: List major subtopics with their `[MM:SS]` timestamps so I can jump back quickly.\n' +
+  '4. **Practical Takeaways & Check Questions**: Key rules to remember + 2 quick self-check questions.'
+
+export const DEFAULT_QUIZ_DIRECTIVE =
+  'Based on this BookView content, create 3–5 targeted review questions with detailed answers and explanations to test deep understanding (mix conceptual questions, edge cases, and practical application).'
+
+export const DEFAULT_EXTRACT_INPUTS_DIRECTIVE =
+  'Extract all parameters, form inputs, configuration fields, constraints, and actionable steps from this BookView page into a clean structured reference.'
+
 export const SUMMARY_STYLE_PRESETS: BookSummaryStylePreset[] = [
   {
     id: 'brief',
@@ -240,6 +325,7 @@ export type ParsedBookChatCommand =
   | {
       kind: 'book-extract-card'
       scope: 'viewport' | 'full' | 'inputs'
+      pageRangeHint?: { startPage: number; endPage: number }
       raw: string
     }
   | {
@@ -248,7 +334,32 @@ export type ParsedBookChatCommand =
       scope: 'viewport' | 'full' | 'inputs' | 'links' | 'selection'
       instruction: string
       hasInlineMacros: boolean
+      pageRangeHint?: { startPage: number; endPage: number }
     }
+
+/**
+ * Extracts an optional PDF page or range token (e.g. `p14`, `p.14`, `p10-18`, `pages 5-10`, `@p14`)
+ * and returns the normalized pageRangeHint plus remaining text.
+ */
+export function extractPdfPageRangeHint(text: string): {
+  pageRangeHint?: { startPage: number; endPage: number }
+  cleanedText: string
+} {
+  if (!text) return { cleanedText: '' }
+  const match =
+    text.match(/(?:^|\s)(?:@?p\.?|pg\.?|pages?:)\s*(\d{1,4})(?:\s*[-–]\s*(\d{1,4}))?(?=\s|$)/i) ||
+    text.match(/(?:^|\s)(?:page|pages)\s+(\d{1,4})(?:\s*[-–]\s*(\d{1,4}))?(?=\s*$)/i)
+  if (!match) return { cleanedText: text }
+  const p1 = Math.max(1, parseInt(match[1], 10))
+  const p2 = match[2] ? Math.max(p1, parseInt(match[2], 10)) : p1
+  const cleanedText = (text.slice(0, match.index || 0) + text.slice((match.index || 0) + match[0].length))
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  return {
+    pageRangeHint: { startPage: p1, endPage: p2 },
+    cleanedText,
+  }
+}
 
 /**
  * Parses a raw chat input string to determine if it is a Workbench ChatView command
@@ -425,7 +536,8 @@ export function parseBookChatCommand(rawInput: string): ParsedBookChatCommand | 
   const pageCmdMatch = cleaned.match(/^(?:\/|!|wb:)(page|read-page|book-page|chapter|full-page|inputs|book-inputs)(?:\s+([\s\S]+))?$/i)
   if (pageCmdMatch) {
     const cmdType = pageCmdMatch[1].toLowerCase()
-    const instruction = (pageCmdMatch[2] || '').trim()
+    const rawInstr = (pageCmdMatch[2] || '').trim()
+    const { pageRangeHint, cleanedText: instruction } = extractPdfPageRangeHint(rawInstr)
     const scope: 'viewport' | 'full' | 'inputs' =
       cmdType === 'chapter' || cmdType === 'full-page'
         ? 'full'
@@ -437,6 +549,7 @@ export function parseBookChatCommand(rawInput: string): ParsedBookChatCommand | 
       return {
         kind: 'book-extract-card',
         scope,
+        pageRangeHint,
         raw: cleaned,
       }
     }
@@ -447,6 +560,7 @@ export function parseBookChatCommand(rawInput: string): ParsedBookChatCommand | 
       scope,
       instruction,
       hasInlineMacros: false,
+      pageRangeHint,
     }
   }
 
@@ -467,16 +581,185 @@ export function parseBookChatCommand(rawInput: string): ParsedBookChatCommand | 
 }
 
 /**
+ * Builds the default catalog of all configurable BookView chat commands across
+ * Summarize, Explain, and General utility actions.
+ */
+export function getDefaultBookCommandCatalog(): BookCommandPromptConfigItem[] {
+  const summaryStyleIds = ['brief', 'deep', 'steps', 'study', 'table']
+  const items: BookCommandPromptConfigItem[] = [
+    {
+      key: 'summarize',
+      command: '/chapter summarize',
+      category: 'summarize',
+      label: 'Summarize (Default)',
+      icon: '📝',
+      aliases: ['summarize', 'summary'],
+      description: 'Default 4-part structured technical summary (Core Concept, Mechanics, Example, Takeaways)',
+      promptDirective: DEFAULT_STRUCTURED_SUMMARY_DIRECTIVE,
+      isBuiltIn: true,
+    },
+    ...SUMMARY_STYLE_PRESETS.filter((p) => summaryStyleIds.includes(p.id)).map((p) => ({
+      key: `summarize:${p.id}`,
+      command: `/chapter summarize:${p.id}`,
+      category: 'summarize' as const,
+      label: p.label,
+      icon: p.icon,
+      aliases: p.aliases,
+      description: p.description,
+      promptDirective: p.promptDirective,
+      isBuiltIn: true,
+    })),
+    {
+      key: 'explain',
+      command: '/chapter explain',
+      category: 'explain',
+      label: 'Explain (Default)',
+      icon: '💡',
+      aliases: ['explain'],
+      description: 'Default 4-part pedagogical tutor explanation (Intuition, How & Why, Walkthrough, Gotchas)',
+      promptDirective: DEFAULT_STRUCTURED_EXPLAIN_DIRECTIVE,
+      isBuiltIn: true,
+    },
+    ...EXPLAIN_STYLE_PRESETS.map((p) => ({
+      key: `explain:${p.id}`,
+      command: `/chapter explain:${p.id}`,
+      category: 'explain' as const,
+      label: p.label,
+      icon: p.icon,
+      aliases: p.aliases,
+      description: p.description,
+      promptDirective: p.promptDirective,
+      isBuiltIn: true,
+    })),
+    {
+      key: 'quiz',
+      command: '/chapter quiz',
+      category: 'general',
+      label: 'Quiz Me',
+      icon: '❓',
+      aliases: ['quiz', 'test', 'questions'],
+      description: 'Generates targeted review questions with detailed answers to test comprehension',
+      promptDirective: DEFAULT_QUIZ_DIRECTIVE,
+      isBuiltIn: true,
+    },
+    {
+      key: 'extract-inputs',
+      command: '/chapter extract-inputs',
+      category: 'general',
+      label: 'Extract Inputs & Steps',
+      icon: '🎛️',
+      aliases: ['extract-inputs', 'extract'],
+      description: 'Extracts parameters, form fields, constraints, and actionable steps from the page',
+      promptDirective: DEFAULT_EXTRACT_INPUTS_DIRECTIVE,
+      isBuiltIn: true,
+    },
+    {
+      key: 'design',
+      command: '/chapter design',
+      category: 'general',
+      label: 'Analyze Page Design',
+      icon: '🏗️',
+      aliases: ['design', 'structure', 'layout'],
+      description: 'Analyzes headings, tables, code blocks, callouts, charts/diagrams, and visual page structure',
+      promptDirective: DEFAULT_DESIGN_COMMAND_DIRECTIVE,
+      isBuiltIn: true,
+    },
+    {
+      key: 'video',
+      command: '/chapter video',
+      category: 'general',
+      label: 'Video Lecture Breakdown',
+      icon: '🎬',
+      aliases: ['video', 'transcript', 'lecture'],
+      description: 'Summarizes video course lectures using active playback timestamps and transcript cues',
+      promptDirective: DEFAULT_VIDEO_COMMAND_DIRECTIVE,
+      isBuiltIn: true,
+    },
+  ]
+  return items
+}
+
+/**
+ * Returns the effective Summarize style presets after applying user overrides & custom summarize commands.
+ */
+export function getEffectiveSummaryPresets(commandOverrides?: BookCommandPromptOverrides): BookSummaryStylePreset[] {
+  const ov = commandOverrides?.overrides || {}
+  const base = SUMMARY_STYLE_PRESETS.map((p) => {
+    const patch = ov[`summarize:${p.id}`]
+    if (!patch) return p
+    return {
+      ...p,
+      label: patch.label ?? p.label,
+      icon: patch.icon ?? p.icon,
+      description: patch.description ?? p.description,
+      promptDirective: patch.promptDirective ?? p.promptDirective,
+      aliases: Array.isArray(patch.aliases) && patch.aliases.length > 0 ? patch.aliases : p.aliases,
+    }
+  })
+
+  const customSummarize = (commandOverrides?.customCommands || []).filter((c) => c.category === 'summarize')
+  for (const c of customSummarize) {
+    base.push({
+      id: c.key,
+      label: c.label,
+      icon: c.icon || '📝',
+      aliases: [c.key],
+      description: c.description,
+      promptDirective: c.promptDirective,
+    })
+  }
+  return base
+}
+
+/**
+ * Returns the effective Explain style presets after applying user overrides & custom explain commands.
+ */
+export function getEffectiveExplainPresets(commandOverrides?: BookCommandPromptOverrides): BookSummaryStylePreset[] {
+  const ov = commandOverrides?.overrides || {}
+  const base = EXPLAIN_STYLE_PRESETS.map((p) => {
+    const patch = ov[`explain:${p.id}`]
+    if (!patch) return p
+    return {
+      ...p,
+      label: patch.label ?? p.label,
+      icon: patch.icon ?? p.icon,
+      description: patch.description ?? p.description,
+      promptDirective: patch.promptDirective ?? p.promptDirective,
+      aliases: Array.isArray(patch.aliases) && patch.aliases.length > 0 ? patch.aliases : p.aliases,
+    }
+  })
+
+  const customExplain = (commandOverrides?.customCommands || []).filter((c) => c.category === 'explain')
+  for (const c of customExplain) {
+    base.push({
+      id: c.key,
+      label: c.label,
+      icon: c.icon || '💡',
+      aliases: [c.key],
+      description: c.description,
+      promptDirective: c.promptDirective,
+    })
+  }
+  return base
+}
+
+/**
  * Resolves shorthand summarization style flags (e.g., `summarize:deep`, `summarize:steps`, `:study`, `--table`),
- * bare template triggers (`summarize`, `explain`, `quiz`), and custom user templates (`#template-id`)
+ * bare template triggers (`summarize`, `explain`, `quiz`), configured command overrides, and custom user templates (`#template-id`)
  * into rich, structured prompt instructions.
  */
 export function resolveBookInstructionWithPresets(
   rawInstruction: string,
-  userTemplates?: CustomUserPromptTemplate[]
+  userTemplates?: CustomUserPromptTemplate[],
+  commandOverrides?: BookCommandPromptOverrides
 ): string {
   const trimmed = (rawInstruction || '').trim()
-  if (!trimmed) return DEFAULT_STRUCTURED_SUMMARY_DIRECTIVE
+  const ov = commandOverrides?.overrides || {}
+  const customCommands = commandOverrides?.customCommands || []
+
+  if (!trimmed) {
+    return ov['summarize']?.promptDirective || DEFAULT_STRUCTURED_SUMMARY_DIRECTIVE
+  }
 
   // Helper to strip `{text}` placeholder from AskAITemplate prompts when used as a header instruction
   const cleanTemplatePrompt = (tplPrompt: string): string => {
@@ -486,7 +769,10 @@ export function resolveBookInstructionWithPresets(
       .trim()
   }
 
-  // 1. Check explicit `#template-id` or `:style` prefix at start of instruction:
+  const effectiveSummaryPresets = getEffectiveSummaryPresets(commandOverrides)
+  const effectiveExplainPresets = getEffectiveExplainPresets(commandOverrides)
+
+  // 1. Check explicit `#template-id`, `summarize:<style>`, `explain:<style>`, or `:style` prefix at start of instruction:
   //    e.g. "/chapter #study-notes", "/chapter :deep", "/chapter summarize:steps", "/chapter explain:trace", "/page --table"
   const styleMatch = trimmed.match(
     /^(?:(summarize|summary|explain)\s*(?::|--|\s+)|(?:#|:|--))([a-zA-Z0-9_-]+)(?:\s+([\s\S]+))?$/i
@@ -496,7 +782,14 @@ export function resolveBookInstructionWithPresets(
     const styleToken = styleMatch[2].toLowerCase()
     const extraFocus = (styleMatch[3] || '').trim()
 
-    // Check user-defined templates first (by id or slugified name)
+    // 1a. Check custom commands from BookCommandConfigModal
+    const matchedCustomCmd = customCommands.find((c) => c.key.toLowerCase() === styleToken)
+    if (matchedCustomCmd && matchedCustomCmd.promptDirective) {
+      const base = cleanTemplatePrompt(matchedCustomCmd.promptDirective)
+      return extraFocus ? `${base}\n\n**Additional Focus / Instruction:** ${extraFocus}` : base
+    }
+
+    // 1b. Check user-defined AskAI templates (by id or slugified name)
     if (userTemplates && userTemplates.length > 0) {
       const matchedUserTpl = userTemplates.find(
         (t) =>
@@ -510,24 +803,34 @@ export function resolveBookInstructionWithPresets(
       }
     }
 
-    // If explicitly prefixed with `explain`, check EXPLAIN_STYLE_PRESETS first, then fallback to SUMMARY_STYLE_PRESETS
-    const primaryList = modePrefix === 'explain' ? EXPLAIN_STYLE_PRESETS : SUMMARY_STYLE_PRESETS
-    const fallbackList = modePrefix === 'explain' ? SUMMARY_STYLE_PRESETS : EXPLAIN_STYLE_PRESETS
+    // 1c. If explicitly prefixed with `explain`, check effectiveExplainPresets first, then fallback to effectiveSummaryPresets
+    const primaryList = modePrefix === 'explain' ? effectiveExplainPresets : effectiveSummaryPresets
+    const fallbackList = modePrefix === 'explain' ? effectiveSummaryPresets : effectiveExplainPresets
 
     const matchedPreset =
       primaryList.find((p) => p.id === styleToken || p.aliases.includes(styleToken)) ||
       fallbackList.find((p) => p.id === styleToken || p.aliases.includes(styleToken))
 
     if (matchedPreset) {
-      return extraFocus
-        ? `${matchedPreset.promptDirective}\n\n**Additional Focus / Instruction:** ${extraFocus}`
-        : matchedPreset.promptDirective
+      const base = cleanTemplatePrompt(matchedPreset.promptDirective)
+      return extraFocus ? `${base}\n\n**Additional Focus / Instruction:** ${extraFocus}` : base
     }
   }
 
-  // 2. Check bare single-keyword triggers: "summarize", "summary", "explain", "quiz", "code"
+  // 2. Check bare single-keyword triggers & configured command keys: "summarize", "summary", "explain", "quiz", "code", "extract-inputs"
+  const firstWord = trimmed.split(/\s+/)[0].toLowerCase()
+  const restAfterFirstWord = trimmed.slice(firstWord.length).trim()
+  const matchedCustomBare = customCommands.find((c) => c.key.toLowerCase() === firstWord)
+  if (matchedCustomBare && matchedCustomBare.promptDirective) {
+    const base = cleanTemplatePrompt(matchedCustomBare.promptDirective)
+    return restAfterFirstWord ? `${base}\n\n**Additional Focus / Instruction:** ${restAfterFirstWord}` : base
+  }
+
   const lower = trimmed.toLowerCase()
   if (lower === 'summarize' || lower === 'summary') {
+    if (ov['summarize']?.promptDirective) {
+      return cleanTemplatePrompt(ov['summarize'].promptDirective)
+    }
     const customSummarize = userTemplates?.find((t) => t.id === 'summarize')
     const defaultStockSummarize = 'Please summarize the key takeaways of the following excerpt:\n\n"{text}"'
     if (
@@ -541,6 +844,9 @@ export function resolveBookInstructionWithPresets(
   }
 
   if (lower === 'explain') {
+    if (ov['explain']?.promptDirective) {
+      return cleanTemplatePrompt(ov['explain'].promptDirective)
+    }
     const customExplain = userTemplates?.find((t) => t.id === 'explain')
     const defaultStockExplain =
       'Please explain the following concept clearly in simple terms with practical examples:\n\n"{text}"'
@@ -554,15 +860,39 @@ export function resolveBookInstructionWithPresets(
     return DEFAULT_STRUCTURED_EXPLAIN_DIRECTIVE
   }
 
-  if (lower === 'quiz' || lower === 'code') {
-    const matchedTpl = userTemplates?.find((t) => t.id === lower)
+  if (lower === 'extract-inputs' || lower === 'extract') {
+    return cleanTemplatePrompt(ov['extract-inputs']?.promptDirective || DEFAULT_EXTRACT_INPUTS_DIRECTIVE)
+  }
+
+  if (lower === 'design' || lower === 'structure' || lower === 'layout') {
+    return cleanTemplatePrompt(ov['design']?.promptDirective || DEFAULT_DESIGN_COMMAND_DIRECTIVE)
+  }
+
+  if (lower === 'video' || lower === 'transcript' || lower === 'lecture') {
+    return cleanTemplatePrompt(ov['video']?.promptDirective || DEFAULT_VIDEO_COMMAND_DIRECTIVE)
+  }
+
+  if (lower === 'quiz') {
+    if (ov['quiz']?.promptDirective) {
+      return cleanTemplatePrompt(ov['quiz'].promptDirective)
+    }
+    const matchedTpl = userTemplates?.find((t) => t.id === 'quiz')
     if (matchedTpl && matchedTpl.prompt) {
       return cleanTemplatePrompt(matchedTpl.prompt)
     }
-    if (lower === 'code') {
-      const codePreset = SUMMARY_STYLE_PRESETS.find((p) => p.id === 'code')
-      if (codePreset) return codePreset.promptDirective
+    return DEFAULT_QUIZ_DIRECTIVE
+  }
+
+  if (lower === 'code') {
+    if (ov['explain:code']?.promptDirective) {
+      return cleanTemplatePrompt(ov['explain:code'].promptDirective)
     }
+    const matchedTpl = userTemplates?.find((t) => t.id === 'code')
+    if (matchedTpl && matchedTpl.prompt) {
+      return cleanTemplatePrompt(matchedTpl.prompt)
+    }
+    const codePreset = effectiveSummaryPresets.find((p) => p.id === 'code')
+    if (codePreset) return codePreset.promptDirective
   }
 
   // 3. Check if the user typed `#<template-id>` anywhere or exact custom template name
@@ -589,12 +919,35 @@ export function resolveBookInstructionWithPresets(
 export function buildExpandedBookPrompt(
   parsed: Extract<ParsedBookChatCommand, { kind: 'book-prompt-expansion' }>,
   pageData: any,
-  options?: { userTemplates?: CustomUserPromptTemplate[] }
+  options?: { userTemplates?: CustomUserPromptTemplate[]; commandOverrides?: BookCommandPromptOverrides }
 ): string {
+  const effectiveDesignSettings: PageDesignPromptSettings = {
+    ...DEFAULT_PAGE_DESIGN_SETTINGS,
+    ...(options?.commandOverrides?.pageDesign || {}),
+  }
+
+  const designOptions = {
+    includeDesignSummary: effectiveDesignSettings.includeDesignSummary,
+    includeFigureCaptions: effectiveDesignSettings.includeFigureCaptions,
+    includeVideoTranscript: effectiveDesignSettings.includeVideoTranscript,
+  }
+
+  const guidanceNote =
+    effectiveDesignSettings.includeDesignSummary && effectiveDesignSettings.designGuidancePrompt?.trim()
+      ? `\n\n> ${effectiveDesignSettings.designGuidancePrompt.trim()}`
+      : ''
+
   if (!parsed.hasInlineMacros) {
-    const resolvedInstruction = resolveBookInstructionWithPresets(parsed.instruction, options?.userTemplates)
-    const contextBlock = formatBookPageMarkdown(pageData, { scope: parsed.scope })
-    return `${resolvedInstruction}\n\n---\n${contextBlock}`
+    const resolvedInstruction = resolveBookInstructionWithPresets(
+      parsed.instruction,
+      options?.userTemplates,
+      options?.commandOverrides
+    )
+    const contextBlock = formatBookPageMarkdown(pageData, {
+      scope: parsed.scope,
+      designOptions,
+    })
+    return `${resolvedInstruction}${guidanceNote}\n\n---\n${contextBlock}`
   }
 
   // Replace inline @tokens with clean labels and append the structured BookView context sections at the end
@@ -604,7 +957,8 @@ export function buildExpandedBookPrompt(
   // Also support shorthand style prefixes before inline @macros (e.g., "summarize:deep @chapter", "explain:trace @page")
   const rawWithResolvedPrefix = parsed.rawPrompt.replace(
     /^(summarize:[a-zA-Z0-9_-]+|summary:[a-zA-Z0-9_-]+|explain:[a-zA-Z0-9_-]+|#[a-zA-Z0-9_-]+)\s+(?=@(?:page|book|chapter|inputs|links|selection)\b)/i,
-    (_m, styleToken) => `${resolveBookInstructionWithPresets(styleToken, options?.userTemplates)}\n\nContext: `
+    (_m, styleToken) =>
+      `${resolveBookInstructionWithPresets(styleToken, options?.userTemplates, options?.commandOverrides)}\n\nContext: `
   )
 
   const expandedInstruction = rawWithResolvedPrefix.replace(
@@ -614,28 +968,28 @@ export function buildExpandedBookPrompt(
       if (token === 'page' || token === 'book') {
         if (!seenScopes.has('viewport')) {
           seenScopes.add('viewport')
-          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'viewport' }))
+          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'viewport', designOptions }))
         }
         return `${prefix}[the visible BookView page ("${pageData.title || 'Active Page'}")]`
       }
       if (token === 'chapter') {
         if (!seenScopes.has('full')) {
           seenScopes.add('full')
-          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'full' }))
+          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'full', designOptions }))
         }
         return `${prefix}[the full BookView chapter ("${pageData.chapter || pageData.title || 'Active Chapter'}")]`
       }
       if (token === 'inputs') {
         if (!seenScopes.has('inputs')) {
           seenScopes.add('inputs')
-          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'inputs' }))
+          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'inputs', designOptions }))
         }
         return `${prefix}[the form inputs on the BookView page]`
       }
       if (token === 'links') {
         if (!seenScopes.has('links')) {
           seenScopes.add('links')
-          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'links' }))
+          appendedSections.push(formatBookPageMarkdown(pageData, { scope: 'links', designOptions }))
         }
         return `${prefix}[the links on the BookView page]`
       }
@@ -653,6 +1007,6 @@ export function buildExpandedBookPrompt(
     }
   )
 
-  return `${expandedInstruction.trim()}\n\n---\n${appendedSections.join('\n\n---\n')}`
+  return `${expandedInstruction.trim()}${guidanceNote}\n\n---\n${appendedSections.join('\n\n---\n')}`
 }
 

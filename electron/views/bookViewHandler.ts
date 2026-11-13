@@ -1,10 +1,12 @@
 import { WebContentsView, BrowserWindow, session, Rectangle, Menu } from 'electron'
 import fs from 'node:fs'
+import path from 'node:path'
 import { AuthCoordinator } from '../auth/authCoordinator'
 import { CHROME_DESKTOP_UA } from '../auth/strategies/defaultAuthStrategy'
 import { BookSourceManager, BookSource } from '../services/bookSourceManager'
 import { getViewPreloadPath } from '../utils/preloadPath'
 import { Logger } from '../services/logger'
+import type { BookMaterialType } from '../utils/bookCommandParser'
 
 export { CHROME_DESKTOP_UA }
 
@@ -31,12 +33,57 @@ export interface BookInputItem {
   inViewport: boolean
 }
 
+export type { BookMaterialType }
+
+export interface BookVideoContext {
+  hasVideo: boolean
+  platform: 'oreilly-video' | 'youtube' | 'coursera' | 'udemy' | 'html5' | 'unknown'
+  videoTitle: string
+  currentTimeSec: number
+  durationSec: number
+  currentTimestampFormatted: string
+  paused: boolean
+  transcriptSource: 'dom-transcript' | 'text-track' | 'none'
+  nearbyCues: Array<{ time: string; text: string; isCurrent?: boolean }>
+  fullTranscript: string
+  chapters: Array<{ time?: string; title: string; isCurrent?: boolean }>
+}
+
+export interface BookPageDesignInfo {
+  materialType: BookMaterialType
+  platformHint?: string
+  containerSelector: string
+  breadcrumbs: string[]
+  inPageOutline: string[]
+  hasSidebarToc: boolean
+  paginationLabel?: string
+  headingOutline: Array<{ level: number; text: string; inViewport: boolean }>
+  figures: Array<{ caption: string; alt: string; kind: 'img' | 'svg' | 'figure' | 'chart'; inViewport: boolean }>
+  callouts: Array<{ kind: string; text: string; inViewport: boolean }>
+  tableCount: number
+  interactiveWidgets: Array<{ kind: 'tabs' | 'details' | 'quiz' | 'sandbox' | 'video'; label: string }>
+  video?: BookVideoContext
+}
+
+export interface BookMaterialClassification {
+  materialType: BookMaterialType
+  platformHint: string
+  pageUrl: string
+  documentTitle: string
+  activeFilePath?: string
+  activeTabTitle?: string
+  hasVideo: boolean
+  hasReaderIframe: boolean
+  selectedText: string
+}
+
 export interface BookPageExtractionResult {
   success: boolean
   mode: 'web' | 'local'
   title: string
   chapter: string
   url: string
+  activeFilePath?: string
   scrollPercent: number
   selectedText: string
   visibleText: string
@@ -45,6 +92,7 @@ export interface BookPageExtractionResult {
   codeBlocks: Array<{ language: string; code: string }>
   inputs: BookInputItem[]
   links: BookLinkItem[]
+  pageDesign?: BookPageDesignInfo
   error?: string
 }
 
@@ -360,7 +408,7 @@ export class BookViewHandler {
       if (!this.isVisible || bounds.width <= 0 || bounds.height <= 0) {
         try {
           this.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-        } catch (_) {}
+        } catch (_) { }
         this.detachView(this.view)
       } else {
         this.attachView(this.view)
@@ -377,7 +425,7 @@ export class BookViewHandler {
           v.setVisible(false)
           try {
             v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-          } catch (_) {}
+          } catch (_) { }
           this.detachView(v)
         } else {
           this.attachView(v)
@@ -462,7 +510,7 @@ export class BookViewHandler {
         v.setVisible(false)
         try {
           v.setBounds({ x: -10000, y: -10000, width: 1, height: 1 })
-        } catch (_) {}
+        } catch (_) { }
         this.detachView(v)
       }
     }
@@ -482,7 +530,7 @@ export class BookViewHandler {
 
       const prevBaseUrl = this.sourceBaseUrls.get(source.id)
       if (isExisting && prevBaseUrl && prevBaseUrl !== source.url) {
-        this.view.webContents.loadURL(source.url).catch(() => {})
+        this.view.webContents.loadURL(source.url).catch(() => { })
       }
       this.sourceBaseUrls.set(source.id, source.url)
       this.currentUrl = source.url
@@ -573,11 +621,11 @@ export class BookViewHandler {
 
       const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       const dateStr = new Date().toLocaleDateString()
-      
+
       const cleanTitle = (data.title || '').replace(/\s*[-–|]\s*(O'Reilly|Amazon Kindle|Book|Learning).*$/i, '').trim() || 'Reading Excerpt'
       const cleanChapter = (data.chapter || '').trim()
       const url = data.url || ''
-      
+
       const quotedLines = data.rawText.split('\n').map((l: string) => `> ${l}`).join('\n')
       let attr = `> \n> — `
       if (cleanChapter && cleanTitle && cleanChapter !== cleanTitle) {
@@ -587,7 +635,7 @@ export class BookViewHandler {
       } else if (cleanChapter) {
         attr += `*${cleanChapter}*`
       }
-      
+
       if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
         attr += ` · [🔗 Open in Book](${url})`
       }
@@ -688,7 +736,7 @@ export class BookViewHandler {
               } catch (_) {}
             `
               )
-              .catch(() => {})
+              .catch(() => { })
           })
         }
       }
@@ -749,14 +797,688 @@ export class BookViewHandler {
   }
 
   /**
+   * Stage 1: Fast Material Classifier.
+   * Classifies what kind of learning material is active in BookView BEFORE running extraction,
+   * so each format routes to a dedicated, chrome-free extractor.
+   */
+  private async classifyBookMaterial(
+    wc: Electron.WebContents,
+    isLocalMode: boolean
+  ): Promise<BookMaterialClassification> {
+    const fallbackUrl = isLocalMode ? 'workbench://local-books' : (!wc.isDestroyed() ? wc.getURL() : '')
+    const fallbackTitle = !wc.isDestroyed() ? wc.getTitle() : ''
+
+    try {
+      return await this.execJsWithTimeout<BookMaterialClassification>(
+        wc,
+        `
+        (function(isLocalMode, fallbackUrl) {
+          var pageUrl = isLocalMode ? 'workbench://local-books' : (window.location.href || fallbackUrl || '');
+          var docTitle = document.title || '';
+          var sel = window.getSelection();
+          var selectedText = sel ? sel.toString().trim() : '';
+
+          if (isLocalMode) {
+            var root = document.querySelector('.book-pane') || document.querySelector('.note-pane') || document.body;
+            var activeTab = root ? root.querySelector('.wb-doc-tab.active, [class*="tab"][class*="active"]') : null;
+            var activeFilePath = activeTab ? (activeTab.getAttribute('title') || '') : '';
+            var activeTabTitle = activeTab && activeTab.innerText ? activeTab.innerText.trim() : '';
+            var lowerPath = activeFilePath.toLowerCase();
+            var materialType = 'local-doc';
+            var platformHint = 'local-doc';
+            if (lowerPath.endsWith('.pdf')) {
+              materialType = 'local-pdf';
+              platformHint = 'local-pdf';
+            } else if (lowerPath.endsWith('.epub') || lowerPath.endsWith('.mobi') || lowerPath.endsWith('.azw3')) {
+              materialType = 'local-ebook';
+              platformHint = lowerPath.endsWith('.epub') ? 'local-epub' : 'local-mobi';
+            } else if (root && root.querySelector('.epub-reader-content')) {
+              materialType = 'local-ebook';
+              platformHint = 'local-epub';
+            }
+            return {
+              materialType: materialType,
+              platformHint: platformHint,
+              pageUrl: pageUrl,
+              documentTitle: activeTabTitle || docTitle,
+              activeFilePath: activeFilePath,
+              activeTabTitle: activeTabTitle,
+              hasVideo: false,
+              hasReaderIframe: false,
+              selectedText: selectedText
+            };
+          }
+
+          var lowerUrl = pageUrl.toLowerCase();
+          var videos = Array.from(document.querySelectorAll('video')).filter(function(v) {
+            var r = v.getBoundingClientRect();
+            return r.width > 80 && r.height > 60;
+          });
+          var hasVideo = videos.length > 0;
+          var hasTranscriptDom = Boolean(
+            document.querySelector(
+              '[class*="transcript" i], ytd-transcript-renderer, ytd-transcript-segment-renderer, .rc-Transcript, [data-purpose*="transcript"]'
+            )
+          );
+          var isKnownVideoUrl =
+            /learning\\.oreilly\\.com\\/videos\\//i.test(lowerUrl) ||
+            /youtube\\.com\\/watch/i.test(lowerUrl) ||
+            /youtu\\.be\\//i.test(lowerUrl) ||
+            /coursera\\.org\\/learn\\/[^/]+\\/lecture/i.test(lowerUrl) ||
+            /udemy\\.com\\/course\\/[^/]+\\/learn\\/lecture/i.test(lowerUrl) ||
+            /pluralsight\\.com\\/courses\\/player/i.test(lowerUrl);
+
+          if (isKnownVideoUrl || (hasVideo && (hasTranscriptDom || document.querySelectorAll('article p').length < 5))) {
+            var vPlat = 'html5';
+            if (/oreilly\\.com/i.test(lowerUrl)) vPlat = 'oreilly-video';
+            else if (/youtube\\.com|youtu\\.be/i.test(lowerUrl)) vPlat = 'youtube';
+            else if (/coursera\\.org/i.test(lowerUrl)) vPlat = 'coursera';
+            else if (/udemy\\.com/i.test(lowerUrl)) vPlat = 'udemy';
+            return {
+              materialType: 'video-course',
+              platformHint: vPlat,
+              pageUrl: pageUrl,
+              documentTitle: docTitle,
+              hasVideo: true,
+              hasReaderIframe: false,
+              selectedText: selectedText
+            };
+          }
+
+          var hasKindleIframe = Boolean(
+            document.querySelector('#KindleReaderIFrame, iframe[id*="Kindle" i], iframe[src*="kindle" i], .kg-client-root')
+          );
+          if (/read\\.amazon\\./i.test(lowerUrl) || hasKindleIframe) {
+            return {
+              materialType: 'ereader-spa',
+              platformHint: 'kindle',
+              pageUrl: pageUrl,
+              documentTitle: docTitle,
+              hasVideo: hasVideo,
+              hasReaderIframe: true,
+              selectedText: selectedText
+            };
+          }
+
+          if (
+            /learning\\.oreilly\\.com\\/library\\//i.test(lowerUrl) ||
+            document.querySelector('#sbo-rt-content, [data-testid="reader-content"]')
+          ) {
+            return {
+              materialType: 'ebook-web',
+              platformHint: 'oreilly-book',
+              pageUrl: pageUrl,
+              documentTitle: docTitle,
+              hasVideo: hasVideo,
+              hasReaderIframe: false,
+              selectedText: selectedText
+            };
+          }
+
+          var isCourseDocs = Boolean(
+            document.querySelector(
+              '.bd-sidebar-primary, .bd-article-container, .bd-sidebar-secondary, .theme-doc-markdown, .markdown-section, .book-summary, .sphinxsidebar, .nav-chapters, #main-content'
+            ) ||
+            (/cs\\.cornell\\.edu|docs\\.|readthedocs|gitbook|github\\.io/i.test(lowerUrl) && document.querySelector('article, main'))
+          );
+          if (isCourseDocs) {
+            return {
+              materialType: 'course-docs',
+              platformHint: 'course-docs',
+              pageUrl: pageUrl,
+              documentTitle: docTitle,
+              hasVideo: hasVideo,
+              hasReaderIframe: false,
+              selectedText: selectedText
+            };
+          }
+
+          return {
+            materialType: 'generic-article',
+            platformHint: 'web',
+            pageUrl: pageUrl,
+            documentTitle: docTitle,
+            hasVideo: hasVideo,
+            hasReaderIframe: document.querySelectorAll('iframe').length > 0,
+            selectedText: selectedText
+          };
+        })(${JSON.stringify(isLocalMode)}, ${JSON.stringify(fallbackUrl)})
+      `,
+        1800
+      )
+    } catch (_) {
+      return {
+        materialType: isLocalMode ? 'local-doc' : 'generic-article',
+        platformHint: isLocalMode ? 'local' : 'web',
+        pageUrl: fallbackUrl,
+        documentTitle: fallbackTitle,
+        hasVideo: false,
+        hasReaderIframe: false,
+        selectedText: '',
+      }
+    }
+  }
+
+  /**
+   * Route A: Specialized Local PDF Extractor (leaves PdfEditor.tsx completely untouched).
+   */
+  private async extractLocalPdfMaterial(
+    classification: BookMaterialClassification,
+    scope: 'viewport' | 'full' | 'both',
+    pageRangeHint?: { startPage: number; endPage: number }
+  ): Promise<BookPageExtractionResult> {
+    const filePath = classification.activeFilePath || ''
+    const title = classification.activeTabTitle || path.basename(filePath || 'Document.pdf')
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      return {
+        success: false,
+        mode: 'local',
+        title,
+        chapter: title,
+        url: filePath || 'workbench://local-books',
+        activeFilePath: filePath,
+        scrollPercent: 0,
+        selectedText: classification.selectedText || '',
+        visibleText: '',
+        fullText: '',
+        headings: [],
+        codeBlocks: [],
+        inputs: [],
+        links: [],
+        error: 'Active PDF file path could not be resolved',
+      }
+    }
+
+    const pdfBuffer = await fs.promises.readFile(filePath)
+    const pdfParseModule: any = await import('pdf-parse')
+    let extractedPages: Array<{ num: number; text: string }> = []
+    let fallbackText = ''
+    let totalPages = 0
+
+    if (pdfParseModule.PDFParse) {
+      const parser = new pdfParseModule.PDFParse({ data: pdfBuffer })
+      try {
+        // If explicit page range requested above page 30, parse full page objects cleanly; otherwise limit initial parse for speed
+        const parseOpts = pageRangeHint
+          ? pageRangeHint.endPage <= 40
+            ? { first: pageRangeHint.endPage }
+            : undefined
+          : { first: scope === 'full' ? 30 : 8 }
+        const textResult = await parser.getText(parseOpts)
+        totalPages = Number(textResult.total || (Array.isArray(textResult.pages) ? textResult.pages.length : 0))
+        if (Array.isArray(textResult.pages) && textResult.pages.length > 0) {
+          extractedPages = textResult.pages.map((p: any, idx: number) => ({
+            num: Number(p.num || idx + 1),
+            text: String(p.text || '').trim(),
+          }))
+        } else {
+          fallbackText = String(textResult.text || '').trim()
+        }
+      } finally {
+        if (typeof parser.destroy === 'function') {
+          try {
+            await parser.destroy()
+          } catch (_) { }
+        }
+      }
+    } else {
+      const parseFn = typeof pdfParseModule.default === 'function' ? pdfParseModule.default : pdfParseModule
+      const parsedPdf = await parseFn(pdfBuffer, { max: pageRangeHint ? pageRangeHint.endPage : scope === 'full' ? 30 : 8 })
+      totalPages = Number(parsedPdf.numpages || 0)
+      fallbackText = String(parsedPdf.text || '').trim()
+    }
+
+    let selectedSliceText = ''
+    let paginationLabel = totalPages > 0 ? `Pages 1–${Math.min(totalPages, scope === 'full' ? 30 : 8)} of ${totalPages}` : 'PDF Document'
+
+    if (extractedPages.length > 0) {
+      const startP = pageRangeHint ? pageRangeHint.startPage : 1
+      const endP = pageRangeHint ? pageRangeHint.endPage : scope === 'full' ? Math.min(extractedPages.length, 30) : Math.min(extractedPages.length, 8)
+      const slice = extractedPages.filter((p) => p.num >= startP && p.num <= endP)
+      selectedSliceText = (slice.length > 0 ? slice : extractedPages.slice(0, 8))
+        .map((p) => `-- Page ${p.num}${totalPages ? ` / ${totalPages}` : ''} --\n${p.text}`)
+        .join('\n\n')
+      paginationLabel = `Pages ${startP}${endP > startP ? `–${endP}` : ''}${totalPages ? ` of ${totalPages}` : ''}`
+    } else {
+      selectedSliceText = fallbackText
+    }
+
+    const cleanPdfText = selectedSliceText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+
+    return {
+      success: true,
+      mode: 'local',
+      title,
+      chapter: `${title} (${paginationLabel})`,
+      url: filePath,
+      activeFilePath: filePath,
+      scrollPercent: 0,
+      selectedText: classification.selectedText || '',
+      visibleText: cleanPdfText.slice(0, 12000),
+      fullText: cleanPdfText.slice(0, 50000),
+      headings: [],
+      codeBlocks: [],
+      inputs: [],
+      links: [],
+      pageDesign: {
+        materialType: 'local-pdf',
+        platformHint: 'local-pdf',
+        containerSelector: 'pdf-parse',
+        breadcrumbs: [path.basename(path.dirname(filePath)), title],
+        inPageOutline: [],
+        hasSidebarToc: false,
+        paginationLabel,
+        headingOutline: [],
+        figures: [],
+        callouts: [],
+        tableCount: 0,
+        interactiveWidgets: [],
+      },
+    }
+  }
+
+  /**
+   * Route B: Specialized Video Course Extractor (O'Reilly Video, YouTube, Coursera, Udemy, HTML5 <video>).
+   * Inspects active video player timing, closed-caption TextTracks, transcript panels, and lesson syllabus.
+   */
+  private async extractVideoCourseMaterial(
+    wc: Electron.WebContents,
+    classification: BookMaterialClassification,
+    opts: { scope: string; includeLinks: boolean; includeInputs: boolean; showBadges: boolean }
+  ): Promise<BookPageExtractionResult> {
+    const extractVideoScript = `
+      (function(opts) {
+        function fmtTime(sec) {
+          sec = Math.max(0, Math.floor(sec || 0));
+          var h = Math.floor(sec / 3600);
+          var m = Math.floor((sec % 3600) / 60);
+          var s = sec % 60;
+          var pad = function(n) { return n < 10 ? '0' + n : String(n); };
+          return h > 0 ? (h + ':' + pad(m) + ':' + pad(s)) : (pad(m) + ':' + pad(s));
+        }
+
+        function parseTimestampToSec(str) {
+          var m = String(str || '').match(/(\\d{1,2}:)?\\d{1,2}:\\d{2}/);
+          if (!m) return -1;
+          var parts = m[0].split(':').map(Number);
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          return -1;
+        }
+
+        var videos = Array.from(document.querySelectorAll('video'));
+        var bestVideo = null;
+        var bestArea = -1;
+        videos.forEach(function(v) {
+          var r = v.getBoundingClientRect();
+          var area = r.width * r.height;
+          if (area > bestArea) {
+            bestArea = area;
+            bestVideo = v;
+          }
+        });
+
+        var currentTimeSec = bestVideo ? (bestVideo.currentTime || 0) : 0;
+        var durationSec = bestVideo && isFinite(bestVideo.duration) ? (bestVideo.duration || 0) : 0;
+        var paused = bestVideo ? Boolean(bestVideo.paused) : true;
+        var videoTitle = '';
+        var titleEl = document.querySelector('h1.title, ytd-watch-metadata h1, [data-testid="video-title"], .video-title, main h1, h1');
+        if (titleEl && titleEl.innerText) videoTitle = titleEl.innerText.trim();
+        if (!videoTitle) videoTitle = document.title || '';
+
+        var cues = [];
+        var transcriptSource = 'none';
+
+        // 1. Check DOM Transcript containers first (O'Reilly, YouTube, Coursera, Udemy, generic)
+        var transcriptSelectors = [
+          '[data-testid*="transcript" i] li, [data-testid*="transcript" i] [role="button"], [data-testid*="transcript" i] p',
+          'ytd-transcript-segment-renderer',
+          '.rc-Transcript .phrases span, .rc-Transcript [class*="cue" i]',
+          '[data-purpose*="transcript-cue" i]',
+          '[class*="transcript" i] [class*="cue" i], [class*="transcript" i] [class*="segment" i], [class*="transcript" i] [class*="line" i], [class*="transcript" i] li, [class*="transcript" i] p'
+        ];
+        for (var ts = 0; ts < transcriptSelectors.length; ts++) {
+          var nodes = document.querySelectorAll(transcriptSelectors[ts]);
+          if (nodes && nodes.length > 0) {
+            nodes.forEach(function(n) {
+              var txt = (n.innerText || n.textContent || '').replace(/\\s+/g, ' ').trim();
+              if (!txt || txt.length < 2) return;
+              var sec = parseTimestampToSec(txt);
+              var timeAttr = n.getAttribute('data-start') || n.getAttribute('data-time') || '';
+              if (sec < 0 && timeAttr && !isNaN(Number(timeAttr))) sec = Number(timeAttr);
+              var cleanedCueText = txt.replace(/^(\\d{1,2}:)?\\d{1,2}:\\d{2}\\s*[-–:]?\\s*/, '').trim();
+              if (cleanedCueText) {
+                cues.push({
+                  sec: sec >= 0 ? sec : -1,
+                  time: sec >= 0 ? fmtTime(sec) : '',
+                  text: cleanedCueText
+                });
+              }
+            });
+            if (cues.length > 0) {
+              transcriptSource = 'dom-transcript';
+              break;
+            }
+          }
+        }
+
+        // 2. Fallback to HTML5 Video TextTracks (.vtt captions/subtitles)
+        if (cues.length === 0 && bestVideo && bestVideo.textTracks) {
+          for (var ti = 0; ti < bestVideo.textTracks.length; ti++) {
+            var track = bestVideo.textTracks[ti];
+            if (track && track.cues && track.cues.length > 0) {
+              for (var ci = 0; ci < track.cues.length; ci++) {
+                var cue = track.cues[ci];
+                var cText = String(cue.text || '').replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim();
+                if (cText) {
+                  cues.push({
+                    sec: Number(cue.startTime || 0),
+                    time: fmtTime(cue.startTime || 0),
+                    text: cText
+                  });
+                }
+              }
+              if (cues.length > 0) {
+                transcriptSource = 'text-track';
+                break;
+              }
+            }
+          }
+        }
+
+        // Build nearbyCues (+-90s around current playback timestamp) and fullTranscript
+        var nearbyCues = [];
+        if (cues.length > 0) {
+          var hasTimed = cues.some(function(c) { return c.sec >= 0; });
+          if (hasTimed && durationSec > 0) {
+            var minSec = Math.max(0, currentTimeSec - 60);
+            var maxSec = currentTimeSec + 90;
+            cues.forEach(function(c) {
+              if (c.sec >= minSec && c.sec <= maxSec) {
+                nearbyCues.push({
+                  time: c.time,
+                  text: c.text,
+                  isCurrent: Math.abs(c.sec - currentTimeSec) <= 8
+                });
+              }
+            });
+          }
+          if (nearbyCues.length === 0) {
+            nearbyCues = cues.slice(0, 20).map(function(c) { return { time: c.time, text: c.text }; });
+          }
+        }
+
+        var fullTranscript = cues.map(function(c) {
+          return (c.time ? '[' + c.time + '] ' : '') + c.text;
+        }).join('\\n');
+
+        // Also capture visible video description / overview when transcript isn't expanded
+        var overviewEl = document.querySelector('#description, [class*="description" i], [data-testid="overview"], article, main');
+        var overviewText = overviewEl ? (overviewEl.innerText || '').trim().slice(0, 4000) : '';
+
+        // Chapters / playlist items
+        var chapters = [];
+        document.querySelectorAll('[class*="playlist" i] a, [class*="curriculum" i] li, [class*="toc" i] a, ytd-macro-markers-list-item-renderer').forEach(function(ch) {
+          var chText = (ch.innerText || '').replace(/\\s+/g, ' ').trim();
+          if (chText && chText.length > 2 && chText.length < 140 && chapters.length < 35) {
+            chapters.push({ title: chText });
+          }
+        });
+
+        var currentTimestampFormatted = durationSec > 0
+          ? (fmtTime(currentTimeSec) + ' / ' + fmtTime(durationSec))
+          : (currentTimeSec > 0 ? fmtTime(currentTimeSec) : '00:00');
+
+        return {
+          hasVideo: Boolean(bestVideo),
+          videoTitle: videoTitle,
+          currentTimeSec: currentTimeSec,
+          durationSec: durationSec,
+          currentTimestampFormatted: currentTimestampFormatted,
+          paused: paused,
+          transcriptSource: transcriptSource,
+          nearbyCues: nearbyCues.slice(0, 40),
+          fullTranscript: fullTranscript.slice(0, 50000),
+          chapters: chapters,
+          overviewText: overviewText
+        };
+      })(${JSON.stringify(opts)})
+    `
+
+    // Scan top frame and child frames in case the <video> is hosted inside a player iframe
+    const mainRes = await this.execJsWithTimeout<any>(wc, extractVideoScript, 2500).catch(() => null)
+    let bestVideoData = mainRes
+
+    if ((!bestVideoData || !bestVideoData.hasVideo || bestVideoData.transcriptSource === 'none') && wc.mainFrame?.framesInSubtree) {
+      const subframes = wc.mainFrame.framesInSubtree.filter((f) => {
+        if (f === wc.mainFrame) return false
+        const u = (f.url || '').toLowerCase()
+        return u && !u.includes('doubleclick') && !u.includes('googlesyndication') && !u.includes('adsystem')
+      })
+      const subResults = await Promise.allSettled(
+        subframes.slice(0, 6).map((f) =>
+          Promise.race([
+            f.executeJavaScript(extractVideoScript),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('frame timeout')), 1400)),
+          ])
+        )
+      )
+      for (const r of subResults) {
+        if (r.status === 'fulfilled' && r.value) {
+          const v = r.value as any
+          if (!bestVideoData?.hasVideo && v.hasVideo) {
+            bestVideoData = {
+              ...bestVideoData,
+              hasVideo: true,
+              currentTimeSec: v.currentTimeSec,
+              durationSec: v.durationSec,
+              currentTimestampFormatted: v.currentTimestampFormatted,
+              paused: v.paused,
+              nearbyCues: bestVideoData?.nearbyCues?.length ? bestVideoData.nearbyCues : v.nearbyCues,
+              fullTranscript: bestVideoData?.fullTranscript || v.fullTranscript,
+              transcriptSource: bestVideoData?.transcriptSource !== 'none' ? bestVideoData.transcriptSource : v.transcriptSource,
+            }
+          } else if (v.fullTranscript && (!bestVideoData?.fullTranscript || v.fullTranscript.length > bestVideoData.fullTranscript.length)) {
+            bestVideoData = {
+              ...bestVideoData,
+              nearbyCues: v.nearbyCues,
+              fullTranscript: v.fullTranscript,
+              transcriptSource: v.transcriptSource,
+            }
+          }
+        }
+      }
+    }
+
+    const vData = bestVideoData || {
+      hasVideo: true,
+      videoTitle: classification.documentTitle,
+      currentTimeSec: 0,
+      durationSec: 0,
+      currentTimestampFormatted: '00:00',
+      paused: true,
+      transcriptSource: 'none',
+      nearbyCues: [],
+      fullTranscript: '',
+      chapters: [],
+      overviewText: '',
+    }
+
+    const nearbyText =
+      vData.nearbyCues && vData.nearbyCues.length > 0
+        ? vData.nearbyCues
+          .map((c: any) => `${c.isCurrent ? '▶ ' : ''}${c.time ? `[${c.time}] ` : ''}${c.text}`)
+          .join('\n')
+        : vData.overviewText || '(No live transcript or captions detected on this video page)'
+
+    const fullText =
+      vData.fullTranscript ||
+      vData.overviewText ||
+      nearbyText
+
+    const scrollPct =
+      vData.durationSec > 0 ? Math.min(100, Math.round((vData.currentTimeSec / vData.durationSec) * 100)) : 0
+
+    return {
+      success: true,
+      mode: 'web',
+      title: vData.videoTitle || classification.documentTitle,
+      chapter: `${vData.videoTitle || classification.documentTitle} [${vData.currentTimestampFormatted}]`,
+      url: classification.pageUrl,
+      scrollPercent: scrollPct,
+      selectedText: classification.selectedText || '',
+      visibleText: nearbyText,
+      fullText,
+      headings: (vData.chapters || []).map((c: any) => c.title),
+      codeBlocks: [],
+      inputs: [],
+      links: [],
+      pageDesign: {
+        materialType: 'video-course',
+        platformHint: classification.platformHint,
+        containerSelector: 'video-player',
+        breadcrumbs: [],
+        inPageOutline: (vData.chapters || []).map((c: any) => c.title),
+        hasSidebarToc: (vData.chapters || []).length > 0,
+        paginationLabel: `Playback ${vData.currentTimestampFormatted}`,
+        headingOutline: (vData.chapters || []).map((c: any) => ({ level: 2, text: c.title, inViewport: true })),
+        figures: [],
+        callouts: [],
+        tableCount: 0,
+        interactiveWidgets: [{ kind: 'video', label: `${classification.platformHint} (${vData.currentTimestampFormatted})` }],
+        video: {
+          hasVideo: Boolean(vData.hasVideo),
+          platform: (classification.platformHint as any) || 'html5',
+          videoTitle: vData.videoTitle || classification.documentTitle,
+          currentTimeSec: vData.currentTimeSec || 0,
+          durationSec: vData.durationSec || 0,
+          currentTimestampFormatted: vData.currentTimestampFormatted || '00:00',
+          paused: Boolean(vData.paused),
+          transcriptSource: vData.transcriptSource || 'none',
+          nearbyCues: vData.nearbyCues || [],
+          fullTranscript: vData.fullTranscript || '',
+          chapters: vData.chapters || [],
+        },
+      },
+    }
+  }
+
+  /**
+   * Route C: Specialized E-Reader SPA Extractor (Amazon Kindle Cloud Reader).
+   * Traverses child frames via wc.mainFrame.framesInSubtree with strict timeouts so paginated iframe pages are extracted.
+   */
+  private async extractEReaderSpaMaterial(
+    wc: Electron.WebContents,
+    classification: BookMaterialClassification,
+    opts: { scope: string; includeLinks: boolean; includeInputs: boolean; showBadges: boolean; isLocalMode: boolean }
+  ): Promise<BookPageExtractionResult> {
+    const outerData = await this.extractStructuredDomMaterial(wc, classification, opts)
+    const cleanOuterLen = (outerData.visibleText || '').trim().length
+
+    // Kindle Cloud Reader often renders pages inside child reader iframes (#KindleReaderIFrame)
+    if (wc.mainFrame?.framesInSubtree && cleanOuterLen < 400) {
+      const candidateFrames = wc.mainFrame.framesInSubtree.filter((f) => {
+        if (f === wc.mainFrame) return false
+        const u = (f.url || '').toLowerCase()
+        if (!u || u.includes('doubleclick') || u.includes('googlesyndication') || u.includes('adsystem') || u === 'about:blank') {
+          return false
+        }
+        return true
+      })
+
+      const frameScript = `
+        (function() {
+          var rect = document.documentElement ? document.documentElement.getBoundingClientRect() : { width: 0, height: 0 };
+          if (rect.width < 120 || rect.height < 120) return null;
+          var text = (document.body ? (document.body.innerText || '') : '').replace(/\\n{3,}/g, '\\n\\n').trim();
+          if (!text || text.length < 60) return null;
+          var headings = [];
+          document.querySelectorAll('h1, h2, h3, [role="heading"]').forEach(function(h) {
+            var ht = (h.innerText || '').trim();
+            if (ht && headings.indexOf(ht) === -1) headings.push(ht);
+          });
+          var figures = [];
+          document.querySelectorAll('img').forEach(function(img) {
+            var alt = (img.getAttribute('alt') || img.getAttribute('title') || '').trim();
+            if (alt && figures.length < 8) figures.push({ caption: '', alt: alt, kind: 'img', inViewport: true });
+          });
+          var sel = window.getSelection();
+          return {
+            text: text,
+            headings: headings,
+            figures: figures,
+            selectedText: sel ? sel.toString().trim() : ''
+          };
+        })()
+      `
+
+      const results = await Promise.allSettled(
+        candidateFrames.slice(0, 8).map((f) =>
+          Promise.race([
+            f.executeJavaScript(frameScript),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Kindle frame timeout')), 1500)),
+          ])
+        )
+      )
+
+      let richest: any = null
+      for (const r of results) {
+        const val = r.status === 'fulfilled' ? (r.value as any) : null
+        if (val && val.text) {
+          if (!richest || val.text.length > richest.text.length) {
+            richest = val
+          }
+        }
+      }
+
+      if (richest) {
+        return {
+          ...outerData,
+          selectedText: richest.selectedText || outerData.selectedText,
+          visibleText: richest.text.slice(0, 12000),
+          fullText: richest.text.slice(0, 50000),
+          headings: richest.headings?.length ? richest.headings : outerData.headings,
+          pageDesign: {
+            ...(outerData.pageDesign || {
+              materialType: 'ereader-spa',
+              platformHint: 'kindle',
+              containerSelector: 'reader-iframe',
+              breadcrumbs: [],
+              inPageOutline: [],
+              hasSidebarToc: false,
+              headingOutline: [],
+              figures: [],
+              callouts: [],
+              tableCount: 0,
+              interactiveWidgets: [],
+            }),
+            materialType: 'ereader-spa',
+            platformHint: 'kindle',
+            containerSelector: 'reader-iframe',
+            figures: richest.figures?.length ? richest.figures : (outerData.pageDesign?.figures || []),
+          },
+        }
+      }
+    }
+
+    if (outerData.pageDesign) {
+      outerData.pageDesign.materialType = 'ereader-spa'
+      outerData.pageDesign.platformHint = 'kindle'
+    }
+    return outerData
+  }
+
+  /**
    * Extracts visible viewport text, full chapter/article text, headings, code blocks,
-   * form inputs, and interactive links from the active BookView pane (both Web and Local modes).
+   * form inputs, and interactive links from the active BookView pane (Classifier-First Pipeline).
    */
   public async extractVisiblePage(options?: {
-    scope?: 'viewport' | 'full' | 'both'
+    scope?: 'viewport' | 'full' | 'inputs' | 'links' | 'both'
     includeLinks?: boolean
     includeInputs?: boolean
     showBadges?: boolean
+    pageRangeHint?: { startPage: number; endPage: number }
     _forceLocalFallback?: boolean
   }): Promise<BookPageExtractionResult> {
     const { wc, isLocalMode } = this.getTargetWebContents(options?._forceLocalFallback)
@@ -779,8 +1501,9 @@ export class BookViewHandler {
       }
     }
 
+    const scopeNorm = options?.scope === 'inputs' || options?.scope === 'links' ? 'viewport' : (options?.scope || 'both')
     const opts = {
-      scope: options?.scope || 'both',
+      scope: scopeNorm,
       includeLinks: options?.includeLinks !== false,
       includeInputs: options?.includeInputs !== false,
       showBadges: Boolean(options?.showBadges),
@@ -788,9 +1511,67 @@ export class BookViewHandler {
     }
 
     try {
-      const data: BookPageExtractionResult & { activeFilePath?: string } = await this.execJsWithTimeout(
-        wc,
-        `
+      // Stage 1: Classify Material First
+      const classification = await this.classifyBookMaterial(wc, isLocalMode)
+
+      // Stage 2: Dispatch to Specialized Extractor
+      let data: BookPageExtractionResult
+      if (classification.materialType === 'local-pdf') {
+        data = await this.extractLocalPdfMaterial(classification, scopeNorm, options?.pageRangeHint)
+      } else if (classification.materialType === 'video-course') {
+        data = await this.extractVideoCourseMaterial(wc, classification, opts)
+      } else if (classification.materialType === 'ereader-spa') {
+        data = await this.extractEReaderSpaMaterial(wc, classification, opts)
+      } else {
+        data = await this.extractStructuredDomMaterial(wc, classification, opts)
+      }
+
+      if (options?.showBadges) {
+        await this.renderOrClearBadges(true)
+      }
+      return data
+    } catch (err: any) {
+      console.error('[BookView] extractVisiblePage error:', err)
+      if (!isLocalMode && !options?._forceLocalFallback && this.mainWindow && !this.mainWindow.isDestroyed()) {
+        return await this.extractVisiblePage({ ...options, _forceLocalFallback: true })
+      }
+      return {
+        success: false,
+        mode: isLocalMode ? 'local' : 'web',
+        title: '',
+        chapter: '',
+        url: '',
+        scrollPercent: 0,
+        selectedText: '',
+        visibleText: '',
+        fullText: '',
+        headings: [],
+        codeBlocks: [],
+        inputs: [],
+        links: [],
+        error: err?.message || 'Failed to extract BookView page',
+      }
+    }
+  }
+
+  /**
+   * Route D: Structured DOM Extractor for Course Docs, O'Reilly Web Books, Local Readers, & Web Articles.
+   * Extracts only the primary teaching container (excluding sidebars/drawers), preserves Markdown headings,
+   * fenced code blocks (gutter line-numbers stripped), Markdown tables, callout boxes, and figure/chart labels.
+   */
+  private async extractStructuredDomMaterial(
+    wc: Electron.WebContents,
+    classification: BookMaterialClassification,
+    opts: { scope: string; includeLinks: boolean; includeInputs: boolean; showBadges: boolean; isLocalMode: boolean }
+  ): Promise<BookPageExtractionResult> {
+    const payloadOpts = {
+      ...opts,
+      materialType: classification.materialType,
+      platformHint: classification.platformHint,
+    }
+    const data: BookPageExtractionResult & { activeFilePath?: string } = await this.execJsWithTimeout(
+      wc,
+      `
         (function(opts) {
           try {
             var root = opts.isLocalMode
@@ -893,147 +1674,251 @@ export class BookViewHandler {
               scrollPercent = Math.round((window.scrollY / (document.documentElement.scrollHeight - window.innerHeight)) * 100);
             }
 
-            // 3. Identify primary content container inside BookView (ordered by specificity so article wins over outer wrapper)
-            var contentSelectors = [
-              '#sbo-rt-content',
-              '.epub-reader-content',
-              '.wb-doc-editor',
-              'main article',
-              '[role="main"] article',
-              'article',
-              '.markdown-section',
-              '.theme-doc-markdown',
-              '.page-inner',
-              '#content main',
-              'main',
-              '[role="main"]',
-              '.local-explorer-content'
-            ];
+            // 3. Identify primary content container tailored to classified materialType
+            var contentSelectors = opts.materialType === 'ebook-web'
+              ? ['#sbo-rt-content', '[data-testid="reader-content"]', 'main article', 'article', 'main', '[role="main"]']
+              : opts.materialType === 'course-docs'
+              ? ['#main-content article', '.bd-article-container', '#main-content', '.theme-doc-markdown', '.markdown-section', '.page-inner', 'main article', 'article', 'main', '[role="main"]']
+              : [
+                  '.epub-reader-content',
+                  '.wb-doc-editor',
+                  '#sbo-rt-content',
+                  'main article',
+                  '[role="main"] article',
+                  'article',
+                  '.markdown-section',
+                  '.theme-doc-markdown',
+                  '.page-inner',
+                  '#content main',
+                  'main',
+                  '[role="main"]',
+                  '.local-explorer-content'
+                ];
             var contentRoot = root;
+            var matchedContainerSelector = 'body';
             for (var cs = 0; cs < contentSelectors.length; cs++) {
               var cand = root.querySelector(contentSelectors[cs]);
               if (cand && isElementVisible(cand) && (cand.innerText || '').trim().length > 40) {
                 contentRoot = cand;
+                matchedContainerSelector = contentSelectors[cs];
                 break;
               }
             }
 
+            var hasSidebarToc = Boolean(
+              root.querySelector('nav, aside, #sidebar, .sidebar, .bd-sidebar-primary, .bd-sidebar-secondary, .book-summary, [class*="drawer" i]')
+            );
+
             function isInsideNavigationChrome(el) {
-              if (!el || !el.closest || opts.isLocalMode) return false;
+              if (!el || !el.closest) return false;
+              if (opts.isLocalMode) {
+                return Boolean(el.closest('.pane-toolbar, .wb-editor-toolbar, .wb-doc-tabs, .local-explorer-sidebar'));
+              }
               var navAnc = el.closest(
-                'nav, [role="navigation"], aside, #sidebar, .sidebar, .book-summary, .nav-chapters, .toc-container, #wb-book-link-badges-host, #workbench-selection-bubble-host, .pane-toolbar'
+                'nav, [role="navigation"], aside, #sidebar, .sidebar, .bd-sidebar-primary, .bd-sidebar-secondary, .sphinxsidebar, .book-summary, .nav-chapters, .toc-container, [class*="drawer" i], [data-testid*="drawer"], [class*="toc" i], #wb-book-link-badges-host, #workbench-selection-bubble-host, .pane-toolbar'
               );
               return Boolean(navAnc && navAnc !== contentRoot);
             }
 
-            // 4. Headings
+            // Capture breadcrumbs & in-page right-hand "On this page" outline separately
+            var breadcrumbs = [];
+            root.querySelectorAll('nav[aria-label*="breadcrumb" i] a, nav[aria-label*="breadcrumb" i] li, .breadcrumb a, .breadcrumb-segment').forEach(function(b) {
+              var bt = (b.innerText || '').trim();
+              if (bt && breadcrumbs.indexOf(bt) === -1 && breadcrumbs.length < 8) breadcrumbs.push(bt);
+            });
+
+            var inPageOutline = [];
+            root.querySelectorAll('.bd-sidebar-secondary a, [class*="toc" i] a, nav[aria-label*="on this page" i] a').forEach(function(a) {
+              if (isElementVisible(a)) {
+                var ot = (a.innerText || '').trim();
+                if (ot && ot.length > 1 && ot.length < 100 && inPageOutline.indexOf(ot) === -1 && inPageOutline.length < 25) {
+                  inPageOutline.push(ot);
+                }
+              }
+            });
+
+            // 4. Structured Headings Outline
             var headings = [];
+            var headingOutline = [];
             contentRoot.querySelectorAll('h1, h2, h3, h4').forEach(function(h) {
               if (isElementVisible(h) && !isInsideNavigationChrome(h)) {
-                var hText = (h.innerText || '').trim();
+                var hText = (h.innerText || '').replace(/\\s+/g, ' ').trim();
+                var lvl = parseInt((h.tagName || 'H2').slice(1), 10) || 2;
                 if (hText && headings.indexOf(hText) === -1) {
                   headings.push(hText);
+                  if (headingOutline.length < 30) {
+                    headingOutline.push({ level: lvl, text: hText, inViewport: isInViewport(h.getBoundingClientRect()) });
+                  }
                 }
               }
             });
 
-            // 5. Extract Viewport-Visible Text & Full Chapter Text via TreeWalker (excluding sidebar/nav chrome)
+            // Helper: Extract clean code without visual line-number gutters
+            function extractCleanCodeFromPre(pre) {
+              var clone = pre.cloneNode(true);
+              clone.querySelectorAll(
+                '.hljs-ln-numbers, .hljs-ln-n, .line-numbers-rows, [class*="gutter" i], [class*="line-num" i], [data-line-number], button, [aria-hidden="true"]'
+              ).forEach(function(rem) { rem.remove(); });
+              var txt = (clone.innerText || clone.textContent || '').replace(/\\r\\n/g, '\\n').trim();
+              // Remove standalone leading line-number block if an outer wrapper rendered lines "1\\n2\\n3\\n..." above code
+              var lines = txt.split('\\n');
+              while (lines.length > 3 && /^\\d+$/.test(lines[0].trim()) && /^\\d+$/.test(lines[1].trim())) {
+                lines.shift();
+              }
+              return lines.join('\\n').trim();
+            }
+
+            function tableToMarkdown(tbl) {
+              var rows = Array.from(tbl.querySelectorAll('tr')).slice(0, 20);
+              if (rows.length === 0) return '';
+              var mdRows = [];
+              rows.forEach(function(tr, rIdx) {
+                var cells = Array.from(tr.querySelectorAll('th, td')).slice(0, 10).map(function(c) {
+                  return (c.innerText || '').replace(/\\s+/g, ' ').replace(/\\|/g, '\\\\|').trim();
+                });
+                if (cells.some(Boolean)) {
+                  mdRows.push('| ' + cells.join(' | ') + ' |');
+                  if (rIdx === 0) {
+                    mdRows.push('| ' + cells.map(function() { return '---'; }).join(' | ') + ' |');
+                  }
+                }
+              });
+              return mdRows.join('\\n');
+            }
+
+            // 5. Extract Structural Content Blocks cleanly (preserving Headings, Code Fences, Tables, Callouts, Figures)
             var visibleBlocks = [];
-            var lastVisBlockEl = null;
-            var currentVisParts = [];
-
             var fullBlocks = [];
-            var lastFullBlockEl = null;
-            var currentFullParts = [];
+            var seenBlockNodes = new Set();
+            var callouts = [];
+            var figures = [];
+            var tableCount = 0;
 
-            var walker = document.createTreeWalker(contentRoot, NodeFilter.SHOW_TEXT, {
-              acceptNode: function(node) {
-                var val = (node.nodeValue || '').trim();
-                if (!val) return NodeFilter.FILTER_REJECT;
-                var parent = node.parentElement;
-                if (!parent) return NodeFilter.FILTER_REJECT;
-                var tag = parent.tagName ? parent.tagName.toLowerCase() : '';
-                if (tag === 'script' || tag === 'style' || tag === 'noscript' || tag === 'svg') {
-                  return NodeFilter.FILTER_REJECT;
+            var blockEls = Array.from(
+              contentRoot.querySelectorAll('h1, h2, h3, h4, p, pre, code-block, table, blockquote, figure, ul, ol, .callout, .admonition, [role="note"], [role="alert"]')
+            );
+
+            blockEls.forEach(function(el) {
+              if (!isElementVisible(el) || isInsideNavigationChrome(el)) return;
+              // Skip nested blocks whose parent container block was already serialized (e.g. p inside blockquote or li inside ul)
+              var anc = el.parentElement ? el.parentElement.closest('pre, code-block, table, blockquote, figure, .callout, .admonition, ul, ol') : null;
+              if (anc && anc !== contentRoot && seenBlockNodes.has(anc)) return;
+
+              var tag = (el.tagName || '').toLowerCase();
+              var rect = el.getBoundingClientRect();
+              var inVp = isInViewport(rect);
+              var mdChunk = '';
+
+              if (tag === 'pre' || tag === 'code-block') {
+                seenBlockNodes.add(el);
+                var codeEl = el.querySelector('code');
+                var cls = ((codeEl ? codeEl.className : '') + ' ' + (el.className || '')).toLowerCase();
+                var m = cls.match(/language-([a-z0-9_\\-#+]+)/i);
+                var lang = m ? m[1] : '';
+                var cleanCode = extractCleanCodeFromPre(el);
+                if (cleanCode && cleanCode.length > 3) {
+                  mdChunk = '\`\`\`' + lang + '\\n' + cleanCode.slice(0, 5000) + '\\n\`\`\`';
                 }
-                if (isInsideNavigationChrome(parent)) {
-                  return NodeFilter.FILTER_REJECT;
+              } else if (tag === 'table') {
+                seenBlockNodes.add(el);
+                tableCount++;
+                mdChunk = tableToMarkdown(el);
+              } else if (tag === 'blockquote' || el.matches('.callout, .admonition, [role="note"], [role="alert"]')) {
+                seenBlockNodes.add(el);
+                var cText = (el.innerText || '').replace(/\\n{2,}/g, '\\n').trim();
+                if (cText) {
+                  var cKind = el.className && /warn/i.test(el.className) ? 'WARNING' : (/tip/i.test(el.className || '') ? 'TIP' : 'NOTE');
+                  mdChunk = '> **[' + cKind + ']** ' + cText.replace(/\\n/g, '\\n> ');
+                  if (callouts.length < 8) {
+                    callouts.push({ kind: cKind, text: cText.slice(0, 280), inViewport: inVp });
+                  }
                 }
-                if (!isElementVisible(parent)) return NodeFilter.FILTER_REJECT;
-                return NodeFilter.FILTER_ACCEPT;
+              } else if (tag === 'figure') {
+                seenBlockNodes.add(el);
+                var capEl = el.querySelector('figcaption');
+                var imgEl = el.querySelector('img');
+                var svgTitle = el.querySelector('svg title');
+                var cap = capEl ? (capEl.innerText || '').trim() : '';
+                var alt = imgEl ? (imgEl.getAttribute('alt') || imgEl.getAttribute('title') || '').trim() : (svgTitle ? (svgTitle.textContent || '').trim() : '');
+                if (cap || alt) {
+                  if (figures.length < 12) figures.push({ caption: cap, alt: alt, kind: 'figure', inViewport: inVp });
+                  mdChunk = '[Figure: ' + (cap || alt) + (cap && alt && cap !== alt ? ' (' + alt + ')' : '') + ']';
+                }
+              } else if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4') {
+                var level = parseInt(tag.slice(1), 10) || 2;
+                var ht = (el.innerText || '').replace(/\\s+/g, ' ').trim();
+                if (ht) mdChunk = '#'.repeat(level) + ' ' + ht;
+              } else if (tag === 'ul' || tag === 'ol') {
+                seenBlockNodes.add(el);
+                var items = Array.from(el.children).filter(function(li) { return li.tagName && li.tagName.toLowerCase() === 'li'; });
+                mdChunk = items.slice(0, 40).map(function(li, idx) {
+                  var lt = (li.innerText || '').replace(/\\s+/g, ' ').trim();
+                  return lt ? (tag === 'ol' ? (idx + 1) + '. ' + lt : '- ' + lt) : '';
+                }).filter(Boolean).join('\\n');
+              } else {
+                var pText = (el.innerText || '').replace(/\\s+/g, ' ').trim();
+                if (pText) mdChunk = pText;
+              }
+
+              if (mdChunk) {
+                if (opts.scope === 'full' || opts.scope === 'both') fullBlocks.push(mdChunk);
+                if (inVp) visibleBlocks.push(mdChunk);
               }
             });
 
-            var tNode;
-            while ((tNode = walker.nextNode())) {
-              var pEl = tNode.parentElement;
-              var blockEl = (pEl && pEl.closest)
-                ? (pEl.closest('p, h1, h2, h3, h4, h5, h6, li, pre, blockquote, tr, td, th, dt, dd, figcaption, section, article, div') || pEl)
-                : pEl;
-              var cleanNodeText = (tNode.nodeValue || '').replace(/\\s+/g, ' ').trim();
-
-              // Always accumulate into full chapter blocks when requested
-              if (opts.scope === 'full' || opts.scope === 'both') {
-                if (blockEl !== lastFullBlockEl) {
-                  if (currentFullParts.length > 0) {
-                    fullBlocks.push(currentFullParts.join(' '));
-                    currentFullParts = [];
-                  }
-                  lastFullBlockEl = blockEl;
-                }
-                currentFullParts.push(cleanNodeText);
+            // Capture standalone visible <img> / <svg> diagrams not inside <figure>
+            contentRoot.querySelectorAll('img, svg').forEach(function(vis) {
+              if (!isElementVisible(vis) || isInsideNavigationChrome(vis) || vis.closest('figure')) return;
+              var vr = vis.getBoundingClientRect();
+              if (vr.width < 64 || vr.height < 48) return;
+              var alt = (vis.getAttribute('alt') || vis.getAttribute('aria-label') || vis.getAttribute('title') || '').trim();
+              if (!alt && vis.tagName.toLowerCase() === 'svg') {
+                var st = vis.querySelector('title');
+                if (st && st.textContent) alt = st.textContent.trim();
               }
-
-              // Check viewport intersection for visibleText
-              var range = document.createRange();
-              range.selectNodeContents(tNode);
-              var rect = range.getBoundingClientRect();
-              if (isInViewport(rect)) {
-                if (blockEl !== lastVisBlockEl) {
-                  if (currentVisParts.length > 0) {
-                    visibleBlocks.push(currentVisParts.join(' '));
-                    currentVisParts = [];
-                  }
-                  lastVisBlockEl = blockEl;
-                }
-                currentVisParts.push(cleanNodeText);
+              if (alt && figures.length < 12) {
+                figures.push({
+                  caption: '',
+                  alt: alt.slice(0, 200),
+                  kind: vis.tagName.toLowerCase() === 'svg' ? 'chart' : 'img',
+                  inViewport: isInViewport(vr)
+                });
               }
-            }
-            if (currentVisParts.length > 0) {
-              visibleBlocks.push(currentVisParts.join(' '));
-            }
-            if (currentFullParts.length > 0) {
-              fullBlocks.push(currentFullParts.join(' '));
-            }
+            });
 
-            var visibleText = visibleBlocks.join('\\n').trim();
+            var visibleText = visibleBlocks.join('\\n\\n').trim();
+            var fullText = fullBlocks.join('\\n\\n').trim();
 
-            // 6. Full Page / Chapter Text
-            var fullText = fullBlocks.join('\\n').trim();
-            if (!fullText && (opts.scope === 'full' || opts.scope === 'both' || !visibleText)) {
-              fullText = (contentRoot.innerText || '').trim();
-            }
-            if (fullText.length > 60000) {
-              fullText = fullText.slice(0, 60000) + '\\n... [truncated at 60,000 chars]';
+            // Fallback to clean text if a non-standard SPA uses custom <div> paragraphs without <p>/<h1> tags
+            if (!fullText && (opts.scope === 'full' || opts.scope === 'both')) {
+              fullText = (contentRoot.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim();
             }
             if (!visibleText && fullText) {
               visibleText = fullText.slice(0, 8000);
             }
+            if (fullText.length > 60000) {
+              fullText = fullText.slice(0, 60000) + '\\n... [truncated at 60,000 chars]';
+            }
 
-            // 7. Code Blocks
+            // Interactive Widgets count
+            var interactiveWidgets = [];
+            if (contentRoot.querySelector('details')) interactiveWidgets.push({ kind: 'details', label: 'Expandable Sections' });
+            if (contentRoot.querySelector('[role="tablist"]')) interactiveWidgets.push({ kind: 'tabs', label: 'Tabbed Code/Content' });
+
+            // 7. Code Blocks array
             var codeBlocks = [];
             contentRoot.querySelectorAll('pre, code-block').forEach(function(pre) {
-              if (!isElementVisible(pre)) return;
+              if (!isElementVisible(pre) || isInsideNavigationChrome(pre)) return;
               var rect = pre.getBoundingClientRect();
               if (opts.scope === 'viewport' && !isInViewport(rect)) return;
-              var codeText = (pre.innerText || '').trim();
-              if (codeText && codeText.length > 3) {
+              var cleanCode = extractCleanCodeFromPre(pre);
+              if (cleanCode && cleanCode.length > 3) {
                 var codeEl = pre.querySelector('code');
-                var cls = ((codeEl ? codeEl.className : '') + ' ' + pre.className).toLowerCase();
+                var cls = ((codeEl ? codeEl.className : '') + ' ' + (pre.className || '')).toLowerCase();
                 var m = cls.match(/language-([a-z0-9_\\-#+]+)/i);
                 codeBlocks.push({
                   language: m ? m[1] : 'text',
-                  code: codeText.slice(0, 8000)
+                  code: cleanCode.slice(0, 8000)
                 });
               }
             });
@@ -1152,11 +2037,6 @@ export class BookViewHandler {
                   title: ariaLabel || undefined
                 });
               });
-
-              // Sort so viewport-visible links appear first when listed, while keeping stable IDs
-              if (opts.showBadges && window.__wbRenderBookBadges) {
-                window.__wbRenderBookBadges(root, true);
-              }
             }
 
             return {
@@ -1173,7 +2053,21 @@ export class BookViewHandler {
               headings: headings.slice(0, 40),
               codeBlocks: codeBlocks.slice(0, 25),
               inputs: inputs.slice(0, 50),
-              links: links.slice(0, 120)
+              links: links.slice(0, 120),
+              pageDesign: {
+                materialType: opts.materialType,
+                platformHint: opts.platformHint,
+                containerSelector: matchedContainerSelector,
+                breadcrumbs: breadcrumbs,
+                inPageOutline: inPageOutline,
+                hasSidebarToc: hasSidebarToc,
+                paginationLabel: scrollPercent > 0 ? ('~' + scrollPercent + '% scrolled') : undefined,
+                headingOutline: headingOutline,
+                figures: figures,
+                callouts: callouts,
+                tableCount: tableCount,
+                interactiveWidgets: interactiveWidgets
+              }
             };
           } catch (innerErr) {
             return {
@@ -1193,78 +2087,11 @@ export class BookViewHandler {
               error: innerErr && innerErr.message ? innerErr.message : String(innerErr)
             };
           }
-        })(${JSON.stringify(opts)})
+        })(${JSON.stringify(payloadOpts)})
       `,
-        4000
-      )
-
-      // If a PDF tab is open in Local Mode (visual viewer <embed>), enrich visibleText/fullText with actual PDF text
-      if (
-        isLocalMode &&
-        data.success &&
-        data.activeFilePath &&
-        data.activeFilePath.toLowerCase().endsWith('.pdf') &&
-        fs.existsSync(data.activeFilePath) &&
-        (data.visibleText || '').length < 300
-      ) {
-        try {
-          const pdfBuffer = await fs.promises.readFile(data.activeFilePath)
-          const pdfParseModule: any = await import('pdf-parse')
-          let extractedPdfText = ''
-          const maxPages = options?.scope === 'full' ? 30 : 8
-          if (pdfParseModule.PDFParse) {
-            const parser = new pdfParseModule.PDFParse({ data: pdfBuffer })
-            const textResult = await parser.getText({ first: maxPages })
-            extractedPdfText = textResult.text || ''
-            if (typeof parser.destroy === 'function') {
-              try {
-                await parser.destroy()
-              } catch (_) {}
-            }
-          } else {
-            const parseFn = typeof pdfParseModule.default === 'function' ? pdfParseModule.default : pdfParseModule
-            const parsedPdf = await parseFn(pdfBuffer, { max: maxPages })
-            extractedPdfText = parsedPdf.text || ''
-          }
-          const cleanPdfText = (extractedPdfText || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-          if (cleanPdfText) {
-            data.visibleText = cleanPdfText.slice(0, 12000)
-            data.fullText = cleanPdfText.slice(0, 50000)
-            data.url = data.activeFilePath
-          }
-        } catch (pdfErr) {
-          console.warn('[BookView] Local PDF text enrichment warning:', pdfErr)
-        }
-      }
-
-      if (options?.showBadges) {
-        await this.renderOrClearBadges(true)
-      }
-
-      return data
-    } catch (err: any) {
-      console.error('[BookView] extractVisiblePage error:', err)
-      // If Web BookView timed out or failed, automatically fall back to Local BookView (.book-pane in mainWindow)
-      if (!isLocalMode && !options?._forceLocalFallback && this.mainWindow && !this.mainWindow.isDestroyed()) {
-        return await this.extractVisiblePage({ ...options, _forceLocalFallback: true })
-      }
-      return {
-        success: false,
-        mode: isLocalMode ? 'local' : 'web',
-        title: '',
-        chapter: '',
-        url: '',
-        scrollPercent: 0,
-        selectedText: '',
-        visibleText: '',
-        fullText: '',
-        headings: [],
-        codeBlocks: [],
-        inputs: [],
-        links: [],
-        error: err?.message || 'Failed to extract BookView page',
-      }
-    }
+      4000
+    )
+    return data
   }
 
   /**
@@ -1338,7 +2165,7 @@ export class BookViewHandler {
           setTimeout(clearFn, 25000);
         })(${JSON.stringify(show)}, ${JSON.stringify(isLocalMode)})
       `)
-    } catch (_) {}
+    } catch (_) { }
   }
 
   /**
@@ -1632,19 +2459,19 @@ export class BookViewHandler {
    */
   public async scrollOrNavigate(params: {
     command:
-      | 'scroll-down'
-      | 'scroll-up'
-      | 'scroll-top'
-      | 'scroll-bottom'
-      | 'next'
-      | 'prev'
-      | 'back'
-      | 'forward'
-      | 'reload'
-      | 'home'
-      | 'url'
-      | 'clear-badges'
-      | 'show-badges'
+    | 'scroll-down'
+    | 'scroll-up'
+    | 'scroll-top'
+    | 'scroll-bottom'
+    | 'next'
+    | 'prev'
+    | 'back'
+    | 'forward'
+    | 'reload'
+    | 'home'
+    | 'url'
+    | 'clear-badges'
+    | 'show-badges'
     url?: string
   }): Promise<BookNavResult> {
     const cmd = params.command

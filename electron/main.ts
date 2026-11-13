@@ -21,7 +21,9 @@ import {
   SUMMARY_STYLE_PRESETS,
   EXPLAIN_STYLE_PRESETS,
   CustomUserPromptTemplate,
+  BookCommandPromptOverrides,
 } from './utils/bookCommandParser'
+import { BookCommandConfigManager } from './services/bookCommandConfigManager'
 import { PromptRegistryService } from './services/promptRegistryService'
 import { Logger } from './services/logger'
 
@@ -117,6 +119,7 @@ let mainWindow: BrowserWindow | null = null
 let bookSourceManager: BookSourceManager | null = null
 let aiSourceManager: AISourceManager | null = null
 let noteSourceManager: NoteSourceManager | null = null
+let bookCommandConfigManager: BookCommandConfigManager | null = null
 let bookHandler: BookViewHandler | null = null
 let aiHandler: AIViewHandler | null = null
 let noteHandler: NoteViewHandler | null = null
@@ -219,6 +222,7 @@ function createWindow() {
   bookSourceManager = new BookSourceManager()
   aiSourceManager = new AISourceManager()
   noteSourceManager = new NoteSourceManager()
+  bookCommandConfigManager = new BookCommandConfigManager()
   bookHandler = new BookViewHandler(mainWindow, bookSourceManager)
   aiHandler = new AIViewHandler(mainWindow, aiSourceManager)
   noteHandler = new NoteViewHandler(mainWindow, noteSourceManager)
@@ -510,13 +514,48 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('workbench:get-book-prompt-presets', () => {
+    const state = bookCommandConfigManager?.getFullState()
     return {
-      presets: SUMMARY_STYLE_PRESETS,
-      summaryPresets: SUMMARY_STYLE_PRESETS,
-      explainPresets: EXPLAIN_STYLE_PRESETS,
+      presets: state?.effectiveSummaryPresets || SUMMARY_STYLE_PRESETS,
+      summaryPresets: state?.effectiveSummaryPresets || SUMMARY_STYLE_PRESETS,
+      explainPresets: state?.effectiveExplainPresets || EXPLAIN_STYLE_PRESETS,
       userTemplates: getMergedUserTemplates(),
       defaultTemplateId: syncedDefaultAskAITemplateId,
+      commandConfig: state?.config,
     }
+  })
+
+  ipcMain.handle('workbench:get-book-command-config', () => {
+    return (
+      bookCommandConfigManager?.getFullState() || {
+        config: { overrides: {}, customCommands: [] },
+        defaults: [],
+        items: [],
+        effectiveSummaryPresets: SUMMARY_STYLE_PRESETS,
+        effectiveExplainPresets: EXPLAIN_STYLE_PRESETS,
+      }
+    )
+  })
+
+  ipcMain.handle('workbench:save-book-command-config', (_, config: BookCommandPromptOverrides) => {
+    if (!bookCommandConfigManager) {
+      return { success: false, error: 'Command config manager not ready' }
+    }
+    const state = bookCommandConfigManager.saveConfig(config)
+    return { success: true, ...state }
+  })
+
+  ipcMain.handle('workbench:reset-book-command-config', () => {
+    if (!bookCommandConfigManager) {
+      return { success: false, error: 'Command config manager not ready' }
+    }
+    const state = bookCommandConfigManager.resetAll()
+    return { success: true, ...state }
+  })
+
+  ipcMain.on('workbench:open-book-commands-modal', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('workbench:open-book-commands-modal')
   })
 
   ipcMain.on('workbench:open-ask-ai-templates-from-chat', async () => {
@@ -615,6 +654,7 @@ function registerIpcHandlers() {
     includeLinks?: boolean
     includeInputs?: boolean
     showBadges?: boolean
+    pageRangeHint?: { startPage: number; endPage: number }
   }) => {
     if (!bookHandler) return { success: false, error: 'BookView handler not ready' }
     try {
@@ -623,13 +663,16 @@ function registerIpcHandlers() {
         includeLinks: options?.includeLinks ?? true,
         includeInputs: options?.includeInputs ?? true,
         showBadges: options?.showBadges ?? false,
+        pageRangeHint: options?.pageRangeHint,
       })
+      const commandOverrides = bookCommandConfigManager?.getConfig()
       const formattedMarkdown = page.success
         ? formatBookPageMarkdown(page, {
             scope:
               options?.scope === 'full' || options?.scope === 'inputs' || options?.scope === 'links'
                 ? options.scope
                 : 'viewport',
+            designOptions: commandOverrides?.pageDesign,
           })
         : ''
       return { ...page, formattedMarkdown }
@@ -697,24 +740,31 @@ function registerIpcHandlers() {
     }
     try {
       const parsed = parseBookChatCommand(rawPrompt)
+      const pageRangeHint =
+        parsed && (parsed.kind === 'book-prompt-expansion' || parsed.kind === 'book-extract-card')
+          ? parsed.pageRangeHint
+          : undefined
       const page = await bookHandler.extractVisiblePage({
         scope: 'both',
         includeLinks: true,
         includeInputs: true,
         showBadges: false,
+        pageRangeHint,
       })
 
       if (!page.success) {
         return { success: false, error: page.error || 'Failed to read BookView page' }
       }
 
+      const commandOverrides = bookCommandConfigManager?.getConfig()
       let finalPrompt = rawPrompt
       if (parsed && parsed.kind === 'book-prompt-expansion') {
         finalPrompt = buildExpandedBookPrompt(parsed, page, {
           userTemplates: getMergedUserTemplates(),
+          commandOverrides,
         })
       } else {
-        finalPrompt = `${rawPrompt}\n\n---\n${formatBookPageMarkdown(page, { scope: 'viewport' })}`
+        finalPrompt = `${rawPrompt}\n\n---\n${formatBookPageMarkdown(page, { scope: 'viewport', designOptions: commandOverrides?.pageDesign })}`
       }
 
       if (mainWindow && !mainWindow.isDestroyed()) {

@@ -9,17 +9,85 @@ export function formatBookPageMarkdown(
   options?: {
     scope?: 'viewport' | 'full' | 'inputs' | 'links' | 'selection'
     maxTextLength?: number
+    designOptions?: {
+      includeDesignSummary?: boolean
+      includeFigureCaptions?: boolean
+      includeVideoTranscript?: boolean
+    }
   }
 ): string {
   const scope = options?.scope || 'viewport'
   const maxLen = options?.maxTextLength || 25000
+  const includeDesignSummary = options?.designOptions?.includeDesignSummary !== false
+  const includeFigureCaptions = options?.designOptions?.includeFigureCaptions !== false
+  const includeVideoTranscript = options?.designOptions?.includeVideoTranscript !== false
   const lines: string[] = []
+
+  const materialLabels: Record<string, string> = {
+    'video-course': '🎬 Video Course / Lecture',
+    'ereader-spa': '📕 E-Reader (Kindle / Paginated)',
+    'ebook-web': '📙 Online Technical Book (O’Reilly)',
+    'course-docs': '📘 Course Notes & Documentation',
+    'local-pdf': '📄 Local PDF Book',
+    'local-ebook': '📗 Local E-Book (EPUB / MOBI)',
+    'local-doc': '📝 Local Document',
+    'generic-article': '🌐 Web Article',
+  }
 
   lines.push(`### 📖 BookView Page Snapshot`)
   if (page.title) lines.push(`- **Title**: ${page.title}`)
   if (page.chapter && page.chapter !== page.title) lines.push(`- **Chapter / Heading**: ${page.chapter}`)
   if (page.url) lines.push(`- **URL / Source**: ${page.url}`)
-  if (typeof page.scrollPercent === 'number') lines.push(`- **Scroll Position**: ~${page.scrollPercent}%`)
+  if (page.pageDesign?.materialType) {
+    lines.push(`- **Material Format**: ${materialLabels[page.pageDesign.materialType] || page.pageDesign.materialType}`)
+  }
+  if (page.pageDesign?.paginationLabel) {
+    lines.push(`- **Location / Pagination**: ${page.pageDesign.paginationLabel}`)
+  } else if (typeof page.scrollPercent === 'number') {
+    lines.push(`- **Scroll Position**: ~${page.scrollPercent}%`)
+  }
+
+  // Structural Page Design Map (headings outline, callouts, diagrams, breadcrumbs)
+  const pd = page.pageDesign
+  if (includeDesignSummary && pd && (scope === 'viewport' || scope === 'full')) {
+    const designLines: string[] = []
+    if (Array.isArray(pd.breadcrumbs) && pd.breadcrumbs.length > 0) {
+      designLines.push(`- **Breadcrumbs**: ${pd.breadcrumbs.join(' › ')}`)
+    }
+    const outlineItems: string[] =
+      Array.isArray(pd.headingOutline) && pd.headingOutline.length > 0
+        ? pd.headingOutline.slice(0, 20).map((h: any) => `${'  '.repeat(Math.max(0, (h.level || 1) - 1))}• H${h.level || 2}: ${h.text}${h.inViewport ? ' 👁️' : ''}`)
+        : Array.isArray(pd.inPageOutline) && pd.inPageOutline.length > 0
+          ? pd.inPageOutline.slice(0, 20).map((o: string) => `• ${o}`)
+          : []
+    if (outlineItems.length > 0) {
+      designLines.push(`- **Section Outline**:\n${outlineItems.join('\n')}`)
+    }
+    if (Array.isArray(pd.callouts) && pd.callouts.length > 0) {
+      const cList = pd.callouts.slice(0, 4).map((c: any) => `  - **[${c.kind}]** ${String(c.text).replace(/\n/g, ' ').slice(0, 180)}`)
+      designLines.push(`- **Callouts / Highlights (${pd.callouts.length})**:\n${cList.join('\n')}`)
+    }
+    if (includeFigureCaptions && Array.isArray(pd.figures) && pd.figures.length > 0) {
+      const fList = pd.figures.slice(0, 8).map((f: any) => `  - **${f.kind.toUpperCase()}**: ${f.caption || f.alt}${f.inViewport ? ' 👁️' : ''}`)
+      designLines.push(`- **Visual Diagrams & Figures (${pd.figures.length})**:\n${fList.join('\n')}`)
+    }
+    if (pd.tableCount > 0) {
+      designLines.push(`- **Structured Tables Detected**: ${pd.tableCount}`)
+    }
+    if (designLines.length > 0) {
+      lines.push(``, `#### 🏗️ Source Material & Page Structure:`, ...designLines)
+    }
+  }
+
+  // Video Context & Transcript Block (when classified as video-course)
+  if (includeVideoTranscript && pd?.materialType === 'video-course' && pd.video && (scope === 'viewport' || scope === 'full')) {
+    const v = pd.video
+    lines.push(``, `#### 🎬 Video Playback & Course Context:`)
+    lines.push(`- **Playback Status**: ${v.paused ? 'Paused' : 'Playing'} at \`${v.currentTimestampFormatted || '00:00'}\` (Transcript: ${v.transcriptSource})`)
+    if (Array.isArray(v.chapters) && v.chapters.length > 0) {
+      lines.push(`- **Module / Playlist Chapters (${v.chapters.length})**: ${v.chapters.slice(0, 12).map((c: any) => c.title).join(' | ')}`)
+    }
+  }
 
   const rawBodyText =
     scope === 'full' ? page.fullText || page.visibleText || '' : page.visibleText || page.fullText || ''
@@ -38,7 +106,10 @@ export function formatBookPageMarkdown(
 
   if (scope === 'viewport' || scope === 'full') {
     const rawText = rawBodyText
-    const label = scope === 'full' ? 'Full Page / Chapter Content' : 'Visible Viewport Content'
+    const isVideo = pd?.materialType === 'video-course'
+    const label = isVideo
+      ? (scope === 'full' ? 'Full Video Transcript & Lecture Text' : 'Active Video Segment Around Current Playback Time')
+      : (scope === 'full' ? 'Full Page / Chapter Content' : 'Visible Viewport Content')
     if (rawText) {
       const clipped = rawText.length > maxLen ? rawText.slice(0, maxLen) + `\n... [truncated at ${maxLen} chars]` : rawText
       lines.push(``, `#### 📄 ${label}:`)

@@ -190,6 +190,62 @@ export interface ElectronAPI {
   bookClickLink?: (target: { id?: number; text?: string; selector?: string }) => Promise<any>
   bookNavigate?: (params: { command: string; url?: string }) => Promise<any>
   bookExpandAndSubmit?: (params: { rawPrompt: string; autoSubmit?: boolean }) => Promise<any>
+  getBookCommandConfig?: () => Promise<BookCommandConfigState>
+  saveBookCommandConfig?: (config: BookCommandPromptOverrides) => Promise<BookCommandConfigState & { success: boolean; error?: string }>
+  resetBookCommandConfig?: () => Promise<BookCommandConfigState & { success: boolean; error?: string }>
+  onOpenBookCommandsModal?: (callback: () => void) => () => void
+}
+
+export type BookCommandCategory = 'summarize' | 'explain' | 'general'
+
+export interface BookCommandPromptConfigItem {
+  key: string
+  command: string
+  category: BookCommandCategory
+  label: string
+  icon: string
+  aliases: string[]
+  description: string
+  promptDirective: string
+  isBuiltIn: boolean
+}
+
+export interface PageDesignPromptSettings {
+  includeDesignSummary: boolean
+  preserveMarkdownStructure: boolean
+  includeFigureCaptions: boolean
+  includeVideoTranscript: boolean
+  designGuidancePrompt: string
+}
+
+export interface BookCommandPromptOverrides {
+  overrides: Record<
+    string,
+    {
+      label?: string
+      icon?: string
+      description?: string
+      promptDirective?: string
+      aliases?: string[]
+    }
+  >
+  customCommands?: Array<{
+    key: string
+    label: string
+    icon: string
+    description: string
+    promptDirective: string
+    category: BookCommandCategory
+  }>
+  pageDesign?: PageDesignPromptSettings
+}
+
+export interface BookCommandConfigState {
+  config: BookCommandPromptOverrides
+  defaults: BookCommandPromptConfigItem[]
+  items: BookCommandPromptConfigItem[]
+  effectiveSummaryPresets: any[]
+  effectiveExplainPresets: any[]
 }
 
 export interface McpServerConfig {

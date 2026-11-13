@@ -21,7 +21,8 @@ import {
   Settings2,
   Folder,
   Zap,
-  Power
+  Power,
+  Terminal,
 } from 'lucide-react'
 import { NavState, BookSource, AISource, NoteSource } from '../types/electron'
 
@@ -56,6 +57,7 @@ interface PaneToolbarProps {
   customInstructions?: string
   onOpenActionModeModal?: () => void
   onOpenPrimeChatModal?: () => void
+  onOpenBookCommandsModal?: () => void
 }
 
 export const PaneToolbar: React.FC<PaneToolbarProps> = ({
@@ -88,6 +90,7 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
   customInstructions: _propCustomInstructions,
   onOpenActionModeModal,
   onOpenPrimeChatModal,
+  onOpenBookCommandsModal,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [customPrompt, setCustomPrompt] = useState('')
@@ -705,6 +708,18 @@ export const PaneToolbar: React.FC<PaneToolbarProps> = ({
               <span className="action-btn-label">Export</span>
               <ChevronDown size={10} className="export-chevron" style={{ opacity: 0.6, marginLeft: '2px' }} />
             </button>
+
+            {/* 2b. Configure BookView Chat Commands (/chapter, /page, summarize:*, explain:*) */}
+            {onOpenBookCommandsModal && (
+              <button
+                className="clip-note-btn"
+                onClick={onOpenBookCommandsModal}
+                title="Configure BookView chat commands & prompts (/chapter summarize:*, /chapter explain:*)"
+              >
+                <Terminal size={12} className="text-emerald" />
+                <span className="action-btn-label">Commands</span>
+              </button>
+            )}
 
             {/* 3. Streamlined Action Mode Pill: Segregated Status, Action, and Target Folder */}
             <div className={`action-mode-pill ${isChatPrimed ? 'primed' : 'unprimed'}`}>
